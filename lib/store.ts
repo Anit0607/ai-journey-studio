@@ -2,6 +2,7 @@ import {randomUUID} from "node:crypto";
 import type {Connection,Database} from "./db";
 import {CAP,BUFFER,WARNING,ROLES,hash,istMonth,sourceAllowed,type Pricing,type Source,type Task,type Output} from "./domain";
 import type {Completion,Report} from "./providers";
+import {assertBundle,bundleQuality,bundleVersion,type Artifact} from "./grounding";
 export class Store{
   constructor(readonly db:Database){}
   async event(tx:Connection,task:string|null,kind:string,detail:string){
@@ -28,12 +29,19 @@ export class Store{
   async snapshot():Promise<Record<string,any>>{
     const tables=["sources","tasks","outputs","events","ledger","approvals"] as const;
     const data:Record<string,any>={};
-    for(const table of tables)data[table]=await this.db.query("SELECT * FROM "+table+" ORDER BY "+(table==="approvals"?"created":table==="tasks"?"updated":"created"));
+    for(const table of tables)data[table]=await this.db.query("SELECT * FROM "+table+" ORDER BY "+(table==="outputs"?"created,id":table==="approvals"?"created":table==="tasks"?"updated":"created"));
     const month=istMonth();
     const used=data.ledger.filter((r:any)=>r.month===month||r.status!=="settled").reduce((sum:number,r:any)=>sum+Number(r.status==="settled"?r.estimated:r.reserved),0);
     const unresolved=data.ledger.filter((r:any)=>r.status!=="settled").length;
     const workers=await this.db.query("SELECT * FROM runtime ORDER BY name");
-    return {...data,workers,database:this.db.kind,analyst:{status:"insufficient-data",reason:"No real platform metrics imported"},
+    const revisions=await this.db.query("SELECT * FROM content_revisions ORDER BY task_id,sequence"),revisionApprovals=await this.db.query("SELECT * FROM revision_approvals ORDER BY created");
+    const reviews=data.tasks.map((task:Task)=>{
+      const history=revisions.filter((revision:any)=>revision.task_id===task.id),latest:any=history.at(-1);
+      const bundle=latest?.bundle||data.outputs.filter((output:Output)=>output.task_id===task.id);
+      const source=data.sources.find((item:Source)=>item.id===task.source_id);
+      return {task_id:task.id,token:latest?"revision:"+latest.id+":"+latest.version:"original:"+hash(bundle.map((item:Artifact)=>item.hash).join("|")),latest_revision:latest?.id||null,original_bundle:data.outputs.filter((output:Output)=>output.task_id===task.id),original_approval:data.approvals.find((item:any)=>item.task_id===task.id)||null,bundle,quality:bundleQuality(bundle,source?.text||""),approval:latest?revisionApprovals.find((item:any)=>item.revision_id===latest.id)||null:data.approvals.find((item:any)=>item.task_id===task.id)||null,history:history.map((item:any)=>({...item,approval:revisionApprovals.find((approval:any)=>approval.revision_id===item.id)||null}))};
+    });
+    return {...data,reviews,workers,database:this.db.kind,analyst:{status:"insufficient-data",reason:"No real platform metrics imported"},
       budget:{month_IST:month,committed_microdollars:used,warning:used>=WARNING,cap_microdollars:CAP,buffer_microdollars:BUFFER,unresolved_reservations:unresolved,basis:"Reported token estimates and unresolved reservations; not invoices"},
       pricing_blocked:data.ledger.some((r:any)=>r.pricing_anomaly&&r.status!=="settled"),
       updated:new Date().toISOString()};
@@ -136,13 +144,52 @@ export class Store{
     await this.db.transaction(async tx=>{
       const t=(await tx.query<Task>("SELECT * FROM tasks WHERE id=$1 FOR UPDATE",[id]))[0];
       if(!t||t.status!=="review")throw Error("Task is not ready for approval");
+      if((await tx.query("SELECT id FROM content_revisions WHERE task_id=$1 LIMIT 1",[id])).length)throw Error("Fresh revision approval required");
       const outputs=await tx.query<Output>("SELECT * FROM outputs WHERE task_id=$1 ORDER BY created,id",[id]);
       if(outputs.length!==6||!ROLES.every(role=>outputs.some(o=>o.role===role))||outputs.some(o=>hash(o.text)!==o.hash)||hash(outputs.map(o=>o.hash).join("|"))!==version)throw Error("Stale artifact version");
       const source=(await tx.query<Source>("SELECT * FROM sources WHERE id=$1 FOR UPDATE",[t.source_id]))[0];
       if(!source.cleared||source.hash!==t.source_hash||hash(source.text)!==source.hash||!sourceAllowed(source.text,source.category,source.reported_date))throw Error("Source invalidated");
+      if(bundleQuality(outputs,source.text).flags.length)throw Error("Resolve source-grounding flags before approval");
       await tx.query("INSERT INTO approvals(task_id,version) VALUES($1,$2)",[id,version]);
       await tx.query("UPDATE tasks SET status='approved',updated=now() WHERE id=$1",[id]);
       await this.event(tx,id,"approved","User approved exact artifact bundle; publication disabled");
+    });
+  }
+  async revisionContext(tx:Connection,id:string,expected:string){
+    const task=(await tx.query<Task>("SELECT * FROM tasks WHERE id=$1 FOR UPDATE",[id]))[0];
+    if(!task||!["review","approved"].includes(task.status))throw Error("Task is not ready for revision");
+    const source=(await tx.query<Source>("SELECT * FROM sources WHERE id=$1 FOR UPDATE",[task.source_id]))[0];
+    if(!source?.cleared||source.hash!==task.source_hash||hash(source.text)!==source.hash||!sourceAllowed(source.text,source.category,source.reported_date))throw Error("Source invalidated");
+    const latest:any=(await tx.query("SELECT * FROM content_revisions WHERE task_id=$1 ORDER BY sequence DESC LIMIT 1",[id]))[0];
+    const bundle:Artifact[]=latest?.bundle||await tx.query<Output>("SELECT * FROM outputs WHERE task_id=$1 ORDER BY created,id",[id]);assertBundle(bundle);
+    if(latest&&bundleVersion(bundle,source.hash)!==latest.version)throw Error("Stale artifact version");
+    const token=latest?"revision:"+latest.id+":"+latest.version:"original:"+hash(bundle.map(item=>item.hash).join("|"));
+    if(expected!==token)throw Error("Stale revision; refresh before editing");
+    return {task,source,latest,bundle,token};
+  }
+  async revise(id:string,expected:string,note:string,edit?:{role:string;text:string}){
+    if(typeof note!=="string"||!note.trim()||note.length>1000)throw Error("Revision note required");
+    if(edit&&(!ROLES.includes(edit.role as typeof ROLES[number])||typeof edit.text!=="string"||!edit.text.trim()||Buffer.byteLength(edit.text)>32000))throw Error("Invalid revision text");
+    if(/bandhan|\bbank\b|\bclient\b|\bsk-[A-Za-z0-9_-]{12,}|AIza[A-Za-z0-9_-]{20,}|(?:API_KEY|ACCESS_TOKEN)\s*=/i.test(note+" "+(edit?.text||"")))throw Error("Excluded private material");
+    return this.db.transaction(async tx=>{
+      const context=await this.revisionContext(tx,id,expected);
+      if(edit&&context.bundle.find(item=>item.role===edit.role)?.text===edit.text)throw Error("No content change");
+      const bundle=context.bundle.map(item=>({role:item.role,text:edit?.role===item.role?edit.text:item.text,hash:edit?.role===item.role?hash(edit.text):item.hash}));
+      const revision=randomUUID(),version=bundleVersion(bundle,context.source.hash);
+      await tx.query("INSERT INTO content_revisions(id,task_id,parent_id,base_token,version,bundle,request_note,sequence) VALUES($1,$2,$3,$4,$5,$6,$7,$8)",[revision,id,context.latest?.id||null,expected,version,JSON.stringify(bundle),note.trim(),(context.latest?.sequence||0)+1]);
+      await this.event(tx,id,edit?"manual_revision_saved":"changes_requested","New revision "+revision+"; historical approvals preserved; fresh approval required");
+      return {id:revision,version};
+    });
+  }
+  async approveRevision(id:string,expected:string,acknowledged:boolean){
+    if(acknowledged!==true)throw Error("Human factual review acknowledgement required");
+    await this.db.transaction(async tx=>{
+      const context=await this.revisionContext(tx,id,expected);
+      if(!context.latest)throw Error("No revision to approve");
+      if(bundleQuality(context.bundle,context.source.text).flags.length)throw Error("Resolve source-grounding flags before approval");
+      if(bundleVersion(context.bundle,context.source.hash)!==context.latest.version)throw Error("Stale artifact version");
+      const inserted=await tx.query("INSERT INTO revision_approvals(revision_id,version) VALUES($1,$2) ON CONFLICT DO NOTHING RETURNING revision_id",[context.latest.id,context.latest.version]);
+      if(inserted.length)await this.event(tx,id,"revision_approved","User approved revision "+context.latest.id+" after factual review; publication disabled");
     });
   }
   async heartbeat(enabled:boolean){await this.db.query("INSERT INTO runtime(name,heartbeat,enabled) VALUES('job-step',now(),$1) ON CONFLICT(name) DO UPDATE SET heartbeat=now(),enabled=$1",[enabled]);}

@@ -4,7 +4,7 @@ import {mkdtemp,rm,readFile} from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import {embedded,connectionMode} from "../lib/db";
-import {BASE_SCHEMA,PREFLIGHT_SCHEMA} from "../lib/schema";
+import {BASE_SCHEMA,PREFLIGHT_SCHEMA,REVISION_SCHEMA} from "../lib/schema";
 import {Store} from "../lib/store";
 import {CAPSULE,hash,istMonth,tokenCost,configReady,type Pricing,type RuntimeConfig} from "../lib/domain";
 import {authorized,allowedOrigin} from "../lib/auth";
@@ -123,7 +123,7 @@ test("bounded transient fallback retains uncertain primary reservation",()=>fixt
 }));
 test("six single steps persist outputs; approval invalidation and duplicates",()=>fixture(async s=>{
   const task=await queued(s);
-  for(let i=0;i<6;i++)assert.equal((await step(s,c,async()=>complete("isolated fixture "+i),true)).status,"step_saved");
+  for(let i=0;i<6;i++)assert.equal((await step(s,c,async()=>complete(i===5?"Unsupported claims: none\nEvidence needed: concrete project note\nProposed advice: review drafts":"isolated fixture "+i),true)).status,"step_saved");
   let state=await s.snapshot();assert.equal(state.tasks[0].status,"review");assert.equal(state.outputs.length,6);
   await assert.rejects(s.approve(task.id,"bad-version"));
   const outputs=[...state.outputs].sort((a,b)=>new Date(a.created).getTime()-new Date(b.created).getTime()||String(a.id).localeCompare(String(b.id)));
@@ -148,6 +148,7 @@ test("safe explicit retry resumes; unknown retry remains blocked",()=>fixture(as
 test("migrations match tested schema",async()=>{
   assert.equal(await readFile("migrations/001_initial.sql","utf8"),BASE_SCHEMA);
   assert.equal(await readFile("migrations/002_preflight.sql","utf8"),PREFLIGHT_SCHEMA);
+  assert.equal(await readFile("migrations/003_revisions.sql","utf8"),REVISION_SCHEMA);
 });
 test("relational checkpoint survives database close and reopen",async()=>{
   const dir=await mkdtemp(path.join(os.tmpdir(),"studio-persist-test-"));
