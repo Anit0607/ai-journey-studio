@@ -1,0 +1,49 @@
+"use client";
+import {useEffect,useRef,useState} from "react";
+type State=Record<string,any>;
+const money=(value:number)=>"$"+(value/1_000_000).toFixed(4);
+export default function Page(){
+  const [token,setToken]=useState(""),[state,setState]=useState<State|null>(null),[input,setInput]=useState(""),[busy,setBusy]=useState(false),[error,setError]=useState(""),[status,setStatus]=useState("Disconnected"),[tab,setTab]=useState("Overview");
+  const inFlight=useRef(false);
+  async function request(path:string,body?:unknown,access=token){
+    const response=await fetch("/api/studio/"+path,{method:body?"POST":"GET",headers:{"Authorization":"Bearer "+access,"Content-Type":"application/json"},body:body?JSON.stringify(body):undefined,signal:AbortSignal.timeout(10_000)});
+    const data=await response.json();if(!response.ok)throw Error(data.error||"Request failed");return data;
+  }
+  async function refresh(access=token){
+    if(inFlight.current)return;inFlight.current=true;setBusy(true);setStatus("Loading actual workspace");
+    try{const next=await request("state",undefined,access);setState(next);setError("");setStatus("Connected");}
+    catch(e){setError(e instanceof Error?e.message:"Connection failed");setStatus("Connection failed · previous state may be stale");}finally{setBusy(false);inFlight.current=false;}
+  }
+  useEffect(()=>{if(!token)return;const timer=setInterval(()=>{void refresh();},5000);return ()=>clearInterval(timer);},[token]); // eslint-disable-line react-hooks/exhaustive-deps
+  async function action(path:string,body:unknown){
+    setBusy(true);try{await request(path,body);await refresh();}catch(e){setError(e instanceof Error?e.message:"Action failed");}finally{setBusy(false);}
+  }
+  async function approve(task:string,outputs:State[]){
+    const ordered=[...outputs].sort((a,b)=>new Date(a.created).getTime()-new Date(b.created).getTime()||String(a.id).localeCompare(String(b.id)));
+    const bytes=await crypto.subtle.digest("SHA-256",new TextEncoder().encode(ordered.map(o=>o.hash).join("|")));
+    const version=Array.from(new Uint8Array(bytes)).map(b=>b.toString(16).padStart(2,"0")).join("");
+    await action("approve",{task,version});
+  }
+  function disconnect(){setToken("");setInput("");setState(null);setError("");setStatus("Disconnected");}
+  const tasks:State[]=state?.tasks||[],outputs:State[]=state?.outputs||[];
+  return <main>
+    <aside><div className="brand"><span className="mark">aj</span><div>AI JOURNEY<br/><small>ANIT BOSE · PRIVATE STUDIO</small></div></div><nav aria-label="Studio navigation">{["Overview","Sources","Approval inbox","Usage","Events"].map(item=><button key={item} aria-current={tab===item?"page":undefined} className={tab===item?"selected":""} onClick={()=>setTab(item)}>{item}</button>)}</nav><div className="side-note"><span className="dot"/>{state?"Authenticated session":"Private access required"}<p>Build. Learn. Share honestly.</p></div></aside>
+    <div className="content"><header><div><span className="eyebrow">YOUR LEARNING JOURNEY</span><h1>{tab}</h1></div><span className="pill">Publishing disabled</span></header>
+    <div role="status" aria-live="polite" className="connection">{status}{state&&" · Last refreshed "+new Date(state.updated).toLocaleTimeString()}</div>
+    {error&&<div role="alert" className="alert">{error}</div>}
+    {!state?<section className="login"><span className="eyebrow">OWNER ACCESS</span><h2>A private space for real work.</h2><p>Sign in with this local session’s access token. Sources, agent outputs and usage are protected until authentication succeeds.</p><label htmlFor="access">Session access token</label><input id="access" type="password" autoComplete="off" value={input} onChange={e=>setInput(e.target.value)}/><button className="primary" disabled={busy||!input} onClick={()=>{setToken(input);void refresh(input);setInput("");}}>{busy?"Connecting…":"Unlock studio"}</button><small>This local build has no remote deployment. Provider credentials never belong here.</small></section>:<>
+    <div className="toolbar"><span className="pill blocked">{state.live_enabled?"Execution enabled":"Live execution blocked"}</span><button onClick={()=>void refresh()} disabled={busy}>Refresh</button><button onClick={disconnect}>Sign out</button></div>
+    {(tab==="Overview"||tab==="Usage")&&<>
+      <div className="metrics"><section><small>COMMITTED ESTIMATE + RESERVATIONS</small><strong>{money(state.budget.committed_microdollars)}</strong><p>Reported tokens · not invoices</p></section><section><small>COMBINED MONTHLY MAXIMUM</small><strong>$15.00</strong><p>$1 buffer inside the cap</p></section><section><small>REVIEW INBOX</small><strong>{tasks.filter(t=>t.status==="review").length}</strong><p>Exact versions await your approval</p></section></div>
+      <div className="two-col"><section><span className="eyebrow">EXECUTION READINESS</span><h2>{state.live_enabled?"Ready for authorized work":"Secure setup is pending"}</h2><p>{state.blockers.join(" · ")||"No pending setup gates."}</p><div className="fine">Storage: {state.database==="pglite"?"Embedded PostgreSQL · laptop only":"PostgreSQL"} · IST month {state.budget.month_IST}</div><p>Jobs persist beyond browser closure. A scheduler or local worker must invoke each step.</p></section><section><span className="eyebrow">ANALYST</span><h2>Insufficient data</h2><p>No real platform metrics have been imported. Recommendations and performance figures remain empty.</p><div className="fine">No fabricated reach, impressions or engagement.</div></section></div>
+      {state.budget.warning&&<div className="alert">The $10 monthly warning threshold has been reached.</div>}
+    </>}
+    {tab==="Overview"&&<section><span className="eyebrow">AGENT WORKFLOW</span><h2>From evidence to your final approval.</h2><div className="roles">{["Harvester","Story Miner","Strategist","Writer","Platform Adapter","Critic","Analyst"].map((role,i)=><div key={role}><span>{String(i+1).padStart(2,"0")}</span>{role}</div>)}</div><p>Only cleared real source notes enter the pipeline. Actual outputs and execution events appear after an authorized run.</p></section>}
+    {tab==="Sources"&&<section><span className="eyebrow">USER-REPORTED NOTES · 9 OCTOBER 2026</span><h2>The proposed source capsule</h2><blockquote>{state.proposed_source}</blockquote><p>No proven achievements or outcomes are inferred from these statements.</p><button className="primary" disabled={busy||!state.source_approved||state.sources.length>0} onClick={()=>void action("source",{})}>Save approved capsule</button><p className="fine">{state.source_approved?"Consent recorded for this exact capsule.":"Source consent pending. Saving is disabled."}</p>{state.sources.length===0?<div className="empty"><h3>No sources saved</h3><p>Your workspace stays empty until you clear real evidence.</p></div>:state.sources.map((s:State)=><article key={s.id}><h3>Source note</h3><p>{s.text}</p><small>{s.category} · {s.reported_date} · SHA-256 {s.hash}</small><button disabled={busy} onClick={()=>void action("run",{source:s.id})}>Queue content workflow</button></article>)}</section>}
+    {(tab==="Approval inbox"||tab==="Overview")&&<section><span className="eyebrow">DURABLE TASKS</span><h2>{tab==="Overview"?"Current work":"Your exact-version approval inbox"}</h2>{tasks.length===0?<div className="empty"><span className="empty-icon">↗</span><h3>No tasks or drafts yet</h3><p>Real agent output will appear here after a cleared source and authorized provider run.</p></div>:tasks.map(t=>{const artifacts=outputs.filter(o=>o.task_id===t.id);return <article key={t.id}><h3>Task {t.id.slice(0,8)} <span className="pill">{t.status}</span></h3><small>Source {t.source_id} · Updated {new Date(t.updated).toLocaleString()}</small>{artifacts.map(o=><details key={o.id}><summary>{o.role} · exact version</summary><pre>{o.text}</pre><small>SHA-256 {o.hash}</small></details>)}<div className="actions">{t.status==="review"&&<button className="primary" disabled={busy} onClick={()=>void approve(t.id,artifacts)}>Approve these exact versions</button>}{t.status==="blocked"&&<button disabled={busy} onClick={()=>void action("retry",{task:t.id})}>Resume if safe</button>}{!["approved","cancelled"].includes(t.status)&&<button disabled={busy} onClick={()=>void action("cancel",{task:t.id})}>Cancel task</button>}</div><p className="fine">Approval requires reviewing every platform variant and the factual/privacy critique. Publishing remains disabled.</p></article>})}</section>}
+    {tab==="Usage"&&<section><h2>Actual usage ledger</h2><p>Warning $10 · maximum $15 · unresolved reservations {state.budget.unresolved_reservations}</p>{state.ledger.length===0?<div className="empty"><h3>No calls or costs recorded</h3><p>Usage remains empty until a real provider call is reserved.</p></div>:state.ledger.map((l:State)=><article key={l.id}><h3>{l.provider} · {l.model}</h3><p>{l.status} · reservation {money(Number(l.reserved))} · estimate {l.estimated===null?"unknown":money(Number(l.estimated))}</p><small>Input {l.input_tokens??"unknown"} · output {l.output_tokens??"unknown"}</small><details><summary>Pricing version</summary><pre>{JSON.stringify(l.pricing,null,2)}</pre></details></article>)}</section>}
+    {tab==="Events"&&<section><h2>Execution events</h2>{state.events.length===0?<div className="empty"><h3>No execution events</h3><p>Progress appears as recorded events when work actually happens.</p></div>:state.events.map((e:State)=><article key={e.id}><h3>{e.kind}</h3><p>{e.detail}</p><small>{new Date(e.created).toLocaleString()} · Task {e.task_id}</small></article>)}</section>}
+    </>}
+    <footer>Private learning studio · User reviews every content version · No publishing or outreach</footer></div>
+  </main>;
+}

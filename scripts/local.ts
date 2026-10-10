@@ -1,0 +1,12 @@
+import {randomBytes} from "node:crypto";
+import {spawn} from "node:child_process";
+import path from "node:path";
+if(process.env.VERCEL)throw Error("Local launcher is not a hosted authentication setup");
+const mode=process.argv[2]==="start"?"start":"dev";
+const token=randomBytes(32).toString("base64url");
+const port=process.env.PORT||"3000",origin="http://127.0.0.1:"+port;
+console.log("Laptop-only web view: "+origin);
+console.log("Temporary local owner access token: "+token);
+const child=spawn(process.execPath,[path.resolve("node_modules/next/dist/bin/next"),mode,"--hostname","127.0.0.1","--port",port],{stdio:"inherit",env:{...process.env,NEXT_TELEMETRY_DISABLED:"1",STUDIO_ACCESS_TOKEN:token,STUDIO_ORIGIN:origin,STUDIO_LOCAL_DB:process.env.STUDIO_DATABASE_AUTHORIZED==="1"?"0":"1"}});
+child.on("exit",code=>process.exit(code??1));
+for(const signal of ["SIGINT","SIGTERM"] as const)process.on(signal,()=>child.kill(signal));
