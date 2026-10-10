@@ -11,6 +11,7 @@
     "lint": "eslint .",
     "test": "tsx --test tests/*.test.ts",
     "qa": "tsx scripts/browser-qa.ts",
+    "qa:bootstrap": "tsx scripts/bootstrap-qa.ts",
     "worker": "tsx scripts/worker.ts",
     "migrate": "tsx scripts/migrate.ts"
   },
