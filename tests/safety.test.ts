@@ -4,14 +4,15 @@ import {mkdtemp,rm,readFile} from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import {embedded,connectionMode} from "../lib/db";
-import {SCHEMA} from "../lib/schema";
+import {BASE_SCHEMA,PREFLIGHT_SCHEMA} from "../lib/schema";
 import {Store} from "../lib/store";
 import {CAPSULE,hash,istMonth,tokenCost,configReady,type Pricing,type RuntimeConfig} from "../lib/domain";
 import {authorized,allowedOrigin} from "../lib/auth";
 import {step} from "../lib/workflow";
-import {ProviderFailure} from "../lib/providers";
-const p:Pricing={model:"isolated-fixture",pricing_version:"test-only",official_pricing_url:"https://example.test",input_microdollars_per_token:"0.40",output_microdollars_per_token:"1.60"};
-const c:RuntimeConfig={source_approved:true,transmission_authorized:true,credential_use_authorized:true,security_tests_passed:true,pricing_verified_date:new Date().toISOString().slice(0,10),openai:p};
+import {ProviderFailure,AccountingFailure,type Completion} from "../lib/providers";
+const p:Pricing={model:"isolated-fixture",pricing_version:"test-only",pricing_tier:"standard",official_pricing_url:"https://example.test",input_microdollars_per_token:"0.40",output_microdollars_per_token:"1.60"};
+const c:RuntimeConfig={source_approved:true,approved_source_hash:hash(CAPSULE),transmission_authorized:true,credential_use_authorized:true,security_tests_passed:true,pricing_verified_date:new Date().toISOString().slice(0,10),openai:p};
+const complete=(text:string,input=10,output=10):Completion=>({text,input,output,outcome:"complete",report:{serviceTier:"default",model:p.model,requestId:"isolated",finishReason:"stop"}});
 test("inherited database configuration never authorizes connection",()=>{
   assert.equal(connectionMode({DATABASE_URL:"isolated-unused-url"}),null);
   assert.equal(connectionMode({DATABASE_URL:"isolated-unused-url",STUDIO_LOCAL_DB:"1"}),"pglite");
@@ -116,13 +117,13 @@ test("403 access refusal never triggers fallback",()=>fixture(async s=>{
 test("bounded transient fallback retains uncertain primary reservation",()=>fixture(async s=>{
   await queued(s);let calls=0;
   const original=process.env.GEMINI_API_KEY;process.env.GEMINI_API_KEY="isolated-test-key";
-  try{await step(s,{...c,fallback_authorized:true,gemini:p},async()=>{calls++;if(calls===1)throw new ProviderFailure(503);return {text:"isolated fixture",input:10,output:10};},true);}
+  try{await step(s,{...c,fallback_authorized:true,gemini:p},async()=>{calls++;if(calls===1)throw new ProviderFailure(503);return complete("isolated fixture");},true);}
   finally{if(original===undefined)delete process.env.GEMINI_API_KEY;else process.env.GEMINI_API_KEY=original;}
   const state=await s.snapshot();assert.equal(calls,2);assert.equal(state.ledger[0].status,"unknown");assert.equal(state.ledger[1].status,"settled");
 }));
 test("six single steps persist outputs; approval invalidation and duplicates",()=>fixture(async s=>{
   const task=await queued(s);
-  for(let i=0;i<6;i++)assert.equal((await step(s,c,async()=>({text:"isolated fixture "+i,input:10,output:10}),true)).status,"step_saved");
+  for(let i=0;i<6;i++)assert.equal((await step(s,c,async()=>complete("isolated fixture "+i),true)).status,"step_saved");
   let state=await s.snapshot();assert.equal(state.tasks[0].status,"review");assert.equal(state.outputs.length,6);
   await assert.rejects(s.approve(task.id,"bad-version"));
   const outputs=[...state.outputs].sort((a,b)=>new Date(a.created).getTime()-new Date(b.created).getTime()||String(a.id).localeCompare(String(b.id)));
@@ -144,17 +145,20 @@ test("safe explicit retry resumes; unknown retry remains blocked",()=>fixture(as
   assert.equal((await s.snapshot()).tasks[0].status,"blocked");
   await s.retry(task.id);assert.equal((await s.snapshot()).tasks[0].status,"queued");
 }));
-test("migration matches tested schema",async()=>assert.equal(await readFile("migrations/001_initial.sql","utf8"),SCHEMA));
+test("migrations match tested schema",async()=>{
+  assert.equal(await readFile("migrations/001_initial.sql","utf8"),BASE_SCHEMA);
+  assert.equal(await readFile("migrations/002_preflight.sql","utf8"),PREFLIGHT_SCHEMA);
+});
 test("relational checkpoint survives database close and reopen",async()=>{
   const dir=await mkdtemp(path.join(os.tmpdir(),"studio-persist-test-"));
   let db=await embedded(dir);
   try{
     let store=new Store(db);const task=await queued(store);
-    await step(store,c,async()=>({text:"isolated persistence fixture",input:10,output:10}),true);
+    await step(store,c,async()=>complete("isolated persistence fixture"),true);
     await db.close();db=await embedded(dir);store=new Store(db);
     const state=await store.snapshot();
     assert.equal(state.tasks[0].id,task.id);assert.equal(state.tasks[0].checkpoint,1);assert.equal(state.tasks[0].status,"queued");
-    await step(store,c,async()=>({text:"isolated resumed fixture",input:10,output:10}),true);
+    await step(store,c,async()=>complete("isolated resumed fixture"),true);
     assert.equal((await store.snapshot()).outputs.length,2);
   }finally{
     await db.close();
@@ -163,3 +167,39 @@ test("relational checkpoint survives database close and reopen",async()=>{
     await rm(dir,{recursive:true,force:true});
   }
 });
+test("unexpected tier retains reservation, records tier and pauses further reservations",()=>fixture(async s=>{
+  const task=await queued(s);let calls=0;
+  const report={serviceTier:"priority",model:p.model,requestId:"isolated-request",finishReason:"stop"};
+  await step(s,c,async()=>{calls++;throw new AccountingFailure(report);},true);
+  const state=await s.snapshot();
+  assert.equal(calls,1);assert.equal(state.tasks[0].checkpoint,0);
+  assert.equal(state.tasks[0].id,task.id);
+  assert.equal(state.ledger[0].status,"unknown");assert.equal(state.ledger[0].returned_service_tier,"priority");
+  assert.equal(state.ledger[0].requested_service_tier,"default");assert.equal(state.ledger[0].pricing.pricing_version,"test-only");
+  assert.equal(state.pricing_blocked,true);assert.equal(state.ledger[0].estimated,null);
+  await s.db.query("UPDATE tasks SET status='queued'");
+  const claimed=(await s.claim())!;
+  await assert.rejects(s.reserve(claimed,"test",p,1000),/all provider execution paused/);
+}));
+test("truncated Critic settles usage without review readiness; explicit complete retry resumes",()=>fixture(async s=>{
+  const task=await queued(s);
+  for(let i=0;i<5;i++)await step(s,c,async()=>complete("isolated complete "+i),true);
+  await step(s,c,async()=>({...complete("isolated truncated Critic"),outcome:"incomplete",report:{...complete("").report,finishReason:"length"}}),true);
+  let state=await s.snapshot();
+  assert.equal(state.tasks[0].checkpoint,5);assert.equal(state.tasks[0].status,"blocked");assert.equal(state.outputs.length,5);
+  const ledger=state.ledger.find((r:any)=>r.completion_status==="incomplete");
+  assert.equal(ledger.status,"settled");assert.equal(Number(ledger.estimated),20);assert.equal(ledger.partial_output,"isolated truncated Critic");
+  await assert.rejects(s.approve(task.id,"any-version"));
+  await s.retry(task.id);
+  await step(s,c,async()=>complete("isolated complete Critic"),true);
+  state=await s.snapshot();assert.equal(state.tasks[0].checkpoint,6);assert.equal(state.tasks[0].status,"review");assert.equal(state.outputs.length,6);
+}));
+test("safety termination settles known usage and prohibits retry or downstream calls",()=>fixture(async s=>{
+  const task=await queued(s);let calls=0;
+  await step(s,c,async()=>{calls++;return {...complete("isolated refusal"),outcome:"safety",report:{...complete("").report,finishReason:"content_filter"}};},true);
+  await step(s,c,async()=>{calls++;return complete("should not execute");},true);
+  const state=await s.snapshot();
+  assert.equal(calls,1);assert.equal(state.outputs.length,0);assert.equal(state.tasks[0].checkpoint,0);
+  assert.equal(state.ledger[0].status,"settled");assert.equal(state.tasks[0].block_reason,"safety");
+  await assert.rejects(s.retry(task.id),/Safety termination/);
+}));

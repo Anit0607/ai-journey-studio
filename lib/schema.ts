@@ -1,4 +1,4 @@
-export const SCHEMA = `
+export const BASE_SCHEMA = `
 CREATE TABLE IF NOT EXISTS sources (
  id UUID PRIMARY KEY, text TEXT NOT NULL, category TEXT NOT NULL,
  reported_date TEXT NOT NULL, cleared BOOLEAN NOT NULL DEFAULT FALSE,
@@ -42,3 +42,17 @@ INSERT INTO schema_versions(version) VALUES(1) ON CONFLICT DO NOTHING;
 CREATE INDEX IF NOT EXISTS queued_tasks ON tasks(status,updated);
 CREATE INDEX IF NOT EXISTS monthly_ledger ON ledger(month);
 `;
+export const PREFLIGHT_SCHEMA = `
+ALTER TABLE tasks ADD COLUMN IF NOT EXISTS block_reason TEXT;
+ALTER TABLE ledger ADD COLUMN IF NOT EXISTS requested_service_tier TEXT;
+ALTER TABLE ledger ADD COLUMN IF NOT EXISTS returned_service_tier TEXT;
+ALTER TABLE ledger ADD COLUMN IF NOT EXISTS returned_model TEXT;
+ALTER TABLE ledger ADD COLUMN IF NOT EXISTS provider_request_id TEXT;
+ALTER TABLE ledger ADD COLUMN IF NOT EXISTS pricing_anomaly BOOLEAN NOT NULL DEFAULT false;
+ALTER TABLE ledger ADD COLUMN IF NOT EXISTS completion_status TEXT;
+ALTER TABLE ledger ADD COLUMN IF NOT EXISTS finish_reason TEXT;
+ALTER TABLE ledger ADD COLUMN IF NOT EXISTS partial_output TEXT;
+ALTER TABLE ledger ADD COLUMN IF NOT EXISTS partial_hash TEXT;
+INSERT INTO schema_versions(version) VALUES(2) ON CONFLICT DO NOTHING;
+`;
+export const SCHEMA=BASE_SCHEMA+PREFLIGHT_SCHEMA;

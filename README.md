@@ -15,7 +15,7 @@ Default laptop storage uses PGlite, an embedded PostgreSQL engine, at ignored da
 
 ## Durable work
 
-The source proposal and all actual state are behind authentication. Source save is disabled pending consent. Once approved, save the exact capsule in Sources, then queue it. Empty data stays empty.
+The source proposal and all actual state are behind authentication. The approved OpenAI-only secure launcher saves and queues only the exact consented note after readiness checks. Ordinary npm run dev is a blocked inspection session. Empty data stays empty until that authorized launch.
 
 POST /api/studio/step claims and executes one persisted checkpoint. A separate local worker or future approved scheduler invokes it; browser closure has no effect on stored tasks. For local use, set STUDIO_ACCESS_TOKEN to the temporary web-session token in your own process environment and run npm run worker. This is a local access token, never an API key. The worker calls the web service; it does not open a second embedded database. It stops when setup/reconciliation is required.
 
@@ -23,13 +23,13 @@ Jobs use row locks, a lease, persisted checkpoints and unique artifact/action co
 
 ## Provider and budget setup
 
-No provider credentials have been configured and no live calls have occurred. See SECURE_SETUP.md. An inert configuration example is included; it enables nothing.
+No provider credentials have been entered and no live calls have occurred. OpenAI-only consent is recorded for the shorter exact note. Once preflight checks pass, the agent prepares nonsecret setup; the user exclusively types the key into python scripts/secure_start.py. That session-only launcher automatically queues the approved real note and starts the worker. See SECURE_SETUP.md. The example configuration enables nothing.
 
 Combined monthly warning $10 / maximum $15, with $1 buffer inside the cap and IST calendar month. Atomic PostgreSQL transactions lock a shared budget guard before reserving an upper bound. Current-month settled costs plus every unresolved reservation, including prior-month unknown calls, constrain spending. Provider token estimates are distinct from invoices. Input/retry/concurrency/output bounds apply. Gemini fallback occurs once per step only for eligible transient HTTP errors, never access or safety refusals.
 
 ## Network PostgreSQL and hosted shape
 
-lib/db.ts includes a pg connection adapter and migrations/001_initial.sql. An external database connection requires explicit STUDIO_DATABASE_AUTHORIZED=1 as well as a user-supplied approved DATABASE_URL. npm run migrate applies the schema only after that authorization. No database, credentials or cloud resources are provisioned.
+lib/db.ts includes a pg connection adapter and migrations/001_initial.sql plus 002_preflight.sql. An external database connection requires explicit STUDIO_DATABASE_AUTHORIZED=1 as well as a user-supplied approved DATABASE_URL. npm run migrate applies the schema only after that authorization. No database, credentials or cloud resources are provisioned.
 
 Next.js App Router and Node API routes provide the Vercel web deployment shape. Embedded persistence is disabled on Vercel. A hosted database, scheduler delivery, owner authentication setup and Vercel eligibility remain unresolved. The compiled app is not evidence of production integration or 24/7 operation. No deployment is authorized.
 

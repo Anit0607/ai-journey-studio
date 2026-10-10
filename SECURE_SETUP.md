@@ -1,16 +1,22 @@
 # User-operated session credential entry
 
-No credentials have been configured. Do not perform these steps until the parent records action-time authorization for the source capsule, provider transmission and credential use.
+The user has approved OpenAI only for the exact shorter note quoted below, within the $15 monthly cap. Gemini remains disabled. No provider credentials have been entered or configured.
 
-After that authorization, copy runtime-config.example.json to ignored runtime-config.json. Configure source_approved, transmission_authorized, credential_use_authorized and security_tests_passed true only when those steps are fulfilled, update the current UTC pricing_verified_date, and review provider model/pricing fields. Do not add keys to that file. The example file is inert and does not enable calls.
+After all preflight checks pass, the agent prepares ignored runtime-config.json with the approved note hash, OpenAI-only consent, successful verification and current official pricing. The user does not edit security flags. The example remains inert. No keys belong in either configuration file.
+
+Approved source: “Anit is a non-coder who builds and directs AI agents, retains final approval, uses Codex and agents for implementation, and learns by doing. He wants to share practical agent-building methods and honest lessons.”
 
 For the primary web application, in your own interactive PowerShell terminal, from this repository:
 
     python scripts/secure_start.py
 
-The launcher asks for the OpenAI API key through a hidden prompt. Type or paste it there, never into chat, dashboard, command arguments or a source file. It refuses redirected input and visible echo fallback. If separately authorized, a second hidden prompt accepts a Gemini key, or Enter skips fallback. Keys pass only to the child web-server process environment for this session; no user/machine environment, file, browser or credential store is changed. Keys are not written to Git or logs. Stop the launcher/server with Ctrl+C; restart requires entry again. Python/Node cannot guarantee forensic memory zeroization, but no persistent credential facility is installed. Agents must never run this interactive entry flow on the user's behalf.
+The launcher asks for the OpenAI API key through a hidden prompt. Type or paste it there, never into chat, dashboard, command arguments or a source file. It refuses redirected input and visible echo fallback, and checks for .env files without reading their contents. It inherits only OS/runtime necessities; inherited provider aliases, config overrides, proxies and Node injection options are excluded. Only freshly entered keys are passed to the child web-server environment. The exact reviewed configuration is snapshotted for that session; skipped fallback is explicitly disabled. Gemini is not prompted for this approved pilot.
 
-The Next.js launcher prints a separate temporary owner access token. Enter that token in the web sign-in screen on this laptop; it is not a provider key. The scheduler/local worker invokes single authenticated persisted steps. No web-client remote access is implied by the laptop-only address. Do not record/screenshare the key-entry terminal.
+No user/machine environment, file, browser or credential store is changed. Keys are not written to Git or logs. Stop the launcher/server with Ctrl+C; restart requires entry again. Python/Node cannot guarantee forensic memory zeroization. Agents must never run this interactive entry flow on the user's behalf.
+
+After successful key entry and readiness checks, the launcher starts the web server, saves/queues only the approved real note and starts the durable worker automatically. The worker receives a separate temporary owner token and no provider keys. The launcher prints that owner token and http://127.0.0.1:3000. Open that address in a browser on this laptop and enter the owner token in the sign-in screen. It is not a provider key. The web client has no remote access to this laptop address. Keep the terminal open; Ctrl+C stops server and worker. No content is automatically approved or published.
+
+OpenAI uses gpt-4.1-mini-2025-04-14 at standard pricing. Every Chat Completions request explicitly includes service_tier: default. Returned tier/model/request ID and rate version are retained. An unexpected or missing tier pauses further reservations and keeps the full uncertain reservation. Truncated or safety-terminated output never advances checkpoints; known usage is settled, partial output is marked separately, and safety cannot be retried.
 
 Before activation rerun tests and recheck official rates on the run day. Account-specific model access and billing remain unverified without an authorized authenticated provider check. No paid request has occurred.
 

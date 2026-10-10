@@ -2,7 +2,7 @@ import {authorized,allowedOrigin,response} from "../../../../lib/auth";
 import {database} from "../../../../lib/db";
 import {Store} from "../../../../lib/store";
 import {runtimeConfig} from "../../../../lib/config";
-import {CAPSULE,configReady} from "../../../../lib/domain";
+import {CAPSULE,hash,configReady} from "../../../../lib/domain";
 import {liveReady} from "../../../../lib/providers";
 import {step} from "../../../../lib/workflow";
 export const runtime="nodejs",dynamic="force-dynamic",maxDuration=180;
@@ -20,12 +20,15 @@ export async function GET(request:Request,context:Context){
   try{
     const store=new Store(await database()),c=runtimeConfig(),state=await store.snapshot();
     const blockers=[];
-    if(!c.source_approved)blockers.push("Source consent pending");
+    const sourceApproved=!!c.source_approved&&c.approved_source_hash===hash(CAPSULE);
+    if(!sourceApproved)blockers.push("Source consent pending");
     if(!c.transmission_authorized)blockers.push("Provider transmission approval pending");
     if(!c.credential_use_authorized)blockers.push("Credential use approval pending");
     if(!configReady(c))blockers.push("Current model pricing and safety verification required");
     if(!process.env.OPENAI_API_KEY)blockers.push("Runtime provider credential not supplied");
-    return response({...state,blockers,live_enabled:liveReady(c),source_approved:!!c.source_approved,proposed_source:CAPSULE});
+    if(process.env.STUDIO_SESSION_ONLY!=="1")blockers.push("User-operated session-only key entry required");
+    if(state.pricing_blocked)blockers.push("Unexpected provider billing tier requires reconciliation");
+    return response({...state,blockers,live_enabled:liveReady(c)&&!state.pricing_blocked,source_approved:sourceApproved,proposed_source:CAPSULE});
   }catch{return response({error:"Relational database unavailable. Configure an approved PostgreSQL connection or use the laptop-only embedded option."},503);}
 }
 export async function POST(request:Request,context:Context){
@@ -38,7 +41,7 @@ export async function POST(request:Request,context:Context){
     const raw=await readBody(request);
     const body=JSON.parse(raw),store=new Store(await database()),c=runtimeConfig();
     let value:unknown;
-    if(action==="source")value=await store.source(CAPSULE,"user-reported-notes","2026-10-09",!!c.source_approved);
+    if(action==="source")value=await store.source(CAPSULE,"user-reported-notes","2026-10-09",!!c.source_approved&&c.approved_source_hash===hash(CAPSULE));
     if(action==="run")value=await store.enqueue(String(body.source));
     if(action==="approve")value=await store.approve(String(body.task),String(body.version));
     if(action==="cancel")value=await store.cancel(String(body.task));
@@ -46,7 +49,7 @@ export async function POST(request:Request,context:Context){
     if(action==="step")value=await step(store,c);
     return response({result:value??true});
   }catch(error){
-    const safe=error instanceof Error&&["Source not cleared","Source invalidated","Stale artifact version","Task is not ready for approval","Unknown completion; reconciliation required before retry","Task cannot be retried","Approved task cannot be cancelled","Unknown task"].includes(error.message)?error.message:"Action blocked or database unavailable";
+    const safe=error instanceof Error&&["Source not cleared","Source invalidated","Stale artifact version","Task is not ready for approval","Unknown completion; reconciliation required before retry","Task cannot be retried","Safety termination cannot be retried","Approved task cannot be cancelled","Unknown task"].includes(error.message)?error.message:"Action blocked or database unavailable";
     return response({error:safe},400);
   }
 }

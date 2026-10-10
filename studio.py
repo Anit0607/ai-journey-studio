@@ -126,6 +126,7 @@ def config():
 
 def ready():
     c=config()
+    if not c.get("legacy_execution_authorized"): return False
     p=c.get("openai",{})
     try:
         priced=Decimal(str(p.get("input_microdollars_per_token",0)))>0 and Decimal(str(p.get("output_microdollars_per_token",0)))>0

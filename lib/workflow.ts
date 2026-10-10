@@ -1,6 +1,6 @@
 import {Store} from "./store";
 import {ROLES,type RuntimeConfig,type Source,type Output,tokenCost} from "./domain";
-import {providerCall,ProviderFailure,liveReady,type ProviderName} from "./providers";
+import {providerCall,ProviderFailure,AccountingFailure,TerminationFailure,liveReady,type ProviderName} from "./providers";
 const goals=["Extract factual claims and provenance.","Find an honest learning-story angle supported by the source.","Produce a content brief for practical agent users.","Write a draft with no unsupported claims.","Produce LinkedIn, X and Instagram variants.","Critique factual support and privacy for each exact variant; flag unsupported claims."];
 export async function step(store:Store,c:RuntimeConfig,call=providerCall,enabled=liveReady(c)){
   await store.heartbeat(enabled);
@@ -20,8 +20,10 @@ export async function step(store:Store,c:RuntimeConfig,call=providerCall,enabled
       reservation=await store.reserve(task,provider,p,tokenCost(p,Buffer.byteLength(prompt)+256,1200));
       try{
         const result=await call(provider,prompt,p);
-        await store.settle(task,reservation,result.text,result.input,result.output,tokenCost(p,result.input,result.output));
-        return {status:"step_saved",task:task.id,role:ROLES[task.checkpoint]};
+        if(provider==="openai"&&result.report.serviceTier!=="default")throw new AccountingFailure(result.report);
+        await store.report(reservation,result.report);
+        await store.settle(task,reservation,result.text,result.input,result.output,tokenCost(p,result.input,result.output),result.outcome);
+        return {status:result.outcome==="complete"?"step_saved":"blocked",task:task.id,role:ROLES[task.checkpoint]};
       }catch(error){
         if(error instanceof ProviderFailure){
           const transient=[429,500,502,503,504].includes(error.status);
@@ -35,8 +37,13 @@ export async function step(store:Store,c:RuntimeConfig,call=providerCall,enabled
     }
     throw Error("No provider completed");
   }catch(error){
+    if(reservation&&(error instanceof AccountingFailure||error instanceof TerminationFailure)){
+      await store.report(reservation,error.report,error instanceof AccountingFailure);
+      await store.uncertain(task,reservation,error.message,error instanceof AccountingFailure?"pricing":error.outcome);
+      return {status:"blocked",task:task.id,reason:error.message};
+    }
     // Never store raw SDK/network errors: they may contain request details or credentials.
-    const safe=error instanceof Error&&["Input size cap reached","Monthly cap including internal buffer reached","Cancelled or stale lease","Source invalidated"].includes(error.message)?error.message:"Completion blocked; any uncertain reservation retained; automatic replay disabled";
+    const safe=error instanceof Error&&["Input size cap reached","Monthly cap including internal buffer reached","Cancelled or stale lease","Source invalidated","Unverified billing tier; all provider execution paused"].includes(error.message)?error.message:"Completion blocked; any uncertain reservation retained; automatic replay disabled";
     await store.uncertain(task,reservation,safe);
     return {status:"blocked",task:task.id,reason:safe};
   }
