@@ -2,7 +2,7 @@
 
 No credentials have been configured. Do not perform these steps until the parent records action-time authorization for the source capsule, provider transmission and credential use.
 
-After that authorization, configure nonsecret runtime-config.json locally with source_approved, transmission_authorized, credential_use_authorized and security_tests_passed true, the current UTC pricing_verified_date, and reviewed provider model/pricing fields. Do not add keys to that file.
+After that authorization, copy runtime-config.example.json to ignored runtime-config.json. Configure source_approved, transmission_authorized, credential_use_authorized and security_tests_passed true only when those steps are fulfilled, update the current UTC pricing_verified_date, and review provider model/pricing fields. Do not add keys to that file. The example file is inert and does not enable calls.
 
 In your own interactive PowerShell terminal, from this repository:
 

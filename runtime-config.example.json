@@ -1,0 +1,22 @@
+{
+  "source_approved": false,
+  "transmission_authorized": false,
+  "credential_use_authorized": false,
+  "security_tests_passed": false,
+  "pricing_verified_date": "REVERIFY_ON_RUN_DAY",
+  "fallback_authorized": false,
+  "openai": {
+    "model": "gpt-4.1-mini",
+    "pricing_version": "official-docs-2026-10-10-proposed",
+    "official_pricing_url": "https://developers.openai.com/api/docs/models/gpt-4.1-mini",
+    "input_microdollars_per_token": "0.40",
+    "output_microdollars_per_token": "1.60"
+  },
+  "gemini": {
+    "model": "gemini-3.5-flash-lite",
+    "pricing_version": "official-docs-2026-10-10-proposed",
+    "official_pricing_url": "https://ai.google.dev/gemini-api/docs/pricing",
+    "input_microdollars_per_token": "0.30",
+    "output_microdollars_per_token": "2.50"
+  }
+}
