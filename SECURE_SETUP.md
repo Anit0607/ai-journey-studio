@@ -1,6 +1,6 @@
 # User-operated session credential entry
 
-The user has approved OpenAI only for the exact shorter note quoted below, within the $15 monthly cap. Gemini remains disabled. No provider credentials have been entered or configured.
+The user has approved OpenAI only for the exact shorter note quoted below, within the $15 monthly cap. Gemini remains disabled. The user has entered their key through the session-only launcher themselves; no credential was inspected or persisted by the agent.
 
 After all preflight checks pass, the agent prepares ignored runtime-config.json with the approved note hash, OpenAI-only consent, successful verification and current official pricing. The user does not edit security flags. The example remains inert. No keys belong in either configuration file.
 
@@ -18,7 +18,7 @@ After successful key entry and readiness checks, the launcher starts the web ser
 
 OpenAI uses gpt-4.1-mini-2025-04-14 at standard pricing. Every Chat Completions request explicitly includes service_tier: default. Returned tier/model/request ID and rate version are retained. An unexpected or missing tier pauses further reservations and keeps the full uncertain reservation. Truncated or safety-terminated output never advances checkpoints; known usage is settled, partial output is marked separately, and safety cannot be retried.
 
-Before activation rerun tests and recheck official rates on the run day. Account-specific model access and billing remain unverified without an authorized authenticated provider check. No paid request has occurred.
+Before a new activation rerun tests and recheck official rates on the run day. The first user-operated task completed six calls using the configured OpenAI model and standard tier. Its reported-token estimate is $0.005690; the invoice remains unverified. See LIVE_RUN_CHECK.md.
 
 Proposed public documentation choices, verified 10 October 2026:
 

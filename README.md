@@ -23,7 +23,7 @@ Jobs use row locks, a lease, persisted checkpoints and unique artifact/action co
 
 ## Provider and budget setup
 
-No provider credentials have been entered and no live calls have occurred. OpenAI-only consent is recorded for the shorter exact note. Once preflight checks pass, the agent prepares nonsecret setup; the user exclusively types the key into python scripts/secure_start.py. That session-only launcher automatically queues the approved real note and starts the worker. See SECURE_SETUP.md. The example configuration enables nothing.
+The first user-operated OpenAI session completed six real outputs and reached review-ready. Its reported-token cost estimate is $0.005690, with no unresolved reservations; invoices have not been verified. The agent did not read credentials or restart live work. See LIVE_RUN_CHECK.md. OpenAI-only consent remains limited to the shorter exact note. The user exclusively enters their key through python scripts/secure_start.py; the example configuration enables nothing.
 
 Combined monthly warning $10 / maximum $15, with $1 buffer inside the cap and IST calendar month. Atomic PostgreSQL transactions lock a shared budget guard before reserving an upper bound. Current-month settled costs plus every unresolved reservation, including prior-month unknown calls, constrain spending. Provider token estimates are distinct from invoices. Input/retry/concurrency/output bounds apply. Gemini fallback occurs once per step only for eligible transient HTTP errors, never access or safety refusals.
 
