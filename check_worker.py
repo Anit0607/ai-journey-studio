@@ -12,17 +12,21 @@ with tempfile.TemporaryDirectory() as directory:
         database=Path(directory)/"data/studio.sqlite3"
         for _ in range(30):
             if database.exists():
-                with sqlite3.connect(database) as db:
+                db=sqlite3.connect(database)
+                try:
                     try:
                         if db.execute("SELECT COUNT(*) FROM runtime").fetchone()[0]:break
                     except sqlite3.OperationalError:pass
+                finally:db.close()
             time.sleep(.1)
         second=subprocess.run([sys.executable,script,"worker"],cwd=directory,capture_output=True,text=True,timeout=5)
         assert second.returncode!=0 and "already running" in second.stderr
-        with sqlite3.connect(database) as db:
+        db=sqlite3.connect(database)
+        try:
             assert db.execute("SELECT COUNT(*) FROM tasks").fetchone()[0]==0
             assert db.execute("SELECT COUNT(*) FROM ledger").fetchone()[0]==0
             assert db.execute("SELECT enabled FROM runtime").fetchone()[0]==0
+        finally:db.close()
         print("PASS: worker heartbeat, singleton exclusion, no browser dependency, empty workspace, no calls")
     finally:
         first.terminate();first.wait(timeout=10)
