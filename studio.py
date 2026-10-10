@@ -11,6 +11,10 @@ import time
 import urllib.error
 import urllib.request
 import msvcrt
+import getpass
+import sys
+import warnings
+from decimal import Decimal, ROUND_CEILING
 from datetime import datetime, timezone, timedelta
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -21,6 +25,29 @@ CAP = 15_000_000  # integer microdollars
 BUFFER = 1_000_000
 WARNING = 10_000_000
 CAPSULE = "I am a non-coder. I mainly focus on building AI agents and keep final approval with me. I am confident in client communication and depend on Codex and agents for implementation. I learn by doing. I want to share practical agent-building methods, confidence and honest lessons."
+RUNTIME_KEYS = {}
+
+def key(provider):
+    return RUNTIME_KEYS.get(provider) or os.environ.get("OPENAI_API_KEY" if provider=="openai" else "GEMINI_API_KEY")
+
+def prompt_keys():
+    """User terminal only: no echo fallback, disk, browser, environment or logging."""
+    c=config()
+    if not c.get("credential_use_authorized"):
+        raise ValueError("Credential use authorization is required before entry")
+    if not sys.stdin.isatty():
+        raise ValueError("Use an interactive local terminal; redirected input is disabled")
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", getpass.GetPassWarning)
+        primary=getpass.getpass("OpenAI API key (hidden, this worker session only): ")
+        if not primary.strip(): raise ValueError("No key entered")
+        RUNTIME_KEYS["openai"]=primary.strip()
+        if c.get("fallback_authorized"):
+            fallback=getpass.getpass("Gemini API key (hidden; Enter to skip fallback): ")
+            if fallback.strip(): RUNTIME_KEYS["gemini"]=fallback.strip()
+
+def token_cost(p, ins, outs):
+    return int((Decimal(str(p["input_microdollars_per_token"]))*ins+Decimal(str(p["output_microdollars_per_token"]))*outs).to_integral_value(rounding=ROUND_CEILING))
 
 def stamp():
     return datetime.now(timezone.utc).isoformat()
@@ -43,6 +70,7 @@ class Store:
             CREATE TABLE IF NOT EXISTS events(id INTEGER PRIMARY KEY, task INTEGER, kind TEXT, detail TEXT, created TEXT);
             CREATE TABLE IF NOT EXISTS ledger(id INTEGER PRIMARY KEY, task INTEGER, month TEXT, provider TEXT, model TEXT, pricing TEXT, reserved INTEGER, estimated INTEGER, input_tokens INTEGER, output_tokens INTEGER, status TEXT, created TEXT);
             CREATE TABLE IF NOT EXISTS approvals(task INTEGER PRIMARY KEY, version TEXT, created TEXT);
+            CREATE TABLE IF NOT EXISTS runtime(id INTEGER PRIMARY KEY CHECK(id=1), heartbeat TEXT, enabled INTEGER);
             """)
     @contextmanager
     def connect(self):
@@ -82,27 +110,39 @@ class Store:
             data = {t:[dict(r) for r in db.execute("SELECT * FROM "+t)] for t in ["sources","tasks","outputs","events","ledger","approvals"]}
         used=sum(r["estimated"] if r["status"]=="settled" else r["reserved"] for r in data["ledger"] if r["month"]==month())
         data.update(analyst={"status":"insufficient-data","reason":"No real platform metrics imported"}, budget={"month_IST":month(),"committed_microdollars":used,"warning":used>=WARNING,"cap_microdollars":CAP,"buffer_microdollars":BUFFER,"basis":"provider-reported tokens and estimates; not invoices"}, live_enabled=ready(),updated=stamp())
+        data["source_approved"]=bool(config().get("source_approved"))
+        with self.connect() as db:
+            worker=db.execute("SELECT * FROM runtime WHERE id=1").fetchone()
+        data["worker"]=dict(worker) if worker else None
+        data["live_enabled"]=bool(worker and worker["enabled"] and (datetime.now(timezone.utc)-datetime.fromisoformat(worker["heartbeat"])).total_seconds()<90)
         return data
 
 def config():
     path = Path("runtime-config.json")
-    return json.loads(path.read_text()) if path.exists() else {}
+    try:
+        return json.loads(path.read_text()) if path.exists() else {}
+    except (ValueError,OSError):
+        return {}
 
 def ready():
     c=config()
     p=c.get("openai",{})
-    return bool(c.get("transmission_authorized") and c.get("credential_use_authorized") and c.get("security_tests_passed") and c.get("pricing_verified_date")==datetime.now(timezone.utc).date().isoformat() and p.get("model") and p.get("official_pricing_url") and isinstance(p.get("input_microdollars_per_token"),int) and p.get("input_microdollars_per_token",0)>0 and isinstance(p.get("output_microdollars_per_token"),int) and p.get("output_microdollars_per_token",0)>0 and os.environ.get("OPENAI_API_KEY"))
+    try:
+        priced=Decimal(str(p.get("input_microdollars_per_token",0)))>0 and Decimal(str(p.get("output_microdollars_per_token",0)))>0
+    except Exception:
+        priced=False
+    return bool(c.get("source_approved") and c.get("transmission_authorized") and c.get("credential_use_authorized") and c.get("security_tests_passed") and c.get("pricing_verified_date")==datetime.now(timezone.utc).date().isoformat() and p.get("model") and p.get("official_pricing_url") and priced and key("openai"))
 
 def provider_call(provider, prompt, c):
     p=c[provider]
     if provider=="openai":
         url="https://api.openai.com/v1/chat/completions"
         body={"model":p["model"],"messages":[{"role":"user","content":prompt}],"max_completion_tokens":1200,"store":False}
-        headers={"Authorization":"Bearer "+os.environ["OPENAI_API_KEY"]}
+        headers={"Authorization":"Bearer "+key("openai")}
     else:
         url="https://generativelanguage.googleapis.com/v1beta/models/"+p["model"]+":generateContent"
         body={"contents":[{"parts":[{"text":prompt}]}],"generationConfig":{"maxOutputTokens":1200}}
-        headers={"x-goog-api-key":os.environ["GEMINI_API_KEY"]}
+        headers={"x-goog-api-key":key("gemini")}
     req=urllib.request.Request(url,data=json.dumps(body).encode(),headers={**headers,"Content-Type":"application/json"},method="POST")
     with urllib.request.urlopen(req,timeout=60) as response:
         result=json.load(response)
@@ -111,7 +151,7 @@ def provider_call(provider, prompt, c):
         usage=result["usage"]; ins=usage["prompt_tokens"]; outs=usage["completion_tokens"]
     else:
         text="".join(x.get("text","") for x in result["candidates"][0]["content"]["parts"])
-        usage=result["usageMetadata"]; ins=usage["promptTokenCount"]; outs=usage["candidatesTokenCount"]
+        usage=result["usageMetadata"]; ins=usage["promptTokenCount"]; outs=usage["candidatesTokenCount"]+usage.get("thoughtsTokenCount",0)
     if not text or ins<0 or outs<0: raise ValueError("Unknown provider completion")
     return text,ins,outs
 
@@ -138,11 +178,11 @@ def run_one(store):
             prompt+=goals[step]+"\nSOURCE: "+s["text"]+"\nPRIOR ARTIFACTS: "+json.dumps(previous)
             if len(prompt.encode())>16000: raise ValueError("Input size cap")
             providers=["openai"]
-            if c.get("fallback_authorized") and os.environ.get("GEMINI_API_KEY"): providers.append("gemini")
+            if c.get("fallback_authorized") and key("gemini"): providers.append("gemini")
             for index,provider in enumerate(providers):
                 p=c[provider]
                 # Byte count is conservative relative to tokenization; no cache discount.
-                upper=len(prompt.encode())*p["input_microdollars_per_token"]+1200*p["output_microdollars_per_token"]
+                upper=token_cost(p,len(prompt.encode())+256,1200)
                 reservation=store.reserve(task,provider,p["model"],p,upper)
                 with store.connect() as db:
                     store.event(db,task,"provider_started",provider+" / "+ROLES[step])
@@ -159,7 +199,7 @@ def run_one(store):
                     with store.connect() as db:
                         db.execute("UPDATE ledger SET status='unknown' WHERE id=?",(reservation,))
                     raise ValueError("Unknown completion; reservation retained; automatic retry blocked")
-                cost=ins*p["input_microdollars_per_token"]+outs*p["output_microdollars_per_token"]
+                cost=token_cost(p,ins,outs)
                 with store.connect() as db:
                     db.execute("BEGIN IMMEDIATE")
                     db.execute("UPDATE ledger SET status='settled',estimated=?,input_tokens=?,output_tokens=? WHERE id=?",(cost,ins,outs,reservation))
@@ -218,7 +258,9 @@ def serve(store, port):
                 size=int(self.headers.get("Content-Length","0"))
                 if size>4096: raise ValueError("Request too large")
                 body=json.loads(self.rfile.read(size))
-                if self.path=="/api/source": value=store.source(body["text"],body["category"],body["reported_date"])
+                if self.path=="/api/source":
+                    if not config().get("source_approved"): raise ValueError("Source consent pending")
+                    value=store.source(body["text"],body["category"],body["reported_date"])
                 elif self.path=="/api/run": value=store.enqueue(int(body["source"]))
                 elif self.path=="/api/approve": approve(store,int(body["task"]),body["version"]); value=True
                 elif self.path=="/api/cancel":
@@ -233,7 +275,7 @@ def serve(store, port):
     ThreadingHTTPServer(("127.0.0.1",port),Handler).serve_forever()
 
 if __name__=="__main__":
-    parser=argparse.ArgumentParser(); parser.add_argument("mode",choices=["serve","worker"]); parser.add_argument("--port",type=int,default=8765); args=parser.parse_args()
+    parser=argparse.ArgumentParser(); parser.add_argument("mode",choices=["serve","worker"]); parser.add_argument("--port",type=int,default=8765); parser.add_argument("--prompt-keys",action="store_true"); args=parser.parse_args()
     store=Store("data/studio.sqlite3")
     if args.mode=="serve": serve(store,args.port)
     else:
@@ -241,6 +283,11 @@ if __name__=="__main__":
         lock.seek(0); lock.write(b"0"); lock.flush(); lock.seek(0)
         try: msvcrt.locking(lock.fileno(),msvcrt.LK_NBLCK,1)
         except OSError: raise SystemExit("A durable worker is already running")
+        if args.prompt_keys:
+            try: prompt_keys()
+            except (ValueError,getpass.GetPassWarning): raise SystemExit("Secure key entry unavailable or unauthorized; nothing persisted")
         recover(store)
         while True:
+            with store.connect() as db:
+                db.execute("INSERT OR REPLACE INTO runtime VALUES(1,?,?)",(stamp(),int(ready())))
             run_one(store); time.sleep(2)
