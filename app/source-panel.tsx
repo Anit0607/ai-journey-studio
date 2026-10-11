@@ -118,7 +118,7 @@ export default function SourcePanel({sources,proposedSource,sourceApproved,intak
     inFlight.current=true;setPending(true);setNotice("");
     try{
       const saved=await action("source-stage",{text,category,reported_date:date});
-      if(saved){setText("");setDate("");setNotice("Note staged. Review its saved text and SHA-256 below, then decide whether to clear it for OpenAI.");}
+      if(saved){setText("");setDate("");setFileError("");setNotice("Note staged. Review its saved text and SHA-256 below, then decide whether to clear it for OpenAI.");}
     }finally{inFlight.current=false;setPending(false);}
   }
   return <>

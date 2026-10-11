@@ -2,6 +2,8 @@
 
 ## Windows follow-up - 11 October 2026
 
+Source-file warning regression: successful staging now clears only the obsolete file-import error. Failed staging retains the current error and form text. `npx tsx scripts/source-file-qa.ts --edge` checks TXT/JSON preview and replacement, invalid files preserving form state, invalid-file-to-valid-file recovery, failed privacy validation, and corrected successful staging using ephemeral uncleared fixtures only. No actual model calls are made; its screenshot is `artifacts/source-file-qa.png`.
+
 The exact cloud checkpoint ba234ed was fast-forwarded into a clean laptop checkout. Its first Windows run passed 98/100 TypeScript tests; the two new migration comparisons failed only because Git checked them out with CRLF. The comparisons now normalize CRLF to LF only. A regression rejects changed SQL defaults/types, spaces, missing final newline and bare CR. Substantive schema assertions and additive migration checks remain intact.
 
 After that fix, all 101 TypeScript tests and 8 mocked Python secure-entry tests passed on Windows, with typecheck, lint and production build. Isolated source stage/clear/revoke, blocked calendar dispatch and manual fresh-approval browser checks passed in installed Microsoft Edge. Playwright's bundled Chromium was absent; no browser software was installed. None of these checks opened the user's database or called an actual provider.
