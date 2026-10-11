@@ -1,5 +1,13 @@
 # Validation report — 10 October 2026
 
+## Windows follow-up - 11 October 2026
+
+The exact cloud checkpoint ba234ed was fast-forwarded into a clean laptop checkout. Its first Windows run passed 98/100 TypeScript tests; the two new migration comparisons failed only because Git checked them out with CRLF. The comparisons now normalize CRLF to LF only. A regression rejects changed SQL defaults/types, spaces, missing final newline and bare CR. Substantive schema assertions and additive migration checks remain intact.
+
+After that fix, all 101 TypeScript tests and 8 mocked Python secure-entry tests passed on Windows, with typecheck, lint and production build. Isolated source stage/clear/revoke, blocked calendar dispatch and manual fresh-approval browser checks passed in installed Microsoft Edge. Playwright's bundled Chromium was absent; no browser software was installed. None of these checks opened the user's database or called an actual provider.
+
+The reproducible rendered agent-revision check is `npx tsx scripts/agent-revision-qa.ts --edge` after `npm run build` (omit `--edge` when the bundled Chromium is installed). It uses an ephemeral database, explicit credential-free server environment and injected mock completions. It exercises UI feedback queuing, stops the isolated server, processes three steps, reopens the browser at checkpoint three, finishes the remaining steps after another stop, and checks fresh exact-version approval, historical originals and settled mock accounting. Its screenshot is automated fixture evidence, not real generated content or spending.
+
 Primary app: Next.js / TypeScript with relational SQL.
 
 Passed:

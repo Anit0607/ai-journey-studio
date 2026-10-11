@@ -10,6 +10,7 @@ import {assertNoPendingAgentRevision,finalizeAgentRevision,queueAgentRevision,re
 import {step} from "../lib/workflow";
 import type {Completion} from "../lib/providers";
 import {SourceIntake} from "../lib/sources";
+import {assertSchemaParity} from "./schema-parity";
 
 const pricing:Pricing={model:"isolated-revision-fixture",pricing_version:"fixture-only",pricing_tier:"standard",official_pricing_url:"https://example.test/fixture",input_microdollars_per_token:"0.40",output_microdollars_per_token:"1.60"};
 const config:RuntimeConfig={owner_cleared_sources_authorized:true,source_approved:true,approved_source_hash:hash(CAPSULE),transmission_authorized:true,credential_use_authorized:true,security_tests_passed:true,pricing_verified_date:new Date().toISOString().slice(0,10),openai:pricing};
@@ -34,7 +35,7 @@ async function runRoles(store:Store,count=6,call:(provider:string,prompt:string)
 
 test("agent revision migration matches the embedded schema and is additive",async()=>{
   const migration=await readFile(new URL("../migrations/008_agent_revisions.sql",import.meta.url),"utf8");
-  assert.equal(migration.trim(),AGENT_REVISION_SCHEMA.trim());
+  assertSchemaParity(migration.trim(),AGENT_REVISION_SCHEMA.trim());
   assert.doesNotMatch(migration,/DELETE|DROP\s+(?:TABLE|COLUMN)|TRUNCATE/i);
 });
 

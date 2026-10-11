@@ -9,6 +9,7 @@ import {embedded,type Database} from "../lib/db";
 import {CAPSULE,configReady,hash,type Pricing,type RuntimeConfig,type Source} from "../lib/domain";
 import {SourceIntake,SOURCE_CLEARANCE_ACKNOWLEDGEMENT,SOURCE_MAX_LENGTH,sourceEligible,sourceAuthorized,ownerSourceEligible,validateSourceInput,assertSourcePrivacy} from "../lib/sources";
 import {BASE_SCHEMA,PREFLIGHT_SCHEMA,REVISION_SCHEMA,CALENDAR_SCHEMA,PLATFORM_TIMING_SCHEMA,SOURCE_CLEARANCE_SCHEMA} from "../lib/schema";
+import {assertSchemaParity} from "./schema-parity";
 
 const text="I built a local outline tool and caught an unsupported claim during review. The next version keeps each generated point attached to a source note.";
 const input={text,category:"project-note",reported_date:"2026-10-10"};
@@ -88,7 +89,7 @@ test("standing readiness never broadens legacy source consent or enables unrevie
 }));
 
 test("source clearance migration matches schema and upgrades old databases without granting clearance",async()=>{
-  assert.equal(await readFile("migrations/006_source_clearance.sql","utf8"),SOURCE_CLEARANCE_SCHEMA);
+  assertSchemaParity(await readFile("migrations/006_source_clearance.sql","utf8"),SOURCE_CLEARANCE_SCHEMA);
   const db=new PGlite();try{
     await db.exec(BASE_SCHEMA+PREFLIGHT_SCHEMA+REVISION_SCHEMA+CALENDAR_SCHEMA+PLATFORM_TIMING_SCHEMA);
     const legacyId=randomUUID(),unsafeId=randomUUID();
