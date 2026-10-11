@@ -1,4 +1,5 @@
 {
+  "owner_cleared_sources_authorized": false,
   "source_approved": false,
   "approved_source_hash": "REQUIRES_EXACT_NOTE_APPROVAL",
   "transmission_authorized": false,

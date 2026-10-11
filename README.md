@@ -2,6 +2,10 @@
 
 Private Next.js/TypeScript web app for Anit Bose's AI learning journey, with relational persistence and resumable single-step jobs. All seven logical roles are represented; Analyst remains insufficient-data until real metrics exist. No seeded live data, simulated agents, publishing or outreach.
 
+## Cleared-source local drafting
+
+The dashboard now supports blank source intake, separate exact-note owner clearance, explicit due-calendar activation, and queued agent feedback revisions with fresh approval. No records or credentials are created automatically. See [LOCAL_LOOP.md](LOCAL_LOOP.md) for the complete owner flow, recovery behavior and remaining hosted limitations. The example runtime configuration keeps the new standing-content scope disabled.
+
 ## Laptop validation
 
     npm ci

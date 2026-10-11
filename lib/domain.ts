@@ -20,13 +20,17 @@ export function tokenCost(p:Pricing,input:number,output:number){
   return cost;
 }
 export type Pricing={model:string;pricing_version:string;pricing_tier:"standard";official_pricing_url:string;input_microdollars_per_token:string;output_microdollars_per_token:string};
-export type RuntimeConfig={source_approved?:boolean;approved_source_hash?:string;transmission_authorized?:boolean;credential_use_authorized?:boolean;security_tests_passed?:boolean;pricing_verified_date?:string;fallback_authorized?:boolean;openai?:Pricing;gemini?:Pricing};
-export type Source={id:string;text:string;category:string;reported_date:string;cleared:boolean;hash:string};
-export type Task={id:string;source_id:string;source_hash:string;status:string;checkpoint:number;lease_token:string|null;lease_until:string|null;updated:string};
+export type RuntimeConfig={owner_cleared_sources_authorized?:boolean;source_approved?:boolean;approved_source_hash?:string;transmission_authorized?:boolean;credential_use_authorized?:boolean;security_tests_passed?:boolean;pricing_verified_date?:string;fallback_authorized?:boolean;openai?:Pricing;gemini?:Pricing};
+export type Source={id:string;text:string;category:string;reported_date:string;cleared:boolean;hash:string;
+  clearance_id?:string|null;clearance_hash?:string|null;clearance_provider?:string|null;clearance_purpose?:string|null;
+  clearance_owner_acknowledged?:boolean;clearance_acknowledgement?:string|null;cleared_at?:string|Date|null;revoked_at?:string|Date|null;
+};
+export type Task={content_brief?:Record<string,unknown>;id:string;source_id:string;source_hash:string;status:string;checkpoint:number;lease_token:string|null;lease_until:string|null;updated:string;origin_key?:string;revision_parent_task_id?:string|null;revision_base_token?:string|null;revision_note?:string|null};
 export type Output={id:string;task_id:string;role:string;text:string;hash:string;created:string};
 export function sourceAllowed(text:string,category:string,date:string){return text===CAPSULE&&category==="user-reported-notes"&&date==="2026-10-09";}
 export function configReady(c:RuntimeConfig,date=new Date()){
-  if(!c.source_approved||c.approved_source_hash!==hash(CAPSULE)||!c.transmission_authorized||!c.credential_use_authorized||!c.security_tests_passed||c.pricing_verified_date!==date.toISOString().slice(0,10))return false;
+  const legacyConsent=c.source_approved===true&&c.approved_source_hash===hash(CAPSULE)&&c.transmission_authorized===true;
+  if((!legacyConsent&&c.owner_cleared_sources_authorized!==true)||c.credential_use_authorized!==true||c.security_tests_passed!==true||c.pricing_verified_date!==date.toISOString().slice(0,10))return false;
   try{for(const p of [c.openai,...(c.fallback_authorized?[c.gemini]:[])]){
     if(!p?.model||!p.pricing_version||p.pricing_tier!=="standard"||!p.official_pricing_url.startsWith("https://"))return false;
     rateNano(p.input_microdollars_per_token);rateNano(p.output_microdollars_per_token);

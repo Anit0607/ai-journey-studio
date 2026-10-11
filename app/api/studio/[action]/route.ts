@@ -5,6 +5,8 @@ import {runtimeConfig} from "../../../../lib/config";
 import {CAPSULE,hash,configReady} from "../../../../lib/domain";
 import {liveReady} from "../../../../lib/providers";
 import {step} from "../../../../lib/workflow";
+import {SourceIntake,sourceAuthorized} from "../../../../lib/sources";
+import {queueAgentRevision} from "../../../../lib/agent-revisions";
 import {Calendar} from "../../../../lib/calendar";
 export const runtime="nodejs",dynamic="force-dynamic",maxDuration=180;
 async function readBody(request:Request,limit=4096){
@@ -22,30 +24,39 @@ export async function GET(request:Request,context:Context){
     const store=new Store(await database()),c=runtimeConfig(),state=await store.snapshot();
     const blockers=[];
     const sourceApproved=!!c.source_approved&&c.approved_source_hash===hash(CAPSULE);
-    if(!sourceApproved)blockers.push("Source consent pending");
-    if(!c.transmission_authorized)blockers.push("Provider transmission approval pending");
+    if(!sourceApproved&&!c.owner_cleared_sources_authorized)blockers.push("Source consent pending");
+    if(!c.transmission_authorized&&!c.owner_cleared_sources_authorized)blockers.push("Provider transmission approval pending");
     if(!c.credential_use_authorized)blockers.push("Credential use approval pending");
     if(!configReady(c))blockers.push("Current model pricing and safety verification required");
     if(!process.env.OPENAI_API_KEY)blockers.push("Runtime provider credential not supplied");
     if(process.env.STUDIO_SESSION_ONLY!=="1")blockers.push("User-operated session-only key entry required");
     if(state.pricing_blocked)blockers.push("Unexpected provider billing tier requires reconciliation");
     const enabled=liveReady(c)&&!state.pricing_blocked;
-    return response({...state,calendar:await new Calendar(store.db).snapshot(state,c,enabled),blockers,live_enabled:enabled,source_approved:sourceApproved,proposed_source:CAPSULE});
+    return response({...state,calendar:await new Calendar(store.db).snapshot(state,c,enabled),blockers,live_enabled:enabled,source_approved:sourceApproved,owner_cleared_sources_authorized:c.owner_cleared_sources_authorized===true,proposed_source:CAPSULE});
   }catch{return response({error:"Relational database unavailable. Configure an approved PostgreSQL connection or use the laptop-only embedded option."},503);}
 }
 export async function POST(request:Request,context:Context){
   if(!authorized(request))return response({error:"Private access required"},401);
   if(!allowedOrigin(request))return response({error:"Origin rejected"},403);
   const {action}=await context.params;
-  if(!["source","run","approve","cancel","retry","step","request-changes","revise","approve-revision","calendar-configure","calendar-plan","calendar-link","calendar-prepare"].includes(action))return response({error:"Unknown action"},404);
-  const limit=action==="revise"?40000:4096;
+  if(!["source-stage","source-clear","source-revoke","agent-revise","calendar-dispatch","source","run","approve","cancel","retry","step","request-changes","revise","approve-revision","calendar-configure","calendar-plan","calendar-link","calendar-prepare"].includes(action))return response({error:"Unknown action"},404);
+  const limit=["revise","source-stage"].includes(action)?40000:4096;
   if(Number(request.headers.get("content-length")||0)>limit)return response({error:"Request too large"},413);
   try{
     const raw=await readBody(request,limit);
     const body=JSON.parse(raw),store=new Store(await database()),c=runtimeConfig();
     let value:unknown;
+    if(action==="source-stage")value=await new SourceIntake(store.db).stage({text:body.text,category:body.category,reported_date:body.reported_date});
+    if(action==="source-clear")value=await new SourceIntake(store.db).clear(String(body.source),String(body.expected_hash),body.acknowledged);
+    if(action==="source-revoke")value=await new SourceIntake(store.db).revoke(String(body.source),String(body.expected_hash));
+    if(action==="agent-revise")value=await queueAgentRevision(store,c,String(body.task),String(body.expected),body.note);
     if(action==="source")value=await store.source(CAPSULE,"user-reported-notes","2026-10-09",!!c.source_approved&&c.approved_source_hash===hash(CAPSULE));
-    if(action==="run")value=await store.enqueue(String(body.source));
+    if(action==="run"){
+      const source=(await store.db.query<any>("SELECT * FROM sources WHERE id=$1",[String(body.source)]))[0];
+      const legacy=source?.text===CAPSULE&&source?.hash===hash(CAPSULE);
+      if(!legacy&&!sourceAuthorized(c,source))throw Error("Source transmission is not authorized");
+      value=await store.enqueue(String(body.source));
+    }
     if(action==="approve")value=await store.approve(String(body.task),String(body.version));
     if(action==="request-changes")value=await store.revise(String(body.task),String(body.expected),body.note);
     if(action==="revise")value=await store.revise(String(body.task),String(body.expected),body.note,{role:body.role,text:body.text});
@@ -56,10 +67,14 @@ export async function POST(request:Request,context:Context){
     if(action==="calendar-prepare")value=await new Calendar(store.db).prepareDue();
     if(action==="cancel")value=await store.cancel(String(body.task));
     if(action==="retry")value=await store.retry(String(body.task));
-    if(action==="step")value=await step(store,c);
+    if(action==="calendar-dispatch")value=await new Calendar(store.db).dispatchDue(c,liveReady(c));
+    if(action==="step"){
+      await new Calendar(store.db).dispatchDue(c,liveReady(c));
+      value=await step(store,c);
+    }
     return response({result:value??true});
   }catch(error){
-    const safe=error instanceof Error&&["Source not cleared","Source invalidated","Stale artifact version","Task is not ready for approval","Unknown completion; reconciliation required before retry","Task cannot be retried","Safety termination cannot be retried","Approved task cannot be cancelled","Unknown task","Task is not ready for revision","Stale revision; refresh before editing","Revision note required","Invalid revision text","Excluded private material","No content change","Human factual review acknowledgement required","No revision to approve","Resolve source-grounding flags before approval","Fresh revision approval required","Invalid calendar date or time","Invalid cadence","Generation lead must be 48 to 336 hours or unset","Choose one to four weeks","Choose start date and posting time first","Unknown calendar entry","Task must match the linked source","Invalid platform timing","Preset provenance does not match selected hours","Choose every platform/day posting time first"].includes(error.message)?error.message:"Action blocked or database unavailable";
+    const safe=error instanceof Error&&["Dispatched calendar task cannot be relinked","Invalid generation activation","Invalid dispatch time","Completed revision cannot be retried; review its parent content","Revision feedback required (maximum 1000 characters)","Standing OpenAI draft and revision permission required","Revise the parent content task instead","Source not authorized for OpenAI revision","This exact version already has an agent revision request","Agent revision pending; review or cancel it before approval","Invalid source text","Invalid source category","Invalid source date","Source already staged with different metadata","Explicit owner source acknowledgement required","Unknown source","Stale source hash; review the exact source again","Invalid source id","Exact source hash required","Source transmission is not authorized","Source not cleared","Source invalidated","Stale artifact version","Task is not ready for approval","Unknown completion; reconciliation required before retry","Task cannot be retried","Safety termination cannot be retried","Approved task cannot be cancelled","Unknown task","Task is not ready for revision","Stale revision; refresh before editing","Revision note required","Invalid revision text","Excluded private material","No content change","Human factual review acknowledgement required","No revision to approve","Resolve source-grounding flags before approval","Fresh revision approval required","Invalid calendar date or time","Invalid cadence","Generation lead must be 49 to 336 hours or unset","Choose one to four weeks","Choose start date and posting time first","Unknown calendar entry","Task must match the linked source","Invalid platform timing","Preset provenance does not match selected hours","Choose every platform/day posting time first"].includes(error.message)?error.message:"Action blocked or database unavailable";
     return response({error:safe},400);
   }
 }

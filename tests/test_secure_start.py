@@ -61,6 +61,15 @@ class EntryGuards(unittest.TestCase):
         self.assertEqual(result["env"]["GEMINI_API_KEY"],"fresh-fallback-fixture")
         self.assertEqual(json.loads(result["env"]["STUDIO_RUNTIME_CONFIG"]),reviewed)
         self.assertFalse(any("fixture" in arg for arg in result["command"]))
+    def test_standing_content_mode_starts_scheduler_without_pilot_or_gemini(self):
+        reviewed={"credential_use_authorized":True,"fallback_authorized":True,"owner_cleared_sources_authorized":True}
+        result=self.run_mocked(reviewed,["fresh-primary-fixture"])
+        self.assertEqual(result["prompt_count"],1)
+        self.assertNotIn("GEMINI_API_KEY",result["env"])
+        self.assertFalse(json.loads(result["env"]["STUDIO_RUNTIME_CONFIG"])["fallback_authorized"])
+        self.assertIn("--scheduled",result["command"])
+        self.assertNotIn("--pilot",result["command"])
+
     def test_filter_does_not_read_unapproved_environment_values(self):
         class NamesOnly(dict):
             def __getitem__(self,name):

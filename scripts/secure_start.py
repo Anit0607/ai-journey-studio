@@ -42,7 +42,7 @@ def launch():
             primary=getpass.getpass("OpenAI API key (hidden; this web session only): ").strip()
             if not primary:raise SystemExit("No key entered")
             environment["OPENAI_API_KEY"]=primary
-            if config.get("fallback_authorized"):
+            if config.get("fallback_authorized") and not config.get("owner_cleared_sources_authorized"):
                 fallback=getpass.getpass("Gemini API key (hidden; Enter to skip): ").strip()
                 if fallback:environment["GEMINI_API_KEY"]=fallback
                 else:session_config["fallback_authorized"]=False
@@ -53,7 +53,7 @@ def launch():
     environment["STUDIO_DATABASE_AUTHORIZED"]="0"
     environment["STUDIO_SESSION_ONLY"]="1"
     # Child-only environment, not persistent user/machine environment. No secret arguments.
-    command=["node",str(Path("node_modules/tsx/dist/cli.mjs").resolve()),"scripts/local.ts","dev","--session-only","--pilot"]
+    command=["node",str(Path("node_modules/tsx/dist/cli.mjs").resolve()),"scripts/local.ts","dev","--session-only","--scheduled" if session_config.get("owner_cleared_sources_authorized") else "--pilot"]
     try:
         return subprocess.call(command,env=environment)
     finally:

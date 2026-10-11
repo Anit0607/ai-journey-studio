@@ -25,3 +25,25 @@ Revision correction checks: immutable original artifacts/approvals, append-only 
 Calendar checks verify approved/unset configuration, IST deadlines, explicit links, blocked readiness, invalid input and idempotent/concurrent due intents with zero content tasks or provider ledger entries. See CALENDAR.md for local-only scheduler and activation limits.
 
 Platform/day timing checks pass: optional unset preset, distinct IST variant deadlines, earliest-slot shared review deadline, incomplete/invalid timing rejection, truthful benchmark provenance and additive legacy preservation. Final compiled calendar browser QA proves loading the benchmark does not save it or choose a date. The authorized stopped-app planning setup preserved original content/approvals/costs and left generation/source links unset.
+
+## Cloud implementation checkpoint — 11 October 2026
+
+The local cleared-source/scheduled-draft/agent-revision loop is implemented and verified without the user's laptop or live data. This supersedes older implementation-gap statements above; it does not establish hosted execution or paid-provider integration.
+
+Passed on the final cloud source snapshot:
+
+- 100 isolated TypeScript tests via `node --import tsx --test tests/*.test.ts`, including all 53 prior tests.
+- 8 mocked Python secure-entry tests, including standing-content launch without the legacy pilot or Gemini.
+- `npm run typecheck`, `npm run lint`, `NEXT_TELEMETRY_DISABLED=1 npm run build`, and `git diff --check`.
+- Exact route flow: authenticated staging, hash-bound owner acknowledgement, clearance, revocation, and runtime gating with zero provider calls.
+- Complete isolated SQL/workflow loop: cleared concrete note → one scheduled longform task → six mocked OpenAI roles → original approval → feedback revision → restart midway → six completed revised roles → fresh exact-version approval. Original artifacts and approvals remain unchanged; 12 mock calls and no unresolved reservation. This is test evidence, not real generated content.
+- Concurrent/idempotent dispatch, frozen brief, explicit default-off activation, budget headroom, prior-month unknown usage, cancellation, stale revision bases, source revocation, migrations/reopen, historical-artifact privacy guards and no automatic replay.
+
+Independent review caught and corrected two defects: stored manual artifacts are checked for excluded material immediately before any outbound revision prompt, and new generation leads require 49–336 hours to leave at least one hour ahead of the 48-hour review deadline. Legacy 48-hour plans remain unchanged and explicitly blocked until corrected and replanned. Catch-up within the review window is labeled as a late start; dates are never changed automatically.
+
+Verification limits:
+
+- New rendered browser QA is not established. Browser socket creation was denied in this executor, including the reviewed escalation route; no workaround around that restriction was attempted. Existing committed screenshots belong to earlier laptop validation and do not prove the new UI flows. Static rendering checks and compilation are not substitutes for interactive browser testing.
+- The npm test wrapper's tsx CLI needed an IPC socket unavailable here; the direct supported Node import loader ran the same test files successfully.
+- Legacy Windows-only Python/SQLite tests cannot import msvcrt on this Linux executor and were not passed here. They are separate from the primary app and eight secure-entry tests.
+- No real database, provider credential, actual paid call, deployment, merge, publication, hosted scheduler or network-PostgreSQL integration was exercised. Existing real content, ledger, source clearance and runtime configuration were not read or changed.
