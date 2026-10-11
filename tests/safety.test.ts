@@ -4,7 +4,7 @@ import {mkdtemp,rm,readFile} from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import {embedded,connectionMode} from "../lib/db";
-import {BASE_SCHEMA,PREFLIGHT_SCHEMA,REVISION_SCHEMA,CALENDAR_SCHEMA} from "../lib/schema";
+import {BASE_SCHEMA,PREFLIGHT_SCHEMA,REVISION_SCHEMA,CALENDAR_SCHEMA,PLATFORM_TIMING_SCHEMA} from "../lib/schema";
 import {Store} from "../lib/store";
 import {CAPSULE,hash,istMonth,tokenCost,configReady,type Pricing,type RuntimeConfig} from "../lib/domain";
 import {authorized,allowedOrigin} from "../lib/auth";
@@ -150,6 +150,7 @@ test("migrations match tested schema",async()=>{
   assert.equal(await readFile("migrations/002_preflight.sql","utf8"),PREFLIGHT_SCHEMA);
   assert.equal(await readFile("migrations/003_revisions.sql","utf8"),REVISION_SCHEMA);
   assert.equal(await readFile("migrations/004_calendar.sql","utf8"),CALENDAR_SCHEMA);
+  assert.equal(await readFile("migrations/005_platform_timing.sql","utf8"),PLATFORM_TIMING_SCHEMA);
 });
 test("relational checkpoint survives database close and reopen",async()=>{
   const dir=await mkdtemp(path.join(os.tmpdir(),"studio-persist-test-"));

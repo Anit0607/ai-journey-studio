@@ -1,5 +1,7 @@
 "use client";
 import {useState,type CSSProperties} from "react";
+import {PLATFORMS,BENCHMARK_PRESET} from "../lib/schedule-presets";
+import type {PlatformTimes} from "../lib/calendar";
 const weekdays=["Sunday","Monday","Tuesday","Wednesday","Thursday","Friday","Saturday"];
 const field:CSSProperties={display:"block",margin:"8px 0 16px",padding:"10px",background:"#0d141c",color:"#dce8ed",border:"1px solid #30404b"};
 const displayDate=(value:string|null)=>value?new Date(value).toLocaleString("en-IN",{timeZone:"Asia/Kolkata",dateStyle:"medium",timeStyle:"short"})+" IST":"Not chosen";
@@ -12,6 +14,7 @@ function Entry({entry,sources,tasks,busy,action}:{entry:any;sources:any[];tasks:
     <button disabled={busy} onClick={()=>void action("calendar-link",{entry:entry.id,source:source||null,task:task||null})}>Save explicit links</button>
     <p>Linked source: {entry.source_id?.slice(0,8)||"none"} · Task: {entry.task_id?.slice(0,8)||"none"}</p>
     <p>{entry.variants.map((variant:any)=>variant.platform+": "+variant.status.replaceAll("_"," ")).join(" · ")}</p>
+    {entry.variants.map((variant:any)=><p key={variant.platform}><strong>{variant.platform}:</strong> intended posting {displayDate(variant.intended_post)} · review deadline {displayDate(variant.review_due)}</p>)}
     {entry.linked_content_version&&<small>Exact content version: {entry.linked_content_version}</small>}
     <details><summary>Generation blockers ({entry.blocked_reasons.length})</summary>{entry.blocked_reasons.map((reason:string)=><p key={reason}>{reason}</p>)}</details>
     <small>Due intent: {entry.job?"prepared, paid execution blocked":"not prepared"} · Last updated {displayDate(entry.updated)}</small>
@@ -20,17 +23,22 @@ function Entry({entry,sources,tasks,busy,action}:{entry:any;sources:any[];tasks:
 export default function CalendarPanel({calendar,sources,tasks,busy,action}:{calendar:any;sources:any[];tasks:any[];busy:boolean;action:(path:string,body:unknown)=>Promise<void>}){
   const settings=calendar.settings;
   const [date,setDate]=useState(settings.start_date||""),[time,setTime]=useState(settings.post_time||""),[lead,setLead]=useState(settings.generation_lead_hours?.toString()||""),[short,setShort]=useState<number[]>(settings.short_days),[long,setLong]=useState<number>(settings.long_day),[weeks,setWeeks]=useState(1);
+  const [mode,setMode]=useState<"shared"|"per_platform">(settings.post_time?settings.timing_mode:"per_platform"),[times,setTimes]=useState<PlatformTimes>(settings.platform_times),[basis,setBasis]=useState(settings.timing_basis||"custom");
   return <section><span className="eyebrow">APPROVED CADENCE · ASIA/KOLKATA</span><h2>Calendar and content queue</h2>
     <p>Monday, Wednesday, Friday posts; Sunday longer piece. Drafts ready for review 48 hours before intended posting. Edit the cadence below; posting date/hour are not assumed.</p>
-    <p><strong>{calendar.configuration_needed?"Configuration needed: choose a start date and posting time":"Calendar timing saved"}</strong></p>
+    <p><strong>{calendar.configuration_needed?"Configuration needed: choose a start date and required posting hours":"Calendar timing saved"}</strong></p>
     <p>Agents are intended to draft; you review. Manual revision is an optional correction path. Calendar paid generation and publishing are disabled. {calendar.scheduler}</p>
     <label>Start date<input style={field} aria-label="Calendar start date" type="date" value={date} onChange={event=>setDate(event.target.value)}/></label>
-    <label>Intended posting time (IST)<input style={field} aria-label="Posting time IST" type="time" value={time} onChange={event=>setTime(event.target.value)}/></label>
+    <label>Timing mode<select style={field} aria-label="Timing mode" value={mode} onChange={event=>setMode(event.target.value as "shared"|"per_platform")}><option value="per_platform">Different platform / weekday hours</option><option value="shared">Shared hour (legacy compatibility)</option></select></label>
+    {mode==="shared"&&<label>Intended posting time (IST)<input style={field} aria-label="Posting time IST" type="time" value={time} onChange={event=>setTime(event.target.value)}/></label>}
     <fieldset><legend>Shortform days</legend>{weekdays.map((day,index)=><label key={day} style={{marginRight:14}}><input type="checkbox" checked={short.includes(index)} onChange={event=>setShort(event.target.checked?[...short,index]:short.filter(item=>item!==index))}/>{day}</label>)}</fieldset>
     <label>Longer-piece day<select style={field} aria-label="Longform day" value={long} onChange={event=>setLong(Number(event.target.value))}>{weekdays.map((day,index)=><option key={day} value={index}>{day}</option>)}</select></label>
+    {mode==="per_platform"&&<><div style={{overflowX:"auto"}}><table><thead><tr><th>Day / IST</th>{PLATFORMS.map(platform=><th key={platform}>{platform}</th>)}</tr></thead><tbody>{[...new Set([...short,long])].map(day=><tr key={day}><th>{weekdays[day]}</th>{PLATFORMS.map(platform=><td key={platform}><input style={field} type="time" aria-label={platform+" "+weekdays[day]+" time IST"} value={times[platform]?.[day]||""} onChange={event=>{setBasis("custom");setTimes({...times,[platform]:{...times[platform],[day]:event.target.value||null}});}}/></td>)}</tr>)}</tbody></table></div><p className="fine">The shared content pack is due 48 hours before the earliest platform slot. Each variant keeps its own intended posting and review timestamps.</p></>}
+    <details><summary>{BENCHMARK_PRESET.label}</summary><p>{BENCHMARK_PRESET.limitations}</p>{BENCHMARK_PRESET.sources.map(source=><p key={source.platform}><a href={source.url} target="_blank" rel="noreferrer">{source.platform} benchmark</a> · {source.sample}</p>)}<button disabled={busy} onClick={()=>{setMode("per_platform");setTimes(structuredClone(BENCHMARK_PRESET.times));setBasis(BENCHMARK_PRESET.id);}}>Load benchmark into form — not saved</button><p>Loading changes only the form. Save explicitly to replace timing configuration; start date and existing planned entries remain unchanged.</p></details>
+    <p className="fine">Timing basis: {basis===BENCHMARK_PRESET.id?BENCHMARK_PRESET.label:"Custom / unset"}</p>
     <label>Optional generation lead (hours before intended posting; 48–336)<input style={field} aria-label="Generation lead hours" type="number" min={48} max={336} placeholder="Unset" value={lead} onChange={event=>setLead(event.target.value)}/></label>
     <p className="fine">48 hours is the draft/review deadline. A generation lead is a separate choice; leaving it empty creates no generation due time. No scheduler is activated by saving.</p>
-    <button disabled={busy} onClick={()=>void action("calendar-configure",{start_date:date||null,post_time:time||null,short_days:short,long_day:long,generation_lead_hours:lead?Number(lead):null})}>Save calendar settings</button>
+    <button disabled={busy} onClick={()=>void action("calendar-configure",{start_date:date||null,post_time:time||null,short_days:short,long_day:long,generation_lead_hours:lead?Number(lead):null,timing_mode:mode,platform_times:times,timing_basis:basis})}>Save calendar settings</button>
     <label>Weeks to plan<select style={field} aria-label="Weeks to plan" value={weeks} onChange={event=>setWeeks(Number(event.target.value))}>{[1,2,3,4].map(value=><option key={value} value={value}>{value}</option>)}</select></label>
     <button disabled={busy||calendar.configuration_needed} onClick={()=>void action("calendar-plan",{weeks})}>Create or update planned dates</button> <button disabled={busy} onClick={()=>void action("calendar-prepare",{})}>Check due queue — no model calls</button>
     {calendar.entries.length===0?<div className="empty"><h3>No calendar entries yet</h3><p>Save timing and explicitly create planned dates. No source or task is selected automatically.</p></div>:calendar.entries.map((entry:any)=><Entry key={entry.id+entry.updated} entry={entry} sources={sources} tasks={tasks} busy={busy} action={action}/>)}
