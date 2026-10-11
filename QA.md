@@ -55,3 +55,9 @@ Verification limits:
 - The npm test wrapper's tsx CLI needed an IPC socket unavailable here; the direct supported Node import loader ran the same test files successfully.
 - Legacy Windows-only Python/SQLite tests cannot import msvcrt on this Linux executor and were not passed here. They are separate from the primary app and eight secure-entry tests.
 - No real database, provider credential, actual paid call, deployment, merge, publication, hosted scheduler or network-PostgreSQL integration was exercised. Existing real content, ledger, source clearance and runtime configuration were not read or changed.
+
+## Local source-file chooser
+
+After desktop checkpoint 99ec186, the authenticated Sources form now accepts a user-selected UTF-8 .txt file or a strict three-field .json file (text, category, reported_date). The file is read only in the browser into a separate preview. It does not upload, stage, clear or call a provider. Applying the preview to an occupied form requires explicit replacement acknowledgement; staging and exact-note clearance remain separate owner actions. Unknown/duplicate JSON fields, malformed UTF-8, unsupported extensions, oversized text/files and invalid dates/categories are rejected. Source privacy validation still runs on the existing server staging path.
+
+Verification: 117 TypeScript tests and 8 mocked Python tests pass, including 15 parser tests and a static empty-form/no-side-effect UI smoke test. Final typecheck, lint and production build pass. The existing desktop browser evidence above covers the prior loop; interactive file-picker/replacement behavior is not established by this cloud check. No real source file, live database, credential or provider call was used, and no file was automatically imported or cleared.
