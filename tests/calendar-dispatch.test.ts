@@ -167,3 +167,23 @@ test("calendar dispatch migration is repeatable and preserves legacy data withou
     await assert.rejects(db.query("INSERT INTO tasks(id,source_id,source_hash,status) VALUES($1,$2,'legacy-hash','queued')",[randomUUID(),source]));
   }finally{await db.close();}
 });
+
+test("hosted daily plans need120-hour lead without silently modifying local choices or review deadlines",()=>fixture(async(db,calendar,store,intake)=>{
+  const hosted=new Calendar(db,120),source=await cleared(intake);
+  await assert.rejects(hosted.configure({...chosen,generation_lead_hours:60}),/120 to 336/);
+  await calendar.configure({...chosen,generation_lead_hours:60,generation_enabled:true});
+  const id=await entry(db,source,{postHours:72});
+  const blocked=await hosted.dispatchDue(config,true,now);assert.equal(blocked.queued,0);assert.match(blocked.entries[0].reason!,/at least 120 hours/);
+  assert.equal((await calendar.settings()).generation_lead_hours,60);
+  const before=(await db.query<any>("SELECT * FROM calendar_entries WHERE id=$1",[id]))[0];
+  const catchupDue=new Date(now.getTime()-48*hour);
+  await db.query("UPDATE calendar_entries SET generation_due=$2 WHERE id=$1",[id,catchupDue]);
+  const queued=await hosted.dispatchDue(config,true,now);assert.equal(queued.queued,1);
+  const after=(await db.query<any>("SELECT * FROM calendar_entries WHERE id=$1",[id]))[0];
+  assert.equal(new Date(after.review_due).getTime(),new Date(before.review_due).getTime());
+  const snapshot=await hosted.snapshot(await store.snapshot(),config,true,now);
+  assert.equal(snapshot.minimum_generation_lead_hours,120);assert.equal(snapshot.entries[0].generation_late,true);
+  assert.match(snapshot.entries[0].timing_notice!,/after the target/);
+  assert.equal((await store.snapshot()).tasks[0].content_brief.generation_due,catchupDue.toISOString());
+  assert.equal((await hosted.dispatchDue(config,true,now)).queued,0);
+}));

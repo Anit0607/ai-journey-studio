@@ -27,15 +27,15 @@ Jobs use row locks, a lease, persisted checkpoints and unique artifact/action co
 
 ## Provider and budget setup
 
-The first user-operated OpenAI session completed six real outputs and reached review-ready. Its reported-token cost estimate is $0.005690, with no unresolved reservations; invoices have not been verified. The agent did not read credentials or restart live work. See LIVE_RUN_CHECK.md. OpenAI-only consent remains limited to the shorter exact note. The user exclusively enters their key through python scripts/secure_start.py; the example configuration enables nothing.
+The first user-operated OpenAI session completed six real outputs and reached review-ready. Its reported-token cost estimate is $0.005690, with no unresolved reservations; invoices have not been verified. The agent did not read credentials or restart live work. See LIVE_RUN_CHECK.md. The first-capsule mode remains limited to that shorter exact note. The separately approved standing mode requires explicit owner clearance for each dashboard source. Local keys are entered by the user through python scripts/secure_start.py; hosted persistent-key use requires separate approval. The example configuration enables nothing.
 
 Combined monthly warning $10 / maximum $15, with $1 buffer inside the cap and IST calendar month. Atomic PostgreSQL transactions lock a shared budget guard before reserving an upper bound. Current-month settled costs plus every unresolved reservation, including prior-month unknown calls, constrain spending. Provider token estimates are distinct from invoices. Input/retry/concurrency/output bounds apply. Gemini fallback occurs once per step only for eligible transient HTTP errors, never access or safety refusals.
 
 ## Network PostgreSQL and hosted shape
 
-lib/db.ts includes a pg connection adapter and migrations/001_initial.sql plus 002_preflight.sql. An external database connection requires explicit STUDIO_DATABASE_AUTHORIZED=1 as well as a user-supplied approved DATABASE_URL. npm run migrate applies the schema only after that authorization. No database, credentials or cloud resources are provisioned.
+lib/db.ts includes a pg connection adapter and additive migrations 001–009. An external database connection requires explicit STUDIO_DATABASE_AUTHORIZED=1 as well as a user-supplied approved DATABASE_URL. npm run migrate applies the schema only after that authorization. No database, credentials or cloud resources are provisioned.
 
-Next.js App Router and Node API routes provide the Vercel web deployment shape. Embedded persistence is disabled on Vercel. A hosted database, scheduler delivery, owner authentication setup and Vercel eligibility remain unresolved. The compiled app is not evidence of production integration or 24/7 operation. No deployment is authorized.
+Next.js App Router and Node API routes provide the Vercel web deployment shape. Embedded persistence is disabled on Vercel. The disabled Hobby adapter now provides a protected daily batch route, durable daily deduplication and separate persistent-access gates. See [HOSTED_HOBBY.md](HOSTED_HOBBY.md) for limits and the owner approval/setup checklist. Network database integration, scheduler delivery and owner authentication setup remain unverified. The compiled app is not evidence of production integration or 24/7 operation. No deployment is authorized.
 
 ## Checks
 

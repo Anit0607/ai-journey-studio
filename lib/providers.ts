@@ -1,11 +1,15 @@
 import {configReady,type RuntimeConfig,type Pricing,tokenCost} from "./domain";
+import {hostedEnvironment,hostedReady,type HostedEnvironment} from "./hosted";
 export type ProviderName="openai"|"gemini";
 export class ProviderFailure extends Error{constructor(readonly status:number){super("Provider HTTP "+status);}}
 export type Report={serviceTier:string|null;model:string|null;requestId:string|null;finishReason:string|null};
 export type Completion={text:string;input:number;output:number;outcome:"complete"|"incomplete"|"safety";report:Report};
 export class AccountingFailure extends Error{constructor(readonly report:Report){super("Unverified model/service tier; reservation retained");}}
 export class TerminationFailure extends Error{constructor(readonly outcome:"incomplete"|"safety",readonly report:Report){super("Completion usage unknown; reservation retained");}}
-export function liveReady(c:RuntimeConfig){return process.env.STUDIO_SESSION_ONLY==="1"&&configReady(c)&&Boolean(process.env.OPENAI_API_KEY);}
+export function liveReady(c:RuntimeConfig,env:HostedEnvironment=process.env){
+  const ready=hostedEnvironment(env)?hostedReady(c,env):env.STUDIO_SESSION_ONLY==="1"&&configReady(c);
+  return ready&&Boolean(env.OPENAI_API_KEY);
+}
 const safeId=(value:unknown)=>typeof value==="string"&&value.length<=150&&/^[A-Za-z0-9_.:-]+$/.test(value)?value:null;
 const tiers=["auto","default","flex","scale","priority","fast"];
 export async function providerCall(provider:ProviderName,prompt:string,p:Pricing,transport:typeof fetch=fetch,credential:(name:ProviderName)=>string|undefined=name=>process.env[name==="openai"?"OPENAI_API_KEY":"GEMINI_API_KEY"]):Promise<Completion>{

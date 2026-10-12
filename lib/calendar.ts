@@ -20,7 +20,7 @@ type DispatchEntry={entry_id:string;task_id:string|null;status:string;reason?:st
 // A due task must fit at least one maximum-size ordinary checkpoint. The worker
 // reserves again immediately before every provider call under its budget lock.
 const CHECKPOINT_MAX_INPUT_BYTES=48_000;
-function dispatchBlockers(settings:any,entry:any,source:Source|undefined,c:RuntimeConfig,runtimeEnabled:boolean,budget:BudgetState,now:Date){
+function dispatchBlockers(settings:any,entry:any,source:Source|undefined,c:RuntimeConfig,runtimeEnabled:boolean,budget:BudgetState,now:Date,minimumLeadHours=49){
   const reasons:string[]=[];
   if(settings.generation_enabled!==true)reasons.push("Recurring paid calendar generation is not activated");
   if(c.owner_cleared_sources_authorized!==true)reasons.push("Standing consent for owner-cleared OpenAI sources is missing");
@@ -28,6 +28,7 @@ function dispatchBlockers(settings:any,entry:any,source:Source|undefined,c:Runti
   else if(!ownerSourceEligible(source,undefined,"openai",now)||!sourceAuthorized(c,source,"openai",now))reasons.push("Source requires explicit owner clearance and provider transmission consent");
   if(!entry.generation_due)reasons.push("Generation timing is unset");
   else if(settings.generation_lead_hours===48||Math.min(new Date(entry.draft_due).getTime(),new Date(entry.review_due).getTime())-new Date(entry.generation_due).getTime()<3_600_000)reasons.push("Generation timing needs at least a one-hour cushion before draft/review; choose a lead of 49 hours or more and explicitly replan");
+  if(minimumLeadHours>49&&(!entry.generation_due||new Date(entry.intended_post).getTime()-new Date(entry.generation_due).getTime()<minimumLeadHours*3_600_000))reasons.push("Hosted daily generation requires a lead of at least "+minimumLeadHours+" hours; explicitly replan without changing the 48-hour review deadline");
   if(new Date(entry.intended_post)<=now)reasons.push("Scheduled posting time has passed; reschedule before generating");
   else if(new Date(entry.draft_due)<now||new Date(entry.review_due)<now)reasons.push("Draft/review deadline has passed; reschedule to preserve the 48-hour review window");
   if(!configReady(c,now))reasons.push("Current pricing/security configuration is required before paid work");
@@ -47,12 +48,12 @@ function linkedBlocker(task:Task|undefined,entry:any,job:any,source:Source|undef
   return null;
 }
 export class Calendar{
-  constructor(readonly db:Database){}
+  constructor(readonly db:Database,readonly minimumGenerationLeadHours=49){}
   async settings(){return (await this.db.query<any>("SELECT * FROM calendar_settings WHERE id=1"))[0];}
   async configure(input:{start_date:string|null;post_time:string|null;short_days:number[];long_day:number;generation_lead_hours:number|null;timing_mode?:"shared"|"per_platform";platform_times?:PlatformTimes;timing_basis?:string|null;generation_enabled?:boolean}){
     if((input.start_date!==null&&!validDate(input.start_date))||(input.post_time!==null&&!/^([01]\d|2[0-3]):[0-5]\d$/.test(input.post_time)))throw Error("Invalid calendar date or time");
     if(!Array.isArray(input.short_days)||input.short_days.length<1||input.short_days.length>6||input.short_days.some(day=>!Number.isInteger(day)||day<0||day>6)||new Set(input.short_days).size!==input.short_days.length||!Number.isInteger(input.long_day)||input.long_day<0||input.long_day>6||input.short_days.includes(input.long_day))throw Error("Invalid cadence");
-    if(input.generation_lead_hours!==null&&(!Number.isInteger(input.generation_lead_hours)||input.generation_lead_hours<49||input.generation_lead_hours>336))throw Error("Generation lead must be 49 to 336 hours or unset");
+    if(input.generation_lead_hours!==null&&(!Number.isInteger(input.generation_lead_hours)||input.generation_lead_hours<this.minimumGenerationLeadHours||input.generation_lead_hours>336))throw Error("Generation lead must be "+this.minimumGenerationLeadHours+" to 336 hours or unset");
     if(input.timing_mode!==undefined&&!["shared","per_platform"].includes(input.timing_mode))throw Error("Invalid platform timing");
     if(input.platform_times!==undefined&&!validateTimes(input.platform_times))throw Error("Invalid platform timing");
     if(input.timing_basis!==undefined&&input.timing_basis!==null&&!["custom",BENCHMARK_PRESET.id].includes(input.timing_basis))throw Error("Invalid platform timing");
@@ -139,13 +140,13 @@ export class Calendar{
           result.entries.push({entry_id:entry.id,task_id:task?.id||job.task_id||entry.task_id,status:reason?"blocked":task?.status||"linked",...(reason?{reason}:{})});
           continue;
         }
-        const blockers=dispatchBlockers(settings,entry,source,c,runtimeEnabled,budget,now);
+        const blockers=dispatchBlockers(settings,entry,source,c,runtimeEnabled,budget,now,this.minimumGenerationLeadHours);
         if(blockers.length){
           const reason=blockers.join("; ");
           await tx.query("UPDATE calendar_jobs SET status='blocked',block_reason=$2,updated=$3 WHERE id=$1",[job.id,reason,now]);
           result.blocked++;result.entries.push({entry_id:entry.id,task_id:null,status:"blocked",reason});continue;
         }
-        const origin="calendar:"+entry.id,brief={kind:entry.kind,planned_date:entry.planned_date,platforms:PLATFORMS,intended_post:new Date(entry.intended_post).toISOString(),review_due:new Date(entry.review_due).toISOString()};
+        const origin="calendar:"+entry.id,brief={kind:entry.kind,planned_date:entry.planned_date,platforms:PLATFORMS,intended_post:new Date(entry.intended_post).toISOString(),review_due:new Date(entry.review_due).toISOString(),generation_due:new Date(entry.generation_due).toISOString()};
         const inserted=await tx.query<Task>("INSERT INTO tasks(id,source_id,source_hash,status,origin_key,content_brief) VALUES($1,$2,$3,'queued',$4,$5) ON CONFLICT(source_id,source_hash,origin_key) DO NOTHING RETURNING *",[randomUUID(),source!.id,source!.hash,origin,JSON.stringify(brief)]);
         const task=inserted[0]||(await tx.query<Task>("SELECT * FROM tasks WHERE source_id=$1 AND source_hash=$2 AND origin_key=$3",[source!.id,source!.hash,origin]))[0];
         if(!task)throw Error("Scheduled task linkage unavailable");
@@ -165,9 +166,9 @@ export class Calendar{
   async snapshot(state:any,c:RuntimeConfig,runtimeEnabled:boolean,now=new Date()){
     const settings=await this.settings(),jobs=await this.db.query<any>("SELECT * FROM calendar_jobs ORDER BY created,id"),entries=await this.db.query<any>("SELECT * FROM calendar_entries ORDER BY intended_post,id");
     const budget={used:Number(state.budget.committed_microdollars),unresolved:Number(state.budget.unresolved_reservations),pricingBlocked:!!state.pricing_blocked};
-    return {settings,paid_activation:settings.generation_enabled===true,scheduler:"Due dispatch requires an active worker or external scheduler invocation; saving does not start a scheduler",configuration_needed:!settings.start_date||timingMissing(settings),entries:entries.map(entry=>{
+    return {settings,minimum_generation_lead_hours:this.minimumGenerationLeadHours,paid_activation:settings.generation_enabled===true,scheduler:"Due dispatch requires an active worker or external scheduler invocation; saving does not start a scheduler",configuration_needed:!settings.start_date||timingMissing(settings),entries:entries.map(entry=>{
       const source=state.sources.find((item:any)=>item.id===entry.source_id),task=state.tasks.find((item:any)=>item.id===entry.task_id),review=state.reviews.find((item:any)=>item.task_id===entry.task_id),job=jobs.find(item=>item.entry_id===entry.id)||null;
-      const blockers=dispatchBlockers(settings,entry,source,c,runtimeEnabled,budget,now);
+      const blockers=dispatchBlockers(settings,entry,source,c,runtimeEnabled,budget,now,this.minimumGenerationLeadHours);
       if(source?.text===CAPSULE)blockers.push("Source lacks concrete events and emotional context; do not invent personal lessons or feelings");
       const reviewReady=task?.status==="review"||task?.status==="approved";
       if(reviewReady&&review?.quality.flags.length)blockers.push("Linked content has source-grounding flags");

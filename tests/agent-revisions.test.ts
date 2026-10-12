@@ -180,3 +180,14 @@ test("historical private artifact is rejected at queue and pre-transmission even
   let calls=0;await step(store,config,async()=>{calls++;throw Error("must not transmit");},true);
   const state=await store.snapshot();assert.equal(calls,0);assert.equal(state.ledger.length,0);assert.equal(state.tasks.find((item:any)=>item.id===child.id).status,"blocked");
 }));
+
+test("scheduled agent revisions retain their inherited review deadline before any provider call",()=>fixture(async(store,parent,token)=>{
+  const past=new Date(Date.now()-60_000).toISOString();
+  await store.db.query("UPDATE tasks SET content_brief=$2 WHERE id=$1",[parent.id,JSON.stringify({kind:"shortform",review_due:past,intended_post:new Date(Date.now()+47*3_600_000).toISOString(),generation_due:new Date(Date.now()-73*3_600_000).toISOString()})]);
+  const job=await queueAgentRevision(store,config,parent.id,token,feedback);let calls=0;
+  const outcome=await step(store,config,async(_provider,prompt)=>{calls++;return completed(prompt);},true);
+  assert.equal(outcome.status,"blocked");assert.equal(calls,0);
+  assert.match(outcome.reason||"",/review deadline passed/);
+  assert.match((await store.db.query<any>("SELECT detail FROM events WHERE task_id=$1 AND kind='blocked'",[job.id]))[0].detail,/review deadline passed/);
+  assert.equal((await store.db.query("SELECT * FROM ledger")).length,0);
+}));
