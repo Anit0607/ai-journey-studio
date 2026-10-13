@@ -10,7 +10,7 @@ export const OWNER_ID="studio-owner",OWNER_EMAIL="owner@studio.local";
 type Env=Record<string,string|undefined>;
 function settings(env:Env){
  const hosted=hostedEnvironment(env),origin=env.STUDIO_ORIGIN,secret=env.STUDIO_AUTH_SECRET||(!hosted?env.STUDIO_ACCESS_TOKEN:undefined);
- if(!origin||!secret||secret.length<32||env.STUDIO_PASSWORD_AUTH_ENABLED==="0")throw Error("Owner password setup missing");
+ if(!origin||!secret||!/^[\x21-\x7e]{32,}$/.test(secret)||env.STUDIO_PASSWORD_AUTH_ENABLED==="0"||env.CRON_SECRET===secret)throw Error("Owner password setup missing");
  const url=new URL(origin);if(url.origin!==origin||url.username||url.password|| (hosted&&url.protocol!=="https:")||(!hosted&&!['127.0.0.1','localhost'].includes(url.hostname)))throw Error("Owner password setup missing");
  if(hosted&&(env.VERCEL!=="1"||env.VERCEL_ENV!=="production"||env.STUDIO_DATABASE_AUTHORIZED!=="1"||env.STUDIO_LOCAL_DB==="1"||!env.DATABASE_URL))throw Error("Owner password setup missing");
  return {origin,secret,hosted};
@@ -58,7 +58,7 @@ function targetMatches(request:Request,origin:string){
  try{const expected=new URL(origin),actual=new URL(request.url),host=request.headers.get("host");return (!host||host===expected.host)&&(actual.origin===origin||(expected.hostname==="127.0.0.1"&&actual.hostname==="localhost"&&actual.protocol===expected.protocol&&actual.port===expected.port&&host===expected.host));}catch{return false;}
 }
 export async function passwordOwnerAuthenticated(request:Request,env:Env=process.env,dbProvider=database){
- try{const configured=settings(env);if(!targetMatches(request,configured.origin))return false;if(configured.hosted&&runtimeConfig().hosted?.owner_auth_authorized!==true)return false;const db=await dbProvider();if(!await ownerExists(db))return false;const session=await createOwnerAuth(db,env).api.getSession({headers:request.headers});return session?.user.id===OWNER_ID;}catch{return false;}
+ try{const configured=settings(env);if(!targetMatches(request,configured.origin))return false;if(configured.hosted&&runtimeConfig().hosted?.owner_auth_authorized!==true)return false;const db=await dbProvider();if(configured.hosted&&db.kind!=="postgres")return false;if(!await ownerExists(db))return false;const session=await createOwnerAuth(db,env).api.getSession({headers:request.headers});return session?.user.id===OWNER_ID;}catch{return false;}
 }
 export async function ownerApiAuthenticated(request:Request){
  // Legacy machine credential remains laptop-only. Browser login uses cookies.
@@ -77,7 +77,7 @@ export async function handleOwnerAuth(request:Request,action:string,env:Env=proc
  try{
   const configured=settings(env);if(!targetMatches(request,configured.origin))return response({error:"Origin rejected"},403);
   if(configured.hosted&&runtimeConfig().hosted?.owner_auth_authorized!==true)throw Error("Owner auth authorization missing");
-  const db=await dbProvider();if(!await ownerExists(db))return response({setup_required:true,authenticated:false,error:"Owner password setup missing. No public registration is available."},503);
+  const db=await dbProvider();if(configured.hosted&&db.kind!=="postgres")throw Error("Hosted PostgreSQL required");if(!await ownerExists(db))return response({mode:configured.hosted?"hosted":"local",setup_required:true,authenticated:false,error:"Owner password setup missing. No public registration is available."},503);
   const auth=createOwnerAuth(db,env);
   if(action==="status")return response({setup_required:false,authenticated:await passwordOwnerAuthenticated(request,env,async()=>db),mode:configured.hosted?"hosted":"local"});
   if(action==="login"){
@@ -86,7 +86,7 @@ export async function handleOwnerAuth(request:Request,action:string,env:Env=proc
    let input:any;try{input=JSON.parse(await boundedBody(request));}catch{return response({error:"Invalid password request"},400);}
    if(!input||Object.keys(input).length!==1||!acceptableOwnerPassword(input.password))return response({error:"Invalid password or password format"},401);
    const internal=new Request(configured.origin+"/api/auth/sign-in/email",{method:"POST",headers:internalHeaders(request),body:JSON.stringify({email:OWNER_EMAIL,password:input.password,rememberMe:true})});
-   const result=await auth.handler(internal);const headers=new Headers(result.headers);headers.set("Cache-Control","no-store");headers.set("Content-Type","application/json");
+   const result=await auth.handler(internal);const headers=new Headers(result.headers);headers.delete("content-length");headers.delete("set-auth-token");headers.set("Cache-Control","no-store");headers.set("Content-Type","application/json");
    // Do not return the library's bearer token or account metadata to browser JS.
    return new Response(JSON.stringify(result.ok?{authenticated:true}:{error:"Invalid password or login temporarily unavailable"}),{status:result.status,headers});
   }

@@ -1,6 +1,7 @@
 """Run only after owner approval and authorized DB setup. Never send password to chat."""
 import getpass
 import json
+import os
 import subprocess
 import sys
 import warnings
@@ -9,19 +10,30 @@ from pathlib import Path
 def main():
     if "--owner-setup-authorized" not in sys.argv or not sys.stdin.isatty():
         raise SystemExit("Owner-approved interactive hidden input is required.")
+    remote="--remote" in sys.argv
+    if remote and "--migrate-authorized" not in sys.argv:
+        raise SystemExit("Remote schema migration needs separate action-time approval.")
+    database_url=""
     with warnings.catch_warnings():
         warnings.simplefilter("error", getpass.GetPassWarning)
         try:
+            if remote:
+                database_url=getpass.getpass("Approved Neon connection string (hidden): ")
             password=getpass.getpass("Choose owner password (hidden): ")
             if password!=getpass.getpass("Repeat owner password (hidden): "):
                 raise SystemExit("Passwords did not match; nothing was written.")
         except getpass.GetPassWarning:
             raise SystemExit("Hidden input unavailable; nothing was written.")
     root=Path(__file__).resolve().parent.parent
-    # DB credentials, if authorized, stay in the owner's process environment.
-    # The password travels over a private child stdin pipe, never command args.
-    result=subprocess.run(["node",str(root/"node_modules/tsx/dist/cli.mjs"),"scripts/owner-password-setup.ts","--owner-setup-authorized"],input=json.dumps({"password":password}),text=True,cwd=root)
-    password=""
+    # Read only OS necessities, never inherited provider/config/proxy secrets.
+    environment={name:os.environ[name] for name in ("PATH","PATHEXT","SYSTEMROOT","WINDIR","COMSPEC","TEMP","TMP","USERPROFILE","APPDATA","LOCALAPPDATA","HOME") if name in os.environ}
+    command=["node",str(root/"node_modules/tsx/dist/cli.mjs"),"scripts/owner-password-setup.ts","--owner-setup-authorized"]
+    if remote:
+        command.extend(["--remote","--migrate-authorized"])
+    else:
+        environment.update({"STUDIO_LOCAL_DB":"1","STUDIO_DATABASE_AUTHORIZED":"0"})
+    result=subprocess.run(command,input=json.dumps({"password":password,"database_url":database_url}),text=True,cwd=root,env=environment)
+    password="";database_url=""
     return result.returncode
 
 if __name__=="__main__":raise SystemExit(main())
