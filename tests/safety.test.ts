@@ -1,3 +1,4 @@
+import {assertSchemaParity} from "./schema-parity";
 import test from "node:test";
 import assert from "node:assert/strict";
 import {mkdtemp,rm,readFile} from "node:fs/promises";
@@ -146,11 +147,11 @@ test("safe explicit retry resumes; unknown retry remains blocked",()=>fixture(as
   await s.retry(task.id);assert.equal((await s.snapshot()).tasks[0].status,"queued");
 }));
 test("migrations match tested schema",async()=>{
-  assert.equal(await readFile("migrations/001_initial.sql","utf8"),BASE_SCHEMA);
-  assert.equal(await readFile("migrations/002_preflight.sql","utf8"),PREFLIGHT_SCHEMA);
-  assert.equal(await readFile("migrations/003_revisions.sql","utf8"),REVISION_SCHEMA);
-  assert.equal(await readFile("migrations/004_calendar.sql","utf8"),CALENDAR_SCHEMA);
-  assert.equal(await readFile("migrations/005_platform_timing.sql","utf8"),PLATFORM_TIMING_SCHEMA);
+  assertSchemaParity(await readFile("migrations/001_initial.sql","utf8"),BASE_SCHEMA);
+  assertSchemaParity(await readFile("migrations/002_preflight.sql","utf8"),PREFLIGHT_SCHEMA);
+  assertSchemaParity(await readFile("migrations/003_revisions.sql","utf8"),REVISION_SCHEMA);
+  assertSchemaParity(await readFile("migrations/004_calendar.sql","utf8"),CALENDAR_SCHEMA);
+  assertSchemaParity(await readFile("migrations/005_platform_timing.sql","utf8"),PLATFORM_TIMING_SCHEMA);
 });
 test("relational checkpoint survives database close and reopen",async()=>{
   const dir=await mkdtemp(path.join(os.tmpdir(),"studio-persist-test-"));

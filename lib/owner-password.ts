@@ -21,7 +21,7 @@ export function createOwnerAuth(db:Database,env:Env){
   baseURL:configured.origin,basePath:"/api/auth",secret:configured.secret,trustedOrigins:[configured.origin],database:studioAuthAdapter(db),
   emailAndPassword:{enabled:true,disableSignUp:true,minPasswordLength:10,maxPasswordLength:128,autoSignIn:false},
   user:{modelName:"studio_auth_user"},account:{modelName:"studio_auth_account",accountLinking:{enabled:false}},
-  session:{modelName:"studio_auth_session",expiresIn:8*3600,updateAge:3600,cookieCache:{enabled:false}},
+  session:{modelName:"studio_auth_session",expiresIn:8*3600,disableSessionRefresh:true,cookieCache:{enabled:false}},
   verification:{modelName:"studio_auth_verification"},
   rateLimit:{enabled:true,storage:"database",modelName:"studio_auth_rate_limit",window:60,max:60,customRules:{"/sign-in/email":{window:900,max:5},"/get-session":false}},
   advanced:{useSecureCookies:configured.hosted||configured.origin.startsWith("https:"),defaultCookieAttributes:{httpOnly:true,sameSite:"strict",path:"/"}},
@@ -90,6 +90,11 @@ export async function handleOwnerAuth(request:Request,action:string,env:Env=proc
    // Do not return the library's bearer token or account metadata to browser JS.
    return new Response(JSON.stringify(result.ok?{authenticated:true}:{error:"Invalid password or login temporarily unavailable"}),{status:result.status,headers});
   }
-  const result=await auth.handler(new Request(configured.origin+"/api/auth/sign-out",{method:"POST",headers:internalHeaders(request),body:"{}"}));const headers=new Headers(result.headers);headers.set("Cache-Control","no-store");return new Response(JSON.stringify({authenticated:false}),{status:result.status,headers});
+  // Better Auth can suppress adapter deletion failures. Verify durable revocation
+  // before forwarding its cookie deletion or telling the owner sign-out succeeded.
+  const current=await auth.api.getSession({headers:request.headers});
+  const result=await auth.handler(new Request(configured.origin+"/api/auth/sign-out",{method:"POST",headers:internalHeaders(request),body:"{}"}));
+  if(!result.ok||(current?.session.id&&(await db.query("SELECT id FROM studio_auth_session WHERE id=$1",[current.session.id])).length))return response({error:"Server sign-out could not be verified. Retry sign out before leaving this device."},503);
+  const headers=new Headers(result.headers);headers.delete("content-length");headers.set("Cache-Control","no-store");return new Response(JSON.stringify({authenticated:false}),{status:200,headers});
  }catch{return response({mode:hostedEnvironment(env)?"hosted":"local",setup_required:true,authenticated:false,error:"Password login unavailable. Approved database and owner setup are required."},503);}
 }

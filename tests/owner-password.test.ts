@@ -50,3 +50,22 @@ test("unknown endpoints cannot bypass global guard and hosted auth never falls b
  assert.throws(()=>createOwnerAuth(db,{...env,STUDIO_AUTH_SECRET:password}),/setup missing/);
  assert.throws(()=>createOwnerAuth(db,{...env,VERCEL:"1",VERCEL_ENV:"production",STUDIO_LOCAL_DB:"1"}),/setup missing/);
 }));
+
+test("session reads do not extend the absolute eight-hour expiry",t=>fixture(async db=>{
+ await provisionOwner(db,password,true);const result=await login(db),saved=cookie(result);
+ const original=(await db.query<any>('SELECT * FROM studio_auth_session'))[0],created=new Date(original.createdAt).getTime();
+ t.mock.timers.enable({apis:["Date"],now:created+66*60_000});
+ const protectedRequest=new Request(origin+"/api/studio/state",{headers:{Cookie:saved}});
+ assert.equal(await passwordOwnerAuthenticated(protectedRequest,env,async()=>db),true);
+ const after=(await db.query<any>('SELECT * FROM studio_auth_session'))[0];assert.equal(new Date(after.expiresAt).getTime(),new Date(original.expiresAt).getTime());
+ t.mock.timers.setTime(created+8*3_600_000+1_000);
+ assert.equal(await passwordOwnerAuthenticated(protectedRequest,env,async()=>db),false);
+}));
+
+test("logout does not claim success or discard the cookie when durable deletion fails; retry revokes it",()=>fixture(async db=>{
+ await provisionOwner(db,password,true);const logged=await login(db),saved=cookie(logged);let failDelete=true;
+ const faulty:Database={...db,query:async<T>(sql:string,params?:unknown[])=>{if(failDelete&&/^DELETE FROM "studio_auth_session"/.test(sql)){failDelete=false;throw Error("isolated deletion failure");}return db.query<T>(sql,params);}};
+ const failed=await handleOwnerAuth(request("logout",{},saved),"logout",env,async()=>faulty);assert.equal(failed.status,503);assert.equal(failed.headers.getSetCookie().length,0);assert.equal((await failed.json()).authenticated,undefined);
+ assert.equal(await passwordOwnerAuthenticated(new Request(origin+"/api/studio/state",{headers:{Cookie:saved}}),env,async()=>db),true);
+ const retried=await handleOwnerAuth(request("logout",{},saved),"logout",env,async()=>db);assert.equal(retried.status,200);assert.equal((await db.query("SELECT id FROM studio_auth_session")).length,0);assert.equal(await passwordOwnerAuthenticated(new Request(origin+"/api/studio/state",{headers:{Cookie:saved}}),env,async()=>db),false);
+}));
