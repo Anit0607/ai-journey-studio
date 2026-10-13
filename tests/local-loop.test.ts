@@ -1,3 +1,4 @@
+import {variantFixture} from "./variant-fixture";
 import test from "node:test";
 import assert from "node:assert/strict";
 import {randomUUID} from "node:crypto";
@@ -21,7 +22,7 @@ test("isolated complete local loop survives restart and requires fresh revision 
  const config:RuntimeConfig={owner_cleared_sources_authorized:true,credential_use_authorized:true,security_tests_passed:true,pricing_verified_date:now.toISOString().slice(0,10),fallback_authorized:false,openai:{model:"isolated-loop",pricing_version:"fixture",pricing_tier:"standard",official_pricing_url:"https://example.test",input_microdollars_per_token:"0.4",output_microdollars_per_token:"1.6"}};
  const mock=async(provider:string,prompt:string):Promise<Completion>=>{
   calls++;assert.equal(provider,"openai");assert(prompt.includes(sourceText));
-  return {text:prompt.startsWith("You are Critic.")?"Unsupported claims: none\nEvidence needed: none for quoted statements\nProposed advice: review the source":sourceText,input:10,output:10,outcome:"complete",report:{model:"isolated-loop",serviceTier:"default",requestId:"isolated-"+calls,finishReason:"stop"}};
+  return {text:prompt.startsWith("You are Critic.")?"Unsupported claims: none\nEvidence needed: none for quoted statements\nProposed advice: review the source":prompt.startsWith("You are Platform Adapter.")?variantFixture(sourceText):sourceText,input:10,output:10,outcome:"complete",report:{model:"isolated-loop",serviceTier:"default",requestId:"isolated-"+calls,finishReason:"stop"}};
  };
  try{
   let store=new Store(db);const intake=new SourceIntake(db);const staged=await intake.stage({text:sourceText,category:"build-log",reported_date:now.toISOString().slice(0,10)});

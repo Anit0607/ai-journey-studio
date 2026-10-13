@@ -1,3 +1,4 @@
+import {variantFixture} from "./variant-fixture";
 import {assertSchemaParity} from "./schema-parity";
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -124,7 +125,7 @@ test("bounded transient fallback retains uncertain primary reservation",()=>fixt
 }));
 test("six single steps persist outputs; approval invalidation and duplicates",()=>fixture(async s=>{
   const task=await queued(s);
-  for(let i=0;i<6;i++)assert.equal((await step(s,c,async()=>complete(i===5?"Unsupported claims: none\nEvidence needed: concrete project note\nProposed advice: review drafts":"isolated fixture "+i),true)).status,"step_saved");
+  for(let i=0;i<6;i++)assert.equal((await step(s,c,async()=>complete(i===5?"Unsupported claims: none\nEvidence needed: concrete project note\nProposed advice: review drafts":i===4?variantFixture():"isolated fixture "+i),true)).status,"step_saved");
   let state=await s.snapshot();assert.equal(state.tasks[0].status,"review");assert.equal(state.outputs.length,6);
   await assert.rejects(s.approve(task.id,"bad-version"));
   const outputs=[...state.outputs].sort((a,b)=>new Date(a.created).getTime()-new Date(b.created).getTime()||String(a.id).localeCompare(String(b.id)));
