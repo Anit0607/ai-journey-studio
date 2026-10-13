@@ -4,3 +4,9 @@ data/
 __pycache__/
 *.pyc
 runtime-config.json
+node_modules/
+.next/
+coverage/
+test-results/
+playwright-report/
+*.tsbuildinfo

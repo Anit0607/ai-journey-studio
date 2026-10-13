@@ -100,5 +100,16 @@ class SafetyTests(unittest.TestCase):
             studio.run_one(self.store);self.assertEqual(call.call_count,3)
         s=self.store.snapshot()
         self.assertEqual([r["status"] for r in s["ledger"]],["unknown","settled","unknown"])
+    def test_decimal_prices_round_up_total(self):
+        p={"input_microdollars_per_token":"0.40","output_microdollars_per_token":"1.60"}
+        self.assertEqual(studio.token_cost(p,3,2),5)
+    def test_key_prompt_requires_authorization(self):
+        with patch("studio.config",return_value={}),patch("studio.getpass.getpass") as prompt:
+            with self.assertRaises(ValueError):studio.prompt_keys()
+            prompt.assert_not_called()
+    def test_key_prompt_rejects_redirection(self):
+        with patch("studio.config",return_value={"credential_use_authorized":True}),patch("studio.sys.stdin.isatty",return_value=False),patch("studio.getpass.getpass") as prompt:
+            with self.assertRaises(ValueError):studio.prompt_keys()
+            prompt.assert_not_called()
 
 if __name__=="__main__": unittest.main()

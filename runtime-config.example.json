@@ -1,0 +1,35 @@
+{
+  "owner_cleared_sources_authorized": false,
+  "source_approved": false,
+  "approved_source_hash": "REQUIRES_EXACT_NOTE_APPROVAL",
+  "transmission_authorized": false,
+  "credential_use_authorized": false,
+  "security_tests_passed": false,
+  "pricing_verified_date": "REVERIFY_ON_RUN_DAY",
+  "fallback_authorized": false,
+  "openai": {
+    "model": "gpt-4.1-mini-2025-04-14",
+    "pricing_tier": "standard",
+    "pricing_version": "official-docs-2026-10-10-proposed",
+    "official_pricing_url": "https://developers.openai.com/api/docs/models/gpt-4.1-mini",
+    "input_microdollars_per_token": "0.40",
+    "output_microdollars_per_token": "1.60"
+  },
+  "gemini": {
+    "model": "gemini-3.5-flash-lite",
+    "pricing_tier": "standard",
+    "pricing_version": "official-docs-2026-10-10-proposed",
+    "official_pricing_url": "https://ai.google.dev/gemini-api/docs/pricing",
+    "input_microdollars_per_token": "0.30",
+    "output_microdollars_per_token": "2.50"
+  },
+  "pricing_window_authorized": false,
+  "pricing_valid_until": "REQUIRES_EXPLICIT_BOUNDED_REVIEW_APPROVAL",
+  "hosted": {
+    "enabled": false,
+    "persistent_key_authorized": false,
+    "owner_auth_authorized": false,
+    "cron_authorized": false,
+    "fluid_compute_verified": false
+  }
+}

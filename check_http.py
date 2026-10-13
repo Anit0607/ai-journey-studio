@@ -20,6 +20,10 @@ try:
     try:
         urllib.request.urlopen(req);raise AssertionError("Missing Origin accepted")
     except urllib.error.HTTPError as e: assert e.code==403
+    req=urllib.request.Request("http://127.0.0.1:8766/api/source",data=json.dumps({"text":"unapproved","category":"user-reported-notes","reported_date":"2026-10-09"}).encode(),headers={"Authorization":"Bearer "+token,"Content-Type":"application/json","Origin":"http://127.0.0.1:8766"})
+    try:
+        urllib.request.urlopen(req);raise AssertionError("Unapproved source accepted")
+    except urllib.error.HTTPError as e: assert e.code==400
     print("PASS: dashboard HTTP, empty actual state, authorization, cross-origin mutation rejection")
 finally:
     p.terminate();p.wait(timeout=10)

@@ -1,0 +1,36 @@
+{
+  "name": "ai-journey-studio",
+  "private": true,
+  "type": "module",
+  "version": "0.1.0",
+  "scripts": {
+    "dev": "tsx scripts/local.ts dev",
+    "start": "tsx scripts/local.ts start",
+    "build": "next build",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint .",
+    "test": "tsx --test tests/*.test.ts",
+    "qa": "tsx scripts/browser-qa.ts",
+    "qa:bootstrap": "tsx scripts/bootstrap-qa.ts",
+    "worker": "tsx scripts/worker.ts",
+    "migrate": "tsx scripts/migrate.ts"
+  },
+  "dependencies": {
+    "@electric-sql/pglite": "0.5.8",
+    "next": "16.4.0",
+    "pg": "8.23.1",
+    "react": "19.3.0",
+    "react-dom": "19.3.0"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.64.0",
+    "@types/node": "26.6.5",
+    "@types/pg": "8.23.1",
+    "@types/react": "19.3.0",
+    "@types/react-dom": "19.3.0",
+    "eslint": "9.39.5",
+    "eslint-config-next": "16.4.0",
+    "tsx": "4.23.15",
+    "typescript": "6.0.3"
+  }
+}
