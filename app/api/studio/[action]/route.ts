@@ -7,7 +7,7 @@ import {liveReady} from "../../../../lib/providers";
 import {step} from "../../../../lib/workflow";
 import {SourceIntake,sourceAuthorized} from "../../../../lib/sources";
 import {queueAgentRevision} from "../../../../lib/agent-revisions";
-import {ownerRequestReady} from "../../../../lib/hosted-http";
+import {ownerApiAuthenticated} from "../../../../lib/owner-password";
 import {hostedEnvironment,hostedBlockers,hostedCronReady} from "../../../../lib/hosted";
 import {Calendar} from "../../../../lib/calendar";
 export const runtime="nodejs",dynamic="force-dynamic",maxDuration=180;
@@ -19,7 +19,7 @@ async function readBody(request:Request,limit=4096){
 }
 type Context={params:Promise<{action:string}>};
 export async function GET(request:Request,context:Context){
-  if(!ownerRequestReady(request,runtimeConfig()))return response({error:"Private access required"},401);
+  if(!await ownerApiAuthenticated(request))return response({error:"Private access required"},401);
   const {action}=await context.params;
   if(action!=="state")return response({error:"Unknown route"},404);
   try{
@@ -40,7 +40,7 @@ export async function GET(request:Request,context:Context){
   }catch{return response({error:"Relational database unavailable. Configure an approved PostgreSQL connection or use the laptop-only embedded option."},503);}
 }
 export async function POST(request:Request,context:Context){
-  if(!ownerRequestReady(request,runtimeConfig()))return response({error:"Private access required"},401);
+  if(!await ownerApiAuthenticated(request))return response({error:"Private access required"},401);
   if(!allowedOrigin(request))return response({error:"Origin rejected"},403);
   const {action}=await context.params;
   if(!["source-stage","source-clear","source-revoke","agent-revise","calendar-dispatch","source","run","approve","cancel","retry","step","request-changes","revise","approve-revision","calendar-configure","calendar-plan","calendar-link","calendar-prepare"].includes(action))return response({error:"Unknown action"},404);

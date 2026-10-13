@@ -6,19 +6,19 @@ import SourcePanel from "./source-panel";
 type State=Record<string,any>;
 const money=(value:number)=>"$"+(value/1_000_000).toFixed(4);
 export default function Page(){
-  const [token,setToken]=useState(""),[state,setState]=useState<State|null>(null),[input,setInput]=useState(""),[busy,setBusy]=useState(false),[error,setError]=useState(""),[status,setStatus]=useState("Disconnected"),[tab,setTab]=useState("Overview");
+  const [signedIn,setSignedIn]=useState(false),[authInfo,setAuthInfo]=useState<State|null>(null),[state,setState]=useState<State|null>(null),[input,setInput]=useState(""),[busy,setBusy]=useState(false),[error,setError]=useState(""),[status,setStatus]=useState("Disconnected"),[tab,setTab]=useState("Overview");
   const inFlight=useRef(false),session=useRef(0);
-  async function request(path:string,body?:unknown,access=token){
-    const response=await fetch("/api/studio/"+path,{method:body?"POST":"GET",headers:{"Authorization":"Bearer "+access,"Content-Type":"application/json"},body:body?JSON.stringify(body):undefined,signal:AbortSignal.timeout(10_000)});
-    const data=await response.json();if(!response.ok)throw Error(data.error||"Request failed");return data;
+  async function request(path:string,body?:unknown){
+    const response=await fetch("/api/studio/"+path,{method:body?"POST":"GET",credentials:"same-origin",headers:{"Content-Type":"application/json"},body:body?JSON.stringify(body):undefined,signal:AbortSignal.timeout(10_000)});
+    const data=await response.json();if(!response.ok){if(response.status===401){setSignedIn(false);setState(null);}throw Error(data.error||"Request failed");}return data;
   }
-  async function refresh(access=token){
+  async function refresh(){
     if(inFlight.current)return;inFlight.current=true;setBusy(true);setStatus("Loading actual workspace");
     const currentSession=session.current;
-    try{const next=await request("state",undefined,access);if(currentSession!==session.current)return;setState(next);setError("");setStatus("Connected");}
+    try{const next=await request("state");if(currentSession!==session.current)return;setState(next);setError("");setStatus("Connected");}
     catch(e){if(currentSession===session.current){setError(e instanceof Error?e.message:"Connection failed");setStatus("Connection failed · previous state may be stale");}}finally{setBusy(false);inFlight.current=false;}
   }
-  useEffect(()=>{if(!token)return;const timer=setInterval(()=>{void refresh();},5000);return ()=>clearInterval(timer);},[token]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(()=>{if(!signedIn)return;const timer=setInterval(()=>{void refresh();},5000);return ()=>clearInterval(timer);},[signedIn]); // eslint-disable-line react-hooks/exhaustive-deps
   async function sourceAction(path:string,body:unknown):Promise<boolean>{
     if(inFlight.current)return false;
     inFlight.current=true;setBusy(true);setError("");
@@ -42,7 +42,9 @@ export default function Page(){
     const version=Array.from(new Uint8Array(bytes)).map(b=>b.toString(16).padStart(2,"0")).join("");
     await action("approve",{task,version});
   }
-  function disconnect(){session.current+=1;setToken("");setInput("");setState(null);setError("");setStatus("Disconnected");}
+    async function login(){let loggedIn=false;const password=input;setInput("");setBusy(true);setError("");try{const result=await fetch("/api/auth/login",{method:"POST",credentials:"same-origin",headers:{"Content-Type":"application/json"},body:JSON.stringify({password})});const data=await result.json();if(!result.ok)throw Error(data.error||"Sign-in failed");setSignedIn(true);loggedIn=true;}catch(e){setError(e instanceof Error?e.message:"Sign-in failed");}finally{setBusy(false);}if(loggedIn)await refresh();}
+  async function disconnect(){session.current+=1;setSignedIn(false);setInput("");setState(null);setStatus("Signed out");try{const result=await fetch("/api/auth/logout",{method:"POST",credentials:"same-origin",headers:{"Content-Type":"application/json"},body:"{}"});if(!result.ok)throw Error("Server sign-out failed. Retry before leaving this device.");setError("");}catch(e){setError(e instanceof Error?e.message:"Sign-out failed");}}
+  useEffect(()=>{void(async()=>{try{const result=await fetch("/api/auth/status",{credentials:"same-origin",cache:"no-store"});const info=await result.json();setAuthInfo(info);if(info.authenticated){setSignedIn(true);void refresh();}}catch{setAuthInfo({setup_required:true});}})();},[]); // eslint-disable-line react-hooks/exhaustive-deps
   const tasks:State[]=state?.tasks||[],outputs:State[]=state?.outputs||[];
   const contentTasks=tasks.filter(task=>!task.revision_parent_task_id);
   return <main>
@@ -50,7 +52,7 @@ export default function Page(){
     <div className="content"><header><div><span className="eyebrow">YOUR LEARNING JOURNEY</span><h1>{tab}</h1></div><span className="pill">Publishing disabled</span></header>
     <div role="status" aria-live="polite" className="connection">{status}{state&&" · Last refreshed "+new Date(state.updated).toLocaleTimeString()}</div>
     {error&&<div role="alert" className="alert">{error}</div>}
-    {!state?<section className="login"><span className="eyebrow">OWNER ACCESS</span><h2>A private space for real work.</h2><p>Sign in with this local session’s access token. Sources, agent outputs and usage are protected until authentication succeeds.</p><label htmlFor="access">Session access token</label><input id="access" type="password" autoComplete="off" value={input} onChange={e=>setInput(e.target.value)}/><button className="primary" disabled={busy||!input} onClick={()=>{setToken(input);void refresh(input);setInput("");}}>{busy?"Connecting…":"Unlock studio"}</button><small>This local build has no remote deployment. Provider credentials never belong here.</small></section>:<>
+    {!state?<section className="login"><span className="eyebrow">OWNER ACCESS</span><h2>Your private studio.</h2><p>{authInfo?.mode==="hosted"?"Private hosted workspace.":"Private workspace."} Sign in with the owner password you set once. Sources, outputs and usage require authentication.</p><label htmlFor="access">Owner password</label><input id="access" type="password" autoComplete="current-password" maxLength={128} value={input} onChange={e=>setInput(e.target.value)}/><button className="primary" disabled={busy||!input||!authInfo||authInfo.setup_required===true} onClick={()=>void login()}>{busy?"Signing in.":"Sign in"}</button>{(!authInfo||authInfo.setup_required)&&<p role="status">{authInfo?"Password setup is required. An approved database and securely provisioned owner account are needed. Public registration is disabled.":"Checking password setup."}</p>}<small>Use your ten-digit password or longer passphrase. Do not send it in chat. Provider credentials never belong here.</small></section>:<>
     <div className="toolbar"><span className="pill blocked">{state.live_enabled?"Execution enabled":"Live execution blocked"}</span><button onClick={()=>void refresh()} disabled={busy}>Refresh</button><button onClick={disconnect}>Sign out</button></div>
     {(tab==="Overview"||tab==="Usage")&&<>
       <div className="metrics"><section><small>COMMITTED ESTIMATE + RESERVATIONS</small><strong>{money(state.budget.committed_microdollars)}</strong><p>Reported tokens · not invoices</p></section><section><small>COMBINED MONTHLY MAXIMUM</small><strong>$15.00</strong><p>$1 buffer inside the cap</p></section><section><small>REVIEW INBOX</small><strong>{contentTasks.filter(t=>t.status==="review").length}</strong><p>Exact versions await your approval</p></section></div>
