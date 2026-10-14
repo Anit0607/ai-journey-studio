@@ -1,3 +1,4 @@
+import {variantFixture} from "./variant-fixture";
 import test from "node:test";
 import assert from "node:assert/strict";
 import {randomUUID} from "node:crypto";
@@ -16,13 +17,13 @@ const pricing:Pricing={model:"isolated-revision-fixture",pricing_version:"fixtur
 const config:RuntimeConfig={owner_cleared_sources_authorized:true,source_approved:true,approved_source_hash:hash(CAPSULE),transmission_authorized:true,credential_use_authorized:true,security_tests_passed:true,pricing_verified_date:new Date().toISOString().slice(0,10),openai:pricing};
 const feedback="Use only supported facts and shorten the proposed approach.";
 const critique="Unsupported claims: none\nEvidence needed: a concrete cleared project note\nProposed advice: review each draft before use";
-const completed=(prompt:string):Completion=>({text:prompt.startsWith("You are Critic.")?critique:"I learn by doing.\nProposed approach: check a draft against the cleared source.",input:10,output:10,outcome:"complete",report:{serviceTier:"default",model:pricing.model,requestId:"isolated-mock",finishReason:"stop"}});
+const completed=(prompt:string):Completion=>({text:prompt.startsWith("You are Critic.")?critique:prompt.startsWith("You are Platform Adapter.")?variantFixture():"I learn by doing.\nProposed approach: check a draft against the cleared source.",input:10,output:10,outcome:"complete",report:{serviceTier:"default",model:pricing.model,requestId:"isolated-mock",finishReason:"stop"}});
 async function fixture(work:(store:Store,parent:Task,token:string)=>Promise<void>,approveOriginal=true){
   // A new, ephemeral in-memory SQL engine per test. No environment DB or provider is used.
   const db=await embedded();
   try{
     const store=new Store(db),source=await store.source(CAPSULE,"user-reported-notes","2026-10-09",true),parent=await store.enqueue(source.id);
-    for(const role of ROLES){const text=role==="Critic"?critique:"Proposed approach: inspect one source.";await db.query("INSERT INTO outputs(id,task_id,role,text,hash) VALUES($1,$2,$3,$4,$5)",[randomUUID(),parent.id,role,text,hash(text)]);}
+    for(const role of ROLES){const text=role==="Critic"?critique:role==="Platform Adapter"?variantFixture():"Proposed approach: inspect one source.";await db.query("INSERT INTO outputs(id,task_id,role,text,hash) VALUES($1,$2,$3,$4,$5)",[randomUUID(),parent.id,role,text,hash(text)]);}
     await db.query("UPDATE tasks SET status='review',checkpoint=6 WHERE id=$1",[parent.id]);
     const initial=await store.snapshot();
     if(approveOriginal)await store.approve(parent.id,initial.reviews[0].token.slice("original:".length));
@@ -154,11 +155,11 @@ test("revision preserves the parent's immutable calendar content brief",()=>fixt
 
 test("owner-cleared new source can queue and complete without legacy capsule consent",()=>fixture(async(store)=>{
   const intake=new SourceIntake(store.db),staged=await intake.stage({text:"I built a test agent on 10 October 2026.",category:"build-log",reported_date:"2026-10-10"}),source=await intake.clear(staged.id,staged.hash,true),parent=await store.enqueue(source.id);
-  for(const role of ROLES){const text=role==="Critic"?critique:source.text;await store.db.query("INSERT INTO outputs(id,task_id,role,text,hash) VALUES($1,$2,$3,$4,$5)",[randomUUID(),parent.id,role,text,hash(text)]);}
+  for(const role of ROLES){const text=role==="Critic"?critique:role==="Platform Adapter"?variantFixture():source.text;await store.db.query("INSERT INTO outputs(id,task_id,role,text,hash) VALUES($1,$2,$3,$4,$5)",[randomUUID(),parent.id,role,text,hash(text)]);}
   await store.db.query("UPDATE tasks SET status='review',checkpoint=6 WHERE id=$1",[parent.id]);
   const initial=(await store.snapshot()).reviews.find((review:any)=>review.task_id===parent.id),newConfig={...config,source_approved:false,approved_source_hash:undefined,transmission_authorized:false};
   const child=await queueAgentRevision(store,newConfig,parent.id,initial.token,feedback);let calls=0;
-  for(let index=0;index<6;index++)await step(store,newConfig,async(provider,prompt)=>{calls++;assert.equal(provider,"openai");assert(prompt.includes(source.text));return {...completed(prompt),text:prompt.startsWith("You are Critic.")?critique:source.text};},true);
+  for(let index=0;index<6;index++)await step(store,newConfig,async(provider,prompt)=>{calls++;assert.equal(provider,"openai");assert(prompt.includes(source.text));return {...completed(prompt),text:prompt.startsWith("You are Critic.")?critique:prompt.startsWith("You are Platform Adapter.")?variantFixture():source.text};},true);
   const state=await store.snapshot(),review=state.reviews.find((item:any)=>item.task_id===parent.id);assert.equal(calls,6);assert.equal(review.history[0].agent_task_id,child.id);assert.equal(review.approval,null);assert.equal(review.quality.flags.length,0);
   await store.approveRevision(parent.id,review.token,true);
 }));

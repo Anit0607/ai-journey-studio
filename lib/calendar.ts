@@ -1,3 +1,4 @@
+import {platformVariants} from "./platform-variants";
 import {randomUUID} from "node:crypto";
 import type {Database} from "./db";
 import {CAPSULE,CAP,BUFFER,configReady,istMonth,tokenCost,type RuntimeConfig,type Source,type Task} from "./domain";
@@ -176,10 +177,11 @@ export class Calendar{
       if(linkageReason)blockers.push(linkageReason);
       const due=!!entry.generation_due&&new Date(entry.generation_due)<=now;
       const content=review?.bundle.find((item:any)=>item.role==="Platform Adapter");
-      const variants=PLATFORMS.map(platform=>({platform,...(entry.platform_schedule[platform]||{intended_post:entry.intended_post,draft_due:entry.draft_due,review_due:entry.review_due}),status:content?(content.text.includes(platform)?review?.approval?"user_approved_quality_separate":"review_needed":"not_separately_identified"):"not_generated",artifact_hash:content?.hash||null}));
+      const parsed=platformVariants(content);
+      const variants=PLATFORMS.map(platform=>{const variant=parsed.variants.find(item=>item.platform===platform)!;return {platform,...(entry.platform_schedule[platform]||{intended_post:entry.intended_post,draft_due:entry.draft_due,review_due:entry.review_due}),status:content?(variant.hash?review?.approval&&parsed.complete?"user_approved_quality_separate":"review_needed":"not_separately_identified"):"not_generated",artifact_hash:variant.hash,source_artifact_hash:content?.hash||null};});
       const generationLate=!!entry.generation_due&&(job?.dispatched_at?new Date(job.dispatched_at)>new Date(entry.generation_due):!task&&new Date(entry.generation_due)<now);
       const timingNotice=generationLate?(job?.dispatched_at?"Queued after the target generation time; the review deadline is unchanged":"Target generation time has passed. Catch-up is allowed only while the review deadline remains in the future"):null;
-      return {...entry,job,generation_late:generationLate,timing_notice:timingNotice,status:reviewReady&&review?.quality.flags.length?"changes_needed":review?.approval?"user_approved_quality_separate":task?.status==="review"?"review_needed":task?task.status:due?blockers.length?"due_blocked":"due_ready":blockers.length?"planned_blocked":"planned_ready",blocked_reasons:blockers,variants,linked_task_status:task?.status||null,linked_content_version:review?.token||null};
+      return {...entry,job,generation_late:generationLate,timing_notice:timingNotice,status:review?.approval&&!parsed.complete?"historical_approval_completeness_unverified":reviewReady&&review?.quality.flags.length?"changes_needed":review?.approval?"user_approved_quality_separate":review?.latest_revision?"review_needed":task?.status==="review"?"review_needed":task?task.status:due?blockers.length?"due_blocked":"due_ready":blockers.length?"planned_blocked":"planned_ready",blocked_reasons:blockers,variants,linked_task_status:task?.status||null,linked_content_version:review?.token||null};
     })};
   }
 }

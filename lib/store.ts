@@ -1,3 +1,6 @@
+import {usageSummary} from "./usage";
+import {OwnerReports} from "./owner-reports";
+import {platformVariants} from "./platform-variants";
 import {randomUUID} from "node:crypto";
 import type {Connection,Database} from "./db";
 import {CAP,BUFFER,WARNING,ROLES,hash,istMonth,sourceAllowed,type Pricing,type Source,type Task,type Output} from "./domain";
@@ -41,9 +44,9 @@ export class Store{
       const history=revisions.filter((revision:any)=>revision.task_id===task.id),latest:any=history.at(-1);
       const bundle=latest?.bundle||data.outputs.filter((output:Output)=>output.task_id===task.id);
       const source=data.sources.find((item:Source)=>item.id===task.source_id);
-      return {task_id:task.id,is_agent_revision:false,pending_agent_revision:data.tasks.find((child:Task)=>child.revision_parent_task_id===task.id&&["queued","running","blocked"].includes(child.status))||null,agent_revision_jobs:data.tasks.filter((child:Task)=>child.revision_parent_task_id===task.id),token:latest?"revision:"+latest.id+":"+latest.version:"original:"+hash(bundle.map((item:Artifact)=>item.hash).join("|")),latest_revision:latest?.id||null,original_bundle:data.outputs.filter((output:Output)=>output.task_id===task.id),original_approval:data.approvals.find((item:any)=>item.task_id===task.id)||null,bundle,quality:bundleQuality(bundle,source?.text||""),approval:latest?revisionApprovals.find((item:any)=>item.revision_id===latest.id)||null:data.approvals.find((item:any)=>item.task_id===task.id)||null,history:history.map((item:any)=>({...item,approval:revisionApprovals.find((approval:any)=>approval.revision_id===item.id)||null}))};
+      return {variants:platformVariants(bundle.find((item:Artifact)=>item.role==="Platform Adapter")),task_id:task.id,is_agent_revision:false,pending_agent_revision:data.tasks.find((child:Task)=>child.revision_parent_task_id===task.id&&["queued","running","blocked"].includes(child.status))||null,agent_revision_jobs:data.tasks.filter((child:Task)=>child.revision_parent_task_id===task.id),token:latest?"revision:"+latest.id+":"+latest.version:"original:"+hash(bundle.map((item:Artifact)=>item.hash).join("|")),latest_revision:latest?.id||null,original_bundle:data.outputs.filter((output:Output)=>output.task_id===task.id),original_approval:data.approvals.find((item:any)=>item.task_id===task.id)||null,bundle,quality:bundleQuality(bundle,source?.text||""),approval:latest?revisionApprovals.find((item:any)=>item.revision_id===latest.id)||null:data.approvals.find((item:any)=>item.task_id===task.id)||null,history:history.map((item:any)=>({...item,approval:revisionApprovals.find((approval:any)=>approval.revision_id===item.id)||null}))};
     });
-    return {...data,reviews,workers,database:this.db.kind,analyst:{status:"insufficient-data",reason:"No real platform metrics imported"},
+    return {...data,reviews,workers,database:this.db.kind,usage:usageSummary(data.ledger,month),analyst:await new OwnerReports(this.db).snapshot(data.ledger),
       budget:{month_IST:month,committed_microdollars:used,warning:used>=WARNING,cap_microdollars:CAP,buffer_microdollars:BUFFER,unresolved_reservations:unresolved,basis:"Reported token estimates and unresolved reservations; not invoices"},
       pricing_blocked:data.ledger.some((r:any)=>r.pricing_anomaly&&r.status!=="settled"),
       updated:new Date().toISOString()};
@@ -69,7 +72,7 @@ export class Store{
     if(!Number.isSafeInteger(upper)||upper<=0)throw Error("Invalid reservation");
     return this.db.transaction(async tx=>{
       const current=(await tx.query<Task>("SELECT * FROM tasks WHERE id=$1 FOR UPDATE",[task.id]))[0];
-      if(current.status!=="running"||current.lease_token!==task.lease_token)throw Error("Cancelled or stale lease");
+      if(!current||current.status!=="running"||current.lease_token!==task.lease_token||current.checkpoint!==task.checkpoint||!ROLES[current.checkpoint])throw Error("Cancelled or stale lease");
       const source=(await tx.query<Source>("SELECT * FROM sources WHERE id=$1 FOR UPDATE",[current.source_id]))[0];
       if(!source?.cleared||source.hash!==current.source_hash||!sourceEligible(source))throw Error("Source invalidated");
       // Include unresolved prior-month calls: completion/billing date can cross the IST boundary.
@@ -81,7 +84,7 @@ export class Store{
       const rows=await tx.query<{used:string}>("SELECT COALESCE(SUM(CASE WHEN status='settled' THEN estimated ELSE reserved END),0) AS used FROM ledger WHERE month=$1 OR status IN ('reserved','unknown')",[month]);
       if(Number(rows[0].used)+upper>CAP-BUFFER)throw Error("Monthly cap including internal buffer reached");
       const id=randomUUID();
-      await tx.query("INSERT INTO ledger(id,task_id,month,provider,model,pricing,reserved,status,requested_service_tier) VALUES($1,$2,$3,$4,$5,$6,$7,'reserved',$8)",[id,task.id,month,provider,p.model,JSON.stringify(p),upper,provider==="openai"?"default":"standard"]);
+      await tx.query("INSERT INTO ledger(id,task_id,month,provider,model,pricing,reserved,status,requested_service_tier,role,checkpoint) VALUES($1,$2,$3,$4,$5,$6,$7,'reserved',$8,$9,$10)",[id,task.id,month,provider,p.model,JSON.stringify(p),upper,provider==="openai"?"default":"standard",ROLES[current.checkpoint],current.checkpoint]);
       await this.event(tx,task.id,"provider_started",provider+" / checkpoint "+task.checkpoint);
       return id;
     });

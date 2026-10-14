@@ -50,3 +50,7 @@ Browser QA uses a project-scoped Playwright headless browser and an isolated emp
 The earlier Python/SQLite slice and its tests remain as reference evidence, while npm scripts and app/lib are the primary implementation. See QA.md and ARCHITECTURE.md for precise integration limits.
 
 Blueprint materialization remains blocked: the supported Library helper requires os.setxattr, unavailable on Windows. Implementation follows the delegated approved brief with the live-only override.
+
+## Actual activity and owner-entered results
+
+[Studio reporting](STUDIO_REPORTING.md) documents immutable per-agent accounting, exact platform variants, cumulative post observations, and separate USD/INR attributable financial records. Reports start empty, require explicit provenance/coverage, never enable model calls, and make no automatic revenue attribution or currency conversion.

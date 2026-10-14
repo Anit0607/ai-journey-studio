@@ -1,3 +1,4 @@
+import {platformVariants} from "./platform-variants";
 import {CAPSULE,ROLES,hash} from "./domain";
 export type Artifact={role:string;text:string;hash:string};
 export const SUPPORTED_SENTENCES=["I am a non-coder","I build and direct AI agents","I retain final approval","I use Codex and agents for implementation","I learn by doing","I want to share practical agent-building methods and honest lessons"];
@@ -9,6 +10,8 @@ export function groundingRules(source:string){
 export function bundleQuality(bundle:Artifact[],source:string){
   const flags:{role:string;claim:string;reason:string}[]=[];
   if(!source.trim())flags.push({role:"Source",claim:"Source missing",reason:"Exact cleared evidence required"});
+  const adapter=bundle.find(item=>item.role==="Platform Adapter");
+  if(adapter){const variants=platformVariants(adapter);if(!variants.complete)flags.push({role:"Platform Adapter",claim:"Incomplete platform variants",reason:variants.reason||"Separate platform drafts required"});}
   for(const artifact of bundle.filter(item=>item.role!=="Critic")){
     for(const line of artifact.text.replace(/\*\*/g,"").split(/(?<=[.!?])\s+|\n/).filter(Boolean)){
       const personal=/\b(?:I\b|I[’'](?:ve|m)|my\b|Anit\b|he\s+(?:found|discovered|learned|shares))/i.test(line);
