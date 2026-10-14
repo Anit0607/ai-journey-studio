@@ -10,7 +10,7 @@ const scheduled=sessionOnly&&process.argv.includes("--scheduled");
 const token=randomBytes(32).toString("base64url");
 const port=process.env.PORT||"3000",origin="http://127.0.0.1:"+port;
 console.log("Laptop-only web view: "+origin);
-console.log("Temporary local owner access token: "+token);
+console.log("Owner login: use the password you set once. The local worker credential stays in this process.");
 const child=spawn(process.execPath,[path.resolve("node_modules/next/dist/bin/next"),mode,"--hostname","127.0.0.1","--port",port],{stdio:"inherit",env:{...process.env,NEXT_TELEMETRY_DISABLED:"1",STUDIO_ACCESS_TOKEN:token,STUDIO_ORIGIN:origin,STUDIO_SESSION_ONLY:sessionOnly?"1":"0",STUDIO_LOCAL_DB:process.env.STUDIO_DATABASE_AUTHORIZED==="1"?"0":"1"}});
 let worker:ChildProcess|undefined;
 child.on("exit",code=>{worker?.kill();process.exit(code??1);});

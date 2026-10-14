@@ -5,7 +5,7 @@ import type {RuntimeConfig} from "../lib/domain";
 import type {HostedEnvironment} from "../lib/hosted";
 import type {Database} from "../lib/db";
 const owner="isolated-owner-"+"a".repeat(32),cron="isolated-cron-"+"b".repeat(32);
-const environment=():HostedEnvironment=>({VERCEL:"1",VERCEL_ENV:"production",STUDIO_HOSTED_ENABLED:"1",STUDIO_DATABASE_AUTHORIZED:"1",DATABASE_URL:"postgresql://fixture.invalid/studio",STUDIO_ORIGIN:"https://studio.example.test",STUDIO_ACCESS_TOKEN:owner,CRON_SECRET:cron,OPENAI_API_KEY:"isolated-provider-fixture"});
+const environment=():HostedEnvironment=>({VERCEL:"1",VERCEL_ENV:"production",STUDIO_HOSTED_ENABLED:"1",STUDIO_DATABASE_AUTHORIZED:"1",DATABASE_URL:"postgresql://fixture.invalid/studio",STUDIO_ORIGIN:"https://studio.example.test",STUDIO_ACCESS_TOKEN:owner,STUDIO_AUTH_SECRET:"isolated-auth-secret-"+"z".repeat(32),CRON_SECRET:cron,OPENAI_API_KEY:"isolated-provider-fixture"});
 const config=():RuntimeConfig=>({owner_cleared_sources_authorized:true,credential_use_authorized:true,security_tests_passed:true,pricing_verified_date:new Date().toISOString().slice(0,10),fallback_authorized:false,openai:{model:"isolated-model",pricing_version:"test",pricing_tier:"standard",official_pricing_url:"https://example.test/pricing",input_microdollars_per_token:"0.40",output_microdollars_per_token:"1.60"},hosted:{enabled:true,persistent_key_authorized:true,owner_auth_authorized:true,cron_authorized:true,fluid_compute_verified:true}});
 const request=(token:string|undefined=cron,url="https://studio.example.test/api/cron",method="GET")=>new Request(url,{method,headers:token?{authorization:"Bearer "+token}:{}});
 
@@ -35,11 +35,11 @@ test("cron database failures return static secret-free errors",async()=>{
 });
 test("hosted owner reads require separate owner permission and exact origin but not provider readiness",()=>{
   const env=environment(),c=config(),input=request(owner,"https://studio.example.test/api/studio/state");
-  assert.equal(ownerRequestReady(input,c,env),true);
+  assert.equal(ownerRequestReady(input,c,env),false);
   assert.equal(ownerRequestReady(request(cron),c,env),false);
   assert.equal(ownerRequestReady(input,{...c,hosted:{...c.hosted,owner_auth_authorized:false}},env),false);
   assert.equal(ownerRequestReady(input,c,{...env,VERCEL_ENV:"preview"}),false);
   assert.equal(ownerRequestReady(request(owner,"https://other.example.test/api/studio/state"),c,env),false);
-  assert.equal(ownerRequestReady(input,{...c,pricing_verified_date:"2000-01-01",hosted:{...c.hosted,persistent_key_authorized:false,cron_authorized:false}},{...env,OPENAI_API_KEY:undefined}),true);
+  assert.equal(ownerRequestReady(input,{...c,pricing_verified_date:"2000-01-01",hosted:{...c.hosted,persistent_key_authorized:false,cron_authorized:false}},{...env,OPENAI_API_KEY:undefined}),false);
   assert.equal(ownerRequestReady(request(owner,"http://127.0.0.1:3000/api/studio/state"),{},{STUDIO_ACCESS_TOKEN:owner}),true);
 });

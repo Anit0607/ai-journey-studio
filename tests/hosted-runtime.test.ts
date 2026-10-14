@@ -9,7 +9,7 @@ const fixture=():RuntimeConfig=>({owner_cleared_sources_authorized:true,credenti
   hosted:{enabled:true,persistent_key_authorized:true,owner_auth_authorized:true,cron_authorized:true,fluid_compute_verified:true}});
 // All values are isolated fixtures. These tests neither inspect process.env nor
 // connect to a database, call a provider, provision credentials, or deploy.
-const environment=():HostedEnvironment=>({VERCEL:"1",VERCEL_ENV:"production",STUDIO_HOSTED_ENABLED:"1",STUDIO_DATABASE_AUTHORIZED:"1",DATABASE_URL:"postgresql://fixture.invalid/studio",STUDIO_ORIGIN:"https://studio.example.test",STUDIO_ACCESS_TOKEN:"isolated-owner-token-"+"a".repeat(32),CRON_SECRET:"isolated-cron-token-"+"b".repeat(32),OPENAI_API_KEY:"isolated-nonfunctional-provider-fixture"});
+const environment=():HostedEnvironment=>({VERCEL:"1",VERCEL_ENV:"production",STUDIO_HOSTED_ENABLED:"1",STUDIO_DATABASE_AUTHORIZED:"1",DATABASE_URL:"postgresql://fixture.invalid/studio",STUDIO_ORIGIN:"https://studio.example.test",STUDIO_AUTH_SECRET:"isolated-owner-token-"+"a".repeat(32),CRON_SECRET:"isolated-cron-token-"+"b".repeat(32),OPENAI_API_KEY:"isolated-nonfunctional-provider-fixture"});
 
 test("hosted runtime is disabled by default and cannot inherit local session authorization",()=>{
   const env=environment(),config=fixture();
@@ -92,13 +92,13 @@ test("network PostgreSQL must be explicitly authorized and embedded or socket pa
 test("hosted owner and cron credentials must be strong and distinct",()=>{
   const config=fixture(),env=environment();
   for(const value of [undefined,"","x".repeat(31)," ".repeat(32),"x".repeat(32)+"\n"]){
-    assert.equal(hostedOwnerReady(config,{...env,STUDIO_ACCESS_TOKEN:value}),false);
-    assert.equal(hostedReady(config,{...env,STUDIO_ACCESS_TOKEN:value}),false);
+    assert.equal(hostedOwnerReady(config,{...env,STUDIO_AUTH_SECRET:value}),false);
+    assert.equal(hostedReady(config,{...env,STUDIO_AUTH_SECRET:value}),false);
     assert.equal(hostedReady(config,{...env,CRON_SECRET:value}),false);
   }
-  assert.equal(hostedReady(config,{...env,STUDIO_ACCESS_TOKEN:"a".repeat(32),CRON_SECRET:"b".repeat(32)}),true);
-  assert.equal(hostedOwnerReady(config,{...env,CRON_SECRET:env.STUDIO_ACCESS_TOKEN}),false);
-  assert.equal(hostedReady(config,{...env,CRON_SECRET:env.STUDIO_ACCESS_TOKEN}),false);
+  assert.equal(hostedReady(config,{...env,STUDIO_AUTH_SECRET:"a".repeat(32),CRON_SECRET:"b".repeat(32)}),true);
+  assert.equal(hostedOwnerReady(config,{...env,CRON_SECRET:env.STUDIO_AUTH_SECRET}),false);
+  assert.equal(hostedReady(config,{...env,CRON_SECRET:env.STUDIO_AUTH_SECRET}),false);
 });
 
 test("hosted origin is an exact canonical HTTPS origin",()=>{
@@ -127,10 +127,10 @@ test("hosted execution blocks fallback and all existing configuration failures",
 });
 
 test("blocker messages never contain supplied secret or environment values",()=>{
-  const env={...environment(),DATABASE_URL:"secret-database-value",STUDIO_ACCESS_TOKEN:"secret-owner-value",CRON_SECRET:"secret-cron-value",STUDIO_ORIGIN:"secret-origin-value",OPENAI_API_KEY:"secret-provider-value"};
+  const env={...environment(),DATABASE_URL:"secret-database-value",STUDIO_AUTH_SECRET:"secret-owner-value",CRON_SECRET:"secret-cron-value",STUDIO_ORIGIN:"secret-origin-value",OPENAI_API_KEY:"secret-provider-value"};
   const blockers=hostedBlockers({},env);
   assert.ok(blockers.length>0);
-  for(const key of ["DATABASE_URL","STUDIO_ACCESS_TOKEN","CRON_SECRET","STUDIO_ORIGIN","OPENAI_API_KEY"])assert.equal(JSON.stringify(blockers).includes(env[key as keyof typeof env]!),false);
+  for(const key of ["DATABASE_URL","STUDIO_AUTH_SECRET","CRON_SECRET","STUDIO_ORIGIN","OPENAI_API_KEY"])assert.equal(JSON.stringify(blockers).includes(env[key as keyof typeof env]!),false);
 });
 
 test("local live readiness preserves the original session, configuration and key gates",()=>{

@@ -2,15 +2,16 @@ import {authorized,response} from "./auth";
 import {database,type Database} from "./db";
 import {runtimeConfig} from "./config";
 import type {RuntimeConfig} from "./domain";
-import {hostedEnvironment,hostedOwnerReady,hostedCronReady,type HostedEnvironment} from "./hosted";
+import {hostedEnvironment,hostedCronReady,type HostedEnvironment} from "./hosted";
 import {liveReady} from "./providers";
 import {runHostedBatch} from "./hosted-batch";
 import {Store} from "./store";
 
-export function ownerRequestReady(request:Request,c:RuntimeConfig,env:HostedEnvironment=process.env){
+export function ownerRequestReady(request:Request,_c:RuntimeConfig,env:HostedEnvironment=process.env){
+  // Compatibility for local machine workers only; hosted owner APIs use cookies.
+  if(hostedEnvironment(env))return false;
   if(!authorized(request,env.STUDIO_ACCESS_TOKEN))return false;
-  if(!hostedEnvironment(env))return true;
-  return hostedOwnerReady(c,env)&&requestOriginMatches(request,env.STUDIO_ORIGIN);
+  return true;
 }
 function requestOriginMatches(request:Request,origin:string|undefined){
   try{
@@ -25,7 +26,7 @@ export async function handleHostedCron(request:Request,deps:CronDependencies={})
   const env=deps.env||process.env;
   // Authenticate before config/database inspection. User agent and query strings
   // are not authentication, and the owner token cannot act as a cron credential.
-  if(!authorized(request,env.CRON_SECRET)||env.CRON_SECRET===env.STUDIO_ACCESS_TOKEN)return response({error:"Private cron access required"},401);
+  if(!authorized(request,env.CRON_SECRET)||env.CRON_SECRET===env.STUDIO_ACCESS_TOKEN||env.CRON_SECRET===env.STUDIO_AUTH_SECRET)return response({error:"Private cron access required"},401);
   const read=deps.readConfig||runtimeConfig,c=read();
   const ready=(current:RuntimeConfig)=>hostedCronReady(current,env)&&liveReady(current,env);
   if(!ready(c)||!requestOriginMatches(request,env.STUDIO_ORIGIN))return response({error:"Hosted scheduling is not ready"},503);

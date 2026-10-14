@@ -11,7 +11,7 @@ The dashboard now supports blank source intake, separate exact-note owner cleara
     npm ci
     npm run dev
 
-The launcher prints a temporary owner access token and a laptop-only address. Open that address in a browser on this laptop and enter the token in the web sign-in screen. The token is generated for this process session and never saved. It protects every data/API action. It is not a provider credential.
+The dashboard uses the owner password and HttpOnly session cookies. Set up the owner once using the approved hidden-input flow in [PASSWORD_AUTH.md](PASSWORD_AUTH.md), then open the laptop-only address printed by the launcher. Public registration is disabled. The launcher retains a separate process-only internal worker token; it is not a browser password or a provider credential.
 
 The web client does not gain remote access to this laptop address. No remote deployment or tunnel exists. Review the committed screenshots in artifacts/ from this private repository.
 
@@ -21,7 +21,7 @@ Default laptop storage uses PGlite, an embedded PostgreSQL engine, at ignored da
 
 The source proposal and all actual state are behind authentication. The approved OpenAI-only secure launcher saves and queues only the exact consented note after readiness checks. Ordinary npm run dev is a blocked inspection session. Empty data stays empty until that authorized launch.
 
-POST /api/studio/step claims and executes one persisted checkpoint. A separate local worker or future approved scheduler invokes it; browser closure has no effect on stored tasks. For local use, set STUDIO_ACCESS_TOKEN to the temporary web-session token in your own process environment and run npm run worker. This is a local access token, never an API key. The worker calls the web service; it does not open a second embedded database. It stops when setup/reconciliation is required.
+POST /api/studio/step claims and executes one persisted checkpoint. A separate local worker or future approved scheduler invokes it; browser closure has no effect on stored tasks. For local use, set STUDIO_ACCESS_TOKEN to the temporary internal worker token in your own process environment and run npm run worker. This is a local access token, never an API key. The worker calls the web service; it does not open a second embedded database. It stops when setup/reconciliation is required.
 
 Jobs use row locks, a lease, persisted checkpoints and unique artifact/action constraints. Expired work with an unresolved provider reservation is blocked. Safe explicit retry resumes at the saved checkpoint; uncertain completion never automatically retries. Cancellation stops future calls and retains any in-flight usage. All artifacts and their exact SHA-256 hashes are checked during approval, including source clearance/version.
 

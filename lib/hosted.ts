@@ -37,8 +37,9 @@ function ownerBlockers(c:RuntimeConfig,env:HostedEnvironment):string[]{
   if(env.VERCEL!=="1"||env.VERCEL_ENV!=="production")blockers.push("Vercel production deployment is required");
   if(env.STUDIO_HOSTED_ENABLED!=="1"||c.hosted?.enabled!==true)blockers.push("Hosted runtime is disabled");
   if(c.hosted?.owner_auth_authorized!==true)blockers.push("Hosted owner authentication is not authorized");
-  if(!strongSecret(env.STUDIO_ACCESS_TOKEN))blockers.push("A strong hosted owner access token is required");
+  if(!strongSecret(env.STUDIO_AUTH_SECRET))blockers.push("Owner password authentication setup is required");
   if(env.STUDIO_ACCESS_TOKEN&&env.CRON_SECRET&&env.STUDIO_ACCESS_TOKEN===env.CRON_SECRET)blockers.push("Owner and cron credentials must be different");
+  if(env.STUDIO_AUTH_SECRET&&env.CRON_SECRET&&env.STUDIO_AUTH_SECRET===env.CRON_SECRET)blockers.push("Authentication and cron credentials must be different");
   if(!exactHttpsOrigin(env.STUDIO_ORIGIN))blockers.push("An exact HTTPS studio origin is required");
   if(!networkPostgres(env))blockers.push("An authorized network PostgreSQL database is required");
   return blockers;
