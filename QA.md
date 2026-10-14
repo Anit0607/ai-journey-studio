@@ -101,3 +101,13 @@ This separate dependent change is based on password-authentication candidate `7e
 - All database checks use isolated PGlite. Real network PostgreSQL multi-connection behavior, production migration 011, deployed reporting and browser layout still need separately authorized verification. No provider key/secret was accessed; no provider call, account setup, source clearance, scheduling activation, deployment or merge occurred. Reporting records never enter model prompts. Publishing stays disabled.
 
 See [STUDIO_REPORTING.md](STUDIO_REPORTING.md) for data semantics, operating boundaries and exact unknown/coverage behavior.
+
+## Completion smoke locator maintenance — 2026-10-14
+
+Recorded desktop QA passed against exact candidate `64a1f3de024613f21077a5510709c5e5641138ab`; merged main `636dc80c3e42db999ebe6abfcd48909c50b2e2f6` has no file differences from that candidate. The desktop result confirms local build, desktop/mobile reports, empty/zero/unknown states, month/lifetime usage, currency separation, coverage/cost-basis/void handling, platform completeness and interrupted/repeated-save behavior. No application-code changes were needed. This supersedes the earlier cloud-only limitation as evidence for that candidate's rendered UI.
+
+The committed smoke runner itself failed on exact dropdown-label matching. This maintenance changes only the runner's `Record type`, `Currency` and `Usage window` selectors to native `combobox` roles with stable accessible-name prefixes, plus test/documentation support. The actual UI, authentication, database schema and runtime configuration are unchanged. Node regression coverage checks the selector contract against rendered component markup; it is not a new browser pass. See [SMOKE_QA.md](SMOKE_QA.md) for the repeatable desktop command and the distinction between smoke and supplemental coverage.
+
+No laptop work, production operation, live database, real credential or provider call is part of this maintenance. [MORNING_SETUP_CHECKLIST.md](MORNING_SETUP_CHECKLIST.md) prepares the separately approved owner-controlled next steps with generation, cron, fallback and provider access kept off.
+
+Maintenance verification: **190/190 TypeScript tests** passed with `node --import tsx --test --test-concurrency=2 tests/*.test.ts`, including the two new selector-contract tests; **35/35 Python secure-entry/setup tests**, TypeScript checking, ESLint, production Next.js build and diff whitespace checks passed. Database-related regressions used disposable PGlite fixtures only. No fresh browser launch was attempted to bypass the previously confirmed cloud restriction; the corrected committed runner still needs its own supported-environment rerun before claiming that exact script passed end to end.
