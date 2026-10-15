@@ -1,0 +1,81 @@
+{
+  "sources": {
+    "github": {
+      "enabled": false,
+      "sync_authorized": false,
+      "private_read_authorized": false,
+      "repositories": [
+        "Anit0607/ai-journey-studio"
+      ],
+      "app": {
+        "authorized": false,
+        "app_id": 0,
+        "installation_id": 0,
+        "selected_repository_ids": []
+      }
+    },
+    "youtube": {
+      "enabled": false,
+      "sync_authorized": false,
+      "handles": [
+        "@Studioemotune"
+      ]
+    },
+    "chat": {
+      "enabled": false
+    }
+  },
+  "oauth": {
+    "enabled": false,
+    "credential_use_authorized": false,
+    "providers": {
+      "linkedin": {
+        "enabled": false,
+        "redirect_uri": "https://YOUR-STUDIO-ORIGIN/api/connections/linkedin/callback",
+        "linkedin_version": "SET_CURRENT_SUPPORTED_VERSION"
+      },
+      "x": {
+        "enabled": false,
+        "redirect_uri": "https://YOUR-STUDIO-ORIGIN/api/connections/x/callback",
+        "identity_cost_authorized": false,
+        "identity_max_microdollars": 0,
+        "monthly_identity_cap_microdollars": 0
+      },
+      "instagram_facebook": {
+        "enabled": false,
+        "redirect_uri": "https://YOUR-STUDIO-ORIGIN/api/connections/instagram_facebook/callback",
+        "instagram_api_version": "SET_CURRENT_SUPPORTED_VERSION",
+        "exchange_url_redaction_verified": false
+      }
+    }
+  },
+  "scheduler": {
+    "authorized": false,
+    "provider": "qstash",
+    "mode": "external",
+    "cadence_seconds": 300,
+    "source_interval_minutes": 60
+  },
+  "publishing": {
+    "enabled": false,
+    "credential_use_authorized": false,
+    "max_lateness_seconds": 300,
+    "x_cost_authorized": false,
+    "x_max_create_microdollars": 0,
+    "x_max_identity_microdollars": 0,
+    "monthly_cap_microdollars": 0,
+    "accounts": [],
+    "media_hosts": []
+  },
+  "media": {
+    "enabled": false,
+    "upload_authorized": false,
+    "credential_use_authorized": false,
+    "auth_mode": "oidc",
+    "public_origin": "https://YOUR-STORE.public.blob.vercel-storage.com",
+    "store_id": "SET_APPROVED_STORE_ID",
+    "hobby_plan_verified": false,
+    "monthly_upload_limit": 0,
+    "monthly_byte_limit": 0
+  }
+}
