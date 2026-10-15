@@ -2,7 +2,7 @@ import {hash} from "./domain";
 import type {Artifact} from "./grounding";
 export const REQUIRED_PLATFORMS=["LinkedIn","X","Instagram"] as const;
 export type Platform=typeof REQUIRED_PLATFORMS[number];
-export const PLATFORM_FORMAT="Return exactly three nonempty sections, each beginning with one of these exact headings on its own line, in this order: ### LinkedIn, ### X, ### Instagram. Put only that platform's draft beneath its heading. No preamble, extra platform sections, or empty placeholders. These exact headings are the platform schema; a name mentioned in prose is not a variant.";
+export const PLATFORM_FORMAT="Return exactly three nonempty sections, each beginning with one of these exact headings on its own line, in this order: ### LinkedIn, ### X, ### Instagram. Put only that platform's draft beneath its heading. No preamble, extra platform sections, or empty placeholders. These exact headings are the platform schema; a name mentioned in prose is not a variant. Target the implemented standard-post formats: LinkedIn at most 3000 characters, X one standalone post at most 280 weighted characters (URLs count as 23; do not emit a thread or native Article), and Instagram a concise caption suitable for a single readable text card (prefer at most 600 characters, English or Latin-script Hinglish, no emoji). Do not invent a photo or claim media already exists. Longer material needs a separately reviewed shorter platform variant; never silently truncate.";
 /** Parse separate, explicit sections without modifying historical artifact bytes or hashes.
  * Exact plain/Markdown headings with an optional colon support existing local output.
  * Incidental names, hashtags, prefixes, partial matches and empty sections fail closed.
