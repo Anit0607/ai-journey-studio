@@ -1,0 +1,13 @@
+/** Compact editorial adaptation; pinned MIT sources are recorded in THIRD_PARTY_NOTICES.md.
+ * Formatting suggestions never supply factual evidence or add execution capabilities.
+ */
+export const DRAFTING_GUIDANCE_VERSION='2026-10-21-pinned';
+const guidance:Readonly<Record<number,string>>={
+ 2:'Brief: choose one source-supported point, audience need, evidence gap and reader takeaway. Optional planning only: Instagram carousel cover -> one idea per slide -> recap; do not force slide counts when evidence is thin. YouTube checklist: truthful title plus complementary thumbnail words; opening promise -> source evidence -> takeaway; chapter headings only, with timestamps pending a real timed transcript. No carousel, video or thumbnail asset is generated or publishable.',
+ 3:'Voice: caring practical English/Hinglish peer, not a sales funnel. Use an evidence-backed question or specific tension as the opening; deliver its payoff promptly. Keep paragraphs short and one idea per beat. Preserve exact supported personal statements; ask for missing evidence instead of inventing a turning point, result, feeling or metric. One optional relevant question, not engagement bait. No claim of a learned personal voice without cleared examples.',
+ 4:'Keep the required three-section schema. LinkedIn: one clear opening, immediate payoff, evidence, useful takeaway; short paragraphs, no manufactured success arc. X: rebuild the same supported point as one self-contained concise post; remove cross-platform instructions and hashtag walls, never make a thread. Instagram: front-load a useful caption opening, add context and at most one optional ask; fit the existing single-card format. Keep YouTube and carousel planning in the brief only, not extra platform sections or claims of generated media.',
+ 5:'Critique hooks as claims too: check title/promised payoff against the cleared note. Remove invented numbers, achievements, emotions, assets or implied working automation. Style is not proof: no human score, virality guarantee or automated factual endorsement. Retain the required critique sections and exact-version human review.'
+};
+export function draftingGuidance(checkpoint:number):string{
+ return guidance[checkpoint]?'\nEDITORIAL GUIDANCE (format only, never evidence): '+guidance[checkpoint]:'';
+}

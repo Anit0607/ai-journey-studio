@@ -53,9 +53,9 @@ export async function POST(request:Request,context:Context){
   if(!await ownerApiAuthenticated(request))return response({error:"Private access required"},401);
   if(!allowedOrigin(request))return response({error:"Origin rejected"},403);
   const {action}=await context.params;
-  if(!["publication-media-stage","publication-media-approve","integration-sync","integration-import","publication-enqueue","publication-approve","publication-cancel","publication-revise","metrics-save","money-add","money-void","coverage-confirm","source-stage","source-clear","source-revoke","agent-revise","calendar-dispatch","source","run","approve","cancel","retry","step","request-changes","revise","approve-revision","calendar-configure","calendar-plan","calendar-link","calendar-prepare"].includes(action))return response({error:"Unknown action"},404);
+  if(!["publication-media-stage","publication-media-approve","integration-sync","integration-import","publication-enqueue","publication-approve","publication-cancel","publication-revise","metrics-save","money-add","money-void","coverage-confirm","source-stage","source-clear","source-revoke","agent-revise","calendar-dispatch","source","run","approve","cancel","retry","step","evidence-review","request-changes","revise","approve-revision","calendar-configure","calendar-plan","calendar-link","calendar-prepare"].includes(action))return response({error:"Unknown action"},404);
   if(hostedEnvironment()&&action==="step")return response({error:"Hosted checkpoints run only through the protected daily scheduler"},403);
-  const limit=action==="integration-import"?1_050_000:action==="publication-enqueue"||action==="publication-revise"?40000:["revise","source-stage"].includes(action)?40000:4096;
+  const limit=action==="evidence-review"?12000:action==="integration-import"?1_050_000:action==="publication-enqueue"||action==="publication-revise"?40000:["revise","source-stage"].includes(action)?40000:4096;
   if(Number(request.headers.get("content-length")||0)>limit)return response({error:"Request too large"},413);
   try{
     const raw=await readBody(request,limit);
@@ -95,6 +95,7 @@ export async function POST(request:Request,context:Context){
       value=await store.enqueue(String(body.source));
     }
     if(action==="approve")value=await store.approve(String(body.task),String(body.version));
+    if(action==="evidence-review")value=await store.reviewEvidence(String(body.task),String(body.expected),body);
     if(action==="request-changes")value=await store.revise(String(body.task),String(body.expected),body.note);
     if(action==="revise")value=await store.revise(String(body.task),String(body.expected),body.note,{role:body.role,text:body.text});
     if(action==="approve-revision")value=await store.approveRevision(String(body.task),String(body.expected),body.acknowledged);

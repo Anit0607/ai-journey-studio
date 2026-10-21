@@ -1,3 +1,4 @@
+import {evidenceQuality,reviewReadiness,saveEvidenceDecision,saveEvidenceApproval,type Decision} from "./evidence-review";
 import {usageSummary} from "./usage";
 import {OwnerReports} from "./owner-reports";
 import {platformVariants} from "./platform-variants";
@@ -7,7 +8,7 @@ import {CAP,BUFFER,WARNING,ROLES,hash,istMonth,sourceAllowed,type Pricing,type S
 import {assertNoPendingAgentRevision,finalizeAgentRevision} from "./agent-revisions";
 import {assertSourcePrivacy,sourceEligible} from "./sources";
 import type {Completion,Report} from "./providers";
-import {assertBundle,bundleQuality,bundleVersion,type Artifact} from "./grounding";
+import {assertBundle,bundleVersion,type Artifact} from "./grounding";
 export class Store{
   constructor(readonly db:Database){}
   async event(tx:Connection,task:string|null,kind:string,detail:string){
@@ -40,11 +41,17 @@ export class Store{
     const unresolved=data.ledger.filter((r:any)=>r.status!=="settled").length;
     const workers=await this.db.query("SELECT * FROM runtime ORDER BY name");
     const revisions=await this.db.query("SELECT * FROM content_revisions ORDER BY task_id,sequence"),revisionApprovals=await this.db.query("SELECT * FROM revision_approvals ORDER BY created");
+    const evidenceRows=await this.db.query<Decision&{task_id:string}>("SELECT * FROM evidence_decisions ORDER BY sequence");
+    const evidenceReceipts=await this.db.query<any>("SELECT * FROM evidence_approval_receipts ORDER BY created,id");
     const reviews=data.tasks.filter((task:Task)=>!task.revision_parent_task_id).map((task:Task)=>{
       const history=revisions.filter((revision:any)=>revision.task_id===task.id),latest:any=history.at(-1);
       const bundle=latest?.bundle||data.outputs.filter((output:Output)=>output.task_id===task.id);
       const source=data.sources.find((item:Source)=>item.id===task.source_id);
-      return {variants:platformVariants(bundle.find((item:Artifact)=>item.role==="Platform Adapter")),task_id:task.id,is_agent_revision:false,pending_agent_revision:data.tasks.find((child:Task)=>child.revision_parent_task_id===task.id&&["queued","running","blocked"].includes(child.status))||null,agent_revision_jobs:data.tasks.filter((child:Task)=>child.revision_parent_task_id===task.id),token:latest?"revision:"+latest.id+":"+latest.version:"original:"+hash(bundle.map((item:Artifact)=>item.hash).join("|")),latest_revision:latest?.id||null,original_bundle:data.outputs.filter((output:Output)=>output.task_id===task.id),original_approval:data.approvals.find((item:any)=>item.task_id===task.id)||null,bundle,quality:bundleQuality(bundle,source?.text||""),approval:latest?revisionApprovals.find((item:any)=>item.revision_id===latest.id)||null:data.approvals.find((item:any)=>item.task_id===task.id)||null,history:history.map((item:any)=>({...item,approval:revisionApprovals.find((approval:any)=>approval.revision_id===item.id)||null}))};
+      const quality=evidenceQuality(bundle,source||{text:"",hash:"",cleared:false},evidenceRows.filter(row=>row.task_id===task.id));
+      const token=latest?"revision:"+latest.id+":"+latest.version:"original:"+hash(bundle.map((item:Artifact)=>item.hash).join("|"));
+      const receipts=evidenceReceipts.filter((row:any)=>row.task_id===task.id);
+      const approvalCurrent=!quality.flags.length&&(receipts.some((row:any)=>row.binding===quality.binding&&row.review_token===token&&row.evidence_version===(quality.evidence_version||""))||(!receipts.length&&!quality.evidence_version));
+      return {variants:platformVariants(bundle.find((item:Artifact)=>item.role==="Platform Adapter")),task_id:task.id,is_agent_revision:false,pending_agent_revision:data.tasks.find((child:Task)=>child.revision_parent_task_id===task.id&&["queued","running","blocked"].includes(child.status))||null,agent_revision_jobs:data.tasks.filter((child:Task)=>child.revision_parent_task_id===task.id),token:latest?"revision:"+latest.id+":"+latest.version:"original:"+hash(bundle.map((item:Artifact)=>item.hash).join("|")),latest_revision:latest?.id||null,original_bundle:data.outputs.filter((output:Output)=>output.task_id===task.id),original_approval:data.approvals.find((item:any)=>item.task_id===task.id)||null,bundle,quality,approval:(latest?revisionApprovals.find((item:any)=>item.revision_id===latest.id):data.approvals.find((item:any)=>item.task_id===task.id))&&approvalCurrent?(latest?revisionApprovals.find((item:any)=>item.revision_id===latest.id):data.approvals.find((item:any)=>item.task_id===task.id))||null:null,history:history.map((item:any)=>({...item,approval:revisionApprovals.find((approval:any)=>approval.revision_id===item.id)||null}))};
     });
     return {...data,reviews,workers,database:this.db.kind,usage:usageSummary(data.ledger,month),analyst:await new OwnerReports(this.db).snapshot(data.ledger),
       budget:{month_IST:month,committed_microdollars:used,warning:used>=WARNING,cap_microdollars:CAP,buffer_microdollars:BUFFER,unresolved_reservations:unresolved,basis:"Reported token estimates and unresolved reservations; not invoices"},
@@ -159,8 +166,10 @@ export class Store{
       if(outputs.length!==6||!ROLES.every(role=>outputs.some(o=>o.role===role))||outputs.some(o=>hash(o.text)!==o.hash)||hash(outputs.map(o=>o.hash).join("|"))!==version)throw Error("Stale artifact version");
       const source=(await tx.query<Source>("SELECT * FROM sources WHERE id=$1 FOR UPDATE",[t.source_id]))[0];
       if(!source.cleared||source.hash!==t.source_hash||hash(source.text)!==source.hash||!sourceEligible(source))throw Error("Source invalidated");
-      if(bundleQuality(outputs,source.text).flags.length)throw Error("Resolve source-grounding flags before approval");
-      await tx.query("INSERT INTO approvals(task_id,version) VALUES($1,$2)",[id,version]);
+      const quality=await reviewReadiness(tx,id,outputs,source);
+      if(quality.flags.length)throw Error("Resolve source-grounding flags before approval");
+      await tx.query("INSERT INTO approvals(task_id,version,evidence_version) VALUES($1,$2,$3) ON CONFLICT(task_id) DO NOTHING",[id,version,quality.evidence_version]);
+      await saveEvidenceApproval(tx,id,"original:"+version,quality);
       await tx.query("UPDATE tasks SET status='approved',updated=now() WHERE id=$1",[id]);
       await this.event(tx,id,"approved","User approved exact artifact bundle; publication disabled");
     });
@@ -192,15 +201,24 @@ export class Store{
       return {id:revision,version};
     });
   }
+  async reviewEvidence(id:string,expected:string,input:Parameters<typeof saveEvidenceDecision>[4]){
+    return this.db.transaction(async tx=>{
+      const context=await this.revisionContext(tx,id,expected);
+      await assertNoPendingAgentRevision(tx,id);
+      return saveEvidenceDecision(tx,id,context.bundle,context.source,input);
+    });
+  }
   async approveRevision(id:string,expected:string,acknowledged:boolean){
     if(acknowledged!==true)throw Error("Human factual review acknowledgement required");
     await this.db.transaction(async tx=>{
       const context=await this.revisionContext(tx,id,expected);
       if(!context.latest)throw Error("No revision to approve");
       await assertNoPendingAgentRevision(tx,id);
-      if(bundleQuality(context.bundle,context.source.text).flags.length)throw Error("Resolve source-grounding flags before approval");
+      const quality=await reviewReadiness(tx,id,context.bundle,context.source);
+      if(quality.flags.length)throw Error("Resolve source-grounding flags before approval");
       if(bundleVersion(context.bundle,context.source.hash)!==context.latest.version)throw Error("Stale artifact version");
-      const inserted=await tx.query("INSERT INTO revision_approvals(revision_id,version) VALUES($1,$2) ON CONFLICT DO NOTHING RETURNING revision_id",[context.latest.id,context.latest.version]);
+      const inserted=await tx.query("INSERT INTO revision_approvals(revision_id,version,evidence_version) VALUES($1,$2,$3) ON CONFLICT DO NOTHING RETURNING revision_id",[context.latest.id,context.latest.version,quality.evidence_version]);
+      await saveEvidenceApproval(tx,id,context.token,quality);
       if(inserted.length)await this.event(tx,id,"revision_approved","User approved revision "+context.latest.id+" after factual review; publication disabled");
     });
   }
