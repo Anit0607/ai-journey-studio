@@ -1,22 +1,34 @@
 import {randomUUID} from "node:crypto";
 import {hasInternalReviewMetadata} from "./platform-variants";
-import {assertBundle,bundleQuality,bundleVersion,SUPPORTED_SENTENCES,type Artifact} from "./grounding";
+import {assertBundle,bundleQuality,bundleVersion,verifiedSourceEnvelope,SUPPORTED_SENTENCES,type Artifact} from "./grounding";
 import {CAPSULE,hash} from "./domain";
 import {assertSourcePrivacy} from "./sources";
 import type {Connection} from "./db";
 
-export const EVIDENCE_POLICY="evidence-review-v1";
+export const EVIDENCE_POLICY="evidence-review-v2";
 export type Span={start:number;end:number};
-export type Finding={id:string;kind:"wording_review"|"hard";role:string;claim:string;reason:string;artifact_hash:string;span:Span};
-export type Decision={id:string;binding:string;finding_id:string;decision:"accept"|"withdraw";policy_version:string;actor:string;reason:string;evidence:{source_span:Span;source_quote:string};context:{source_hash:string;artifact_hash:string;bundle_hash:string;claim_span:Span;claim_text:string};created?:string};
+export type Finding={category?:'structure';id:string;kind:"wording_review"|"hard";role:string;claim:string;reason:string;artifact_hash:string;span:Span};
+export type Decision={id:string;binding:string;finding_id:string;decision:"accept"|"withdraw";policy_version:string;actor:string;reason:string;evidence:{source_span:Span;source_quote:string};context:{source_hash:string;artifact_hash:string;bundle_hash:string;claim_span:Span;claim_text:string;reported_date?:string|null};created?:string};
 type EvidenceSource={text:string;hash:string;cleared?:boolean;clearance_id?:string|null;cleared_at?:unknown;revoked_at?:unknown;reported_date?:string};
 const plain=(text:string)=>text.trim().replace(/^(?:[-*+>]\s+|#{1,3}\s+)/,'').replace(/\*\*/g,'').replace(/^["“]|["”,]$/g,'').replace(/[.!]$/,'').replace(/\s+/g,' ').toLowerCase();
 function spans(text:string):Array<Span&{text:string}>{
  const out:Array<Span&{text:string}>=[];const re=/[^\n.!?]+(?:[.!?](?=\s|$)|$)/g;let m;
  while((m=re.exec(text))){const lead=m[0].length-m[0].trimStart().length,body=m[0].trim();if(body)out.push({start:m.index+lead,end:m.index+lead+body.length,text:body});}return out;
 }
-function artifactSpans(text:string):Array<Span&{text:string;raw?:string}>{
- try{JSON.parse(text);}catch{return spans(text);}
+function artifactSpans(text:string,role?:string,source?:string,reportedDate?:string):Array<Span&{text:string;raw?:string}>{
+ try{JSON.parse(text);}catch{
+  if(role&&source){
+   if(verifiedSourceEnvelope(text,role,source,reportedDate))return [{start:0,end:text.length,text}];
+   // Preserve only independently verified quoted envelopes as atomic metadata.
+   const quoted=/"(?:\\.|[^"\\])*"|\u201c[^\u201d]*\u201d/g;let match;let cursor=0;const parts:Array<Span&{text:string;raw?:string}>=[];
+   while((match=quoted.exec(text))){let body=match[0];try{body=JSON.parse(body);}catch{}
+    if(!verifiedSourceEnvelope(body,role,source,reportedDate))continue;
+    parts.push(...spans(text.slice(cursor,match.index)).map(x=>({...x,start:x.start+cursor,end:x.end+cursor})),{start:match.index,end:quoted.lastIndex,text:body,raw:match[0]});cursor=quoted.lastIndex;
+   }
+   if(cursor){parts.push(...spans(text.slice(cursor)).map(x=>({...x,start:x.start+cursor,end:x.end+cursor})));return parts;}
+  }
+  return spans(text);
+ }
  const out:Array<Span&{text:string;raw?:string}>=[];const re=/"(?:\\.|[^"\\])*"/g;let match;
  while((match=re.exec(text))){if(/^\s*:/.test(text.slice(re.lastIndex)))continue;out.push({start:match.index,end:re.lastIndex,text:JSON.parse(match[0]),raw:match[0]});}return out;
 }
@@ -48,12 +60,13 @@ function hardReason(claim:string,source:string):string|null{
  }
  return null;
 }
-export function evidenceBinding(bundle:Artifact[],source:EvidenceSource){return hash(JSON.stringify({policy:EVIDENCE_POLICY,source_hash:source.hash,clearance:source.clearance_id||"legacy",cleared_at:source.cleared_at?new Date(String(source.cleared_at)).toISOString():null,bundle:bundleVersion(bundle,source.hash)}));}
-function finding(role:string,claim:string,reason:string,kind:Finding['kind'],artifact_hash:string,span:Span):Finding{return {id:hash(JSON.stringify({policy:EVIDENCE_POLICY,role,artifact_hash,span,claim,reason,kind})),role,claim,reason,kind,artifact_hash,span};}
+export function evidenceBinding(bundle:Artifact[],source:EvidenceSource){return hash(JSON.stringify({policy:EVIDENCE_POLICY,source_hash:source.hash,reported_date:source.reported_date||null,clearance:source.clearance_id||"legacy",cleared_at:source.cleared_at?new Date(String(source.cleared_at)).toISOString():null,bundle:bundleVersion(bundle,source.hash)}));}
+function finding(role:string,claim:string,reason:string,kind:Finding['kind'],artifact_hash:string,span:Span,category?:Finding['category']):Finding{return {id:hash(JSON.stringify({policy:EVIDENCE_POLICY,role,artifact_hash,span,claim,reason,kind,...(category?{category}:{} )})),role,claim,reason,kind,artifact_hash,span,...(category?{category}:{} )};}
 export function evidenceFindings(bundle:Artifact[],source:string,reportedDate?:string):Finding[]{
- const legacy=bundleQuality(bundle,source),out:Finding[]=[];
- for(const flag of legacy.flags){if(flag.role==='Critic'&&flag.claim==='Unconditional endorsement')continue;const artifact=bundle.find(x=>x.role===flag.role),start=artifact?.text.indexOf(flag.claim)??-1;
-  const atom=artifact&&start>=0?artifactSpans(artifact.text).find(x=>x.start<=start&&x.end>=start+flag.claim.length):undefined;
+ const legacy=bundleQuality(bundle,source,reportedDate),out:Finding[]=[];
+ for(const flag of legacy.flags){if(flag.category==='structure'){out.push(finding(flag.role,flag.claim,flag.reason,'hard',bundle.find(x=>x.role===flag.role)?.hash||'',{start:-1,end:-1},'structure'));continue;}if(flag.role==='Critic'&&flag.claim==='Unconditional endorsement')continue;const artifact=bundle.find(x=>x.role===flag.role),start=artifact?.text.indexOf(flag.claim)??-1;
+  const atom=artifact&&start>=0?artifactSpans(artifact.text,artifact.role,source,reportedDate).find(x=>x.start<=start&&x.end>=start+flag.claim.length):undefined;
+  if(atom&&verifiedSourceEnvelope(atom.text,artifact!.role,source,reportedDate))continue;
   const claim=atom?(atom.raw||atom.text):flag.claim,span=atom?{start:atom.start,end:atom.end}:{start,end:start+flag.claim.length};
   const wording=/Personal claim needs/.test(flag.reason)&&source!==CAPSULE&&!/^Attributed (?:GitHub|YouTube) evidence;/.test(source);
   const hard=hardReason(claim,source);
@@ -61,7 +74,8 @@ export function evidenceFindings(bundle:Artifact[],source:string,reportedDate?:s
  }
  for(const artifact of bundle.filter(x=>x.role!=="Critic")){
   if(artifact.role==='Writer'&&hasInternalReviewMetadata(artifact.text))out.push(finding(artifact.role,'Internal review notes in public copy','Keep reviewer metadata in internal artifacts; edit public copy','hard',artifact.hash,{start:-1,end:-1}));
-  for(const atom of artifactSpans(artifact.text)){
+  for(const atom of artifactSpans(artifact.text,artifact.role,source,reportedDate)){
+   if(verifiedSourceEnvelope(atom.text,artifact.role,source,reportedDate))continue;
    const internal=['Harvester','Story Miner','Strategist'].includes(artifact.role);
    if(internal&&((reportedDate&&(atom.text==='SOURCE DATE: '+reportedDate||atom.text===reportedDate))||atom.text===hash(source)||(atom.text.startsWith('SOURCE: ')&&exact(atom.text.slice(8),source))))continue;
    if(exact(atom.text,source)||(atom.raw&&spans(atom.text).length>0&&spans(atom.text).every(x=>exact(x.text,source)))||(source===CAPSULE&&SUPPORTED_SENTENCES.some(x=>plain(x)===plain(atom.text)))||/^#{1,3} (?:LinkedIn|X|Instagram)$/.test(atom.text)||(!factual(atom.text)&&!(/^(?:Writer|Platform Adapter)$/.test(artifact.role)&&/\b(?:is|are|was|were|has|have|documents?|uses?)\b/i.test(atom.text))&&!dangerous.test(atom.text)&&! /\d/.test(atom.text)))continue;
@@ -106,7 +120,7 @@ export async function saveEvidenceDecision(tx:Connection,task:string,bundle:Arti
  const existing=item.resolution;if(input.decision==='accept'&&existing)throw Error('This wording already has a current decision');
  if(input.decision==='withdraw'&&!existing)throw Error('No current decision to withdraw');
  const id=randomUUID(),evidence=input.decision==='accept'?{source_span:input.source_span,source_quote:input.source_quote}:existing!.evidence;
- await tx.query("INSERT INTO evidence_decisions(id,task_id,binding,finding_id,decision,policy_version,actor,reason,evidence,context) VALUES($1,$2,$3,$4,$5,$6,'owner',$7,$8,$9)",[id,task,quality.binding,item.id,input.decision,EVIDENCE_POLICY,input.reason.trim(),JSON.stringify(evidence),JSON.stringify({source_hash:source.hash,artifact_hash:item.artifact_hash,bundle_hash:quality.bundle_hash,claim_span:item.span,claim_text:item.claim})]);
+ await tx.query("INSERT INTO evidence_decisions(id,task_id,binding,finding_id,decision,policy_version,actor,reason,evidence,context) VALUES($1,$2,$3,$4,$5,$6,'owner',$7,$8,$9)",[id,task,quality.binding,item.id,input.decision,EVIDENCE_POLICY,input.reason.trim(),JSON.stringify(evidence),JSON.stringify({source_hash:source.hash,artifact_hash:item.artifact_hash,bundle_hash:quality.bundle_hash,claim_span:item.span,claim_text:item.claim,reported_date:source.reported_date||null})]);
  if(input.decision==='withdraw')await tx.query("UPDATE tasks SET status='review',updated=now() WHERE id=$1 AND status='approved'",[task]);
  await tx.query("INSERT INTO events(id,task_id,kind,detail) VALUES($1,$2,'evidence_review_saved',$3)",[randomUUID(),task,'Individual '+input.decision+' decision '+id+' for '+item.id+'; policy '+EVIDENCE_POLICY+'; content approval remains separate']);return {id};
 }

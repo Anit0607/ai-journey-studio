@@ -13,6 +13,15 @@ function unformatClaim(value:string):string{
  }
  return text.replace(/\s+/g,' ').trim();
 }
+/** An internal provenance envelope is metadata only with the exact stored date/body. */
+export function verifiedSourceEnvelope(value:string,role:string,source:string,reportedDate?:string):boolean{
+ if(!['Harvester','Story Miner','Strategist'].includes(role))return false;
+ const text=unformatClaim(value),dated=/^SOURCE DATE:\s*(\d{4}-\d{2}-\d{2})(?:\.\s*|\s+)SOURCE:\s*([\s\S]+)$/i.exec(text);
+ const bare=/^SOURCE:\s*([\s\S]+)$/i.exec(text);
+ const body=dated?(reportedDate===dated[1]?dated[2]:null):bare?.[1];
+ return typeof body==='string'&&unformatClaim(body)===unformatClaim(source);
+}
+export type GroundingFlag={role:string;claim:string;reason:string;category?:'structure'};
 const comparable=(text:string)=>unformatClaim(text).replace(/[.!]$/,'').toLowerCase();
 const sentences=(text:string)=>text.split(/(?<=[.!?])\s+|\n/).filter(line=>line.trim());
 function jsonText(value:unknown):string[]{
@@ -22,19 +31,15 @@ function jsonText(value:unknown):string[]{
  if(value&&typeof value==='object')return Object.entries(value).flatMap(([key,item])=>[...(/\b(?:I|my|Anit)\b/i.test(key)?[key]:[]),...(typeof item==='number'||typeof item==='boolean'?[key+': '+String(item)]:jsonText(item))]);
  return [];
 }
-function claimLines(artifact:Artifact,source:string):string[]{
+function claimLines(artifact:Artifact,source:string,reportedDate?:string):string[]{
  let atoms:string[];
  try{const parsed:unknown=JSON.parse(artifact.text);atoms=jsonText(parsed);}catch{atoms=[artifact.text];}
- const internal=['Harvester','Story Miner','Strategist'].includes(artifact.role);
  const expand=(atom:string)=>{
   const text=unformatClaim(atom);
-  const provenance=/^(?:SOURCE DATE:\s*\d{4}-\d{2}-\d{2}\s+)?SOURCE:\s*([\s\S]+)$/i.exec(text);
-  // Only an exact complete-source field is structural provenance. A prefixed
-  // paraphrase or appended statement never receives this treatment.
-  if(internal&&provenance&&comparable(provenance[1])===comparable(source))return sentences(source);
+  if(verifiedSourceEnvelope(text,artifact.role,source,reportedDate))return [];
   return sentences(text);
  };
- return atoms.flatMap(atom=>atom.split(/\n/).flatMap(expand));
+ return atoms.flatMap(atom=>verifiedSourceEnvelope(atom,artifact.role,source,reportedDate)?[]:atom.split(/\n/).flatMap(expand));
 }
 const REVIEW_BOUNDARY=' Writer and Platform Adapter return public prose only. Keep evidence gaps, provenance records and review advice in Harvester, Strategist and Critic artifacts; never append internal reviewer sections or owner-clearance footers to platform copy. Preserve these internal notes for review; do not silently strip them from saved outputs.';
 
@@ -44,13 +49,13 @@ export function groundingRules(source:string){
   if(source===CAPSULE)return GROUNDING_RULES+REVIEW_BOUNDARY;
   return REVIEW_BOUNDARY+" Use only the exact owner-cleared source as factual evidence. Faithful paraphrases are allowed, preserving source qualification, negation, timing and attribution. The owner reviews every uncertain claim against exact source passages. Never add certainty or describe paraphrases as exact quotations. Do not infer achievements, discoveries, mistakes, lessons, metrics or feelings. A request for a different tone is not new evidence. If a detail is missing, say Evidence needed. Generic suggestions must be labeled Proposed approach. Prior artifacts and revision feedback are not independent evidence. Critic must include Unsupported claims:, Evidence needed:, and Proposed advice: sections; quote and flag unsupported personal claims. Every draft requires human factual review; approval never authorizes publishing.";
 }
-export function bundleQuality(bundle:Artifact[],source:string){
-  const flags:{role:string;claim:string;reason:string}[]=[];
-  if(!source.trim())flags.push({role:"Source",claim:"Source missing",reason:"Exact cleared evidence required"});
+export function bundleQuality(bundle:Artifact[],source:string,reportedDate?:string){
+  const flags:GroundingFlag[]=[];
+  if(!source.trim())flags.push({role:"Source",claim:"Source missing",category:"structure",reason:"Exact cleared evidence required"});
   const adapter=bundle.find(item=>item.role==="Platform Adapter");
-  if(adapter){const variants=platformVariants(adapter);if(!variants.complete)flags.push({role:"Platform Adapter",claim:"Incomplete platform variants",reason:variants.reason||"Separate platform drafts required"});}
+  if(adapter){const variants=platformVariants(adapter);if(!variants.complete)flags.push({role:"Platform Adapter",claim:"Incomplete platform variants",category:"structure",reason:variants.reason||"Separate platform drafts required"});}
   for(const artifact of bundle.filter(item=>item.role!=="Critic")){
-    for(const line of claimLines(artifact,source)){
+    for(const line of claimLines(artifact,source,reportedDate)){
       const personal=/\b(?:I\b|I[’'](?:ve|m)|my\b|Anit\b|he\s+(?:found|discovered|learned|shares))/i.test(line);
       const clean=comparable(line);
       const directQuote=clean.length>=10&&sentences(source).some(sentence=>comparable(sentence)===clean);
@@ -67,7 +72,7 @@ export function bundleQuality(bundle:Artifact[],source:string){
     }
   }
   const critic=bundle.find(item=>item.role==="Critic")?.text||"";
-  if(!["Unsupported claims:","Evidence needed:","Proposed advice:"].every(section=>critic.includes(section)))flags.push({role:"Critic",claim:"Critique format",reason:"Explicit unsupported-claim, evidence and proposed-advice sections required"});
+  if(!["Unsupported claims:","Evidence needed:","Proposed advice:"].every(section=>critic.includes(section)))flags.push({role:"Critic",claim:"Critique format",category:"structure",reason:"Explicit unsupported-claim, evidence and proposed-advice sections required"});
   if(flags.some(item=>item.role!=="Critic")&&/no unsupported|all claims are supported|all variants accurately/i.test(critic))flags.push({role:"Critic",claim:"Unconditional endorsement",reason:"Critic contradicts unresolved source-grounding flags"});
   return {status:flags.length?"needs_revision":"needs_human_review",flags,notice:"Conservative checks are not proof of factual accuracy. Review every claim against the cleared note."};
 }

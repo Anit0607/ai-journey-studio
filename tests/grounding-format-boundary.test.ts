@@ -8,7 +8,7 @@ const second='I am a non-coder and use AI agents for implementation while retain
 const source=first+' '+second+' The hosted dashboard and login are working. Automatic source collection, content generation and reviewed social publishing are not yet verified end to end. This is work in progress, not a completed automation success story.';
 const artifact=(role:string,text:string)=>({role,text,hash:hash(text)});
 const critic=artifact('Critic','Unsupported claims: none\nEvidence needed: end-to-end verification remains pending\nProposed advice: inspect each component.');
-const flags=(role:string,text:string)=>bundleQuality([artifact(role,text),critic],source).flags.filter(f=>f.role===role);
+const flags=(role:string,text:string)=>bundleQuality([artifact(role,text),critic],source,'2026-10-21').flags.filter(f=>f.role===role);
 
 test('JSON evidence values and straight/curly quoted source sentences match formatting only',()=>{
  for(const text of [JSON.stringify({claims:[first,second],provenance:{source_date:'2026-10-21',source}}),'- \u201c'+first+'\u201d\n- \u201c'+second+'\u201d','1. "'+first+'"\n2. "'+second+'"','> **'+first+'**'])assert.deepEqual(flags('Harvester',text),[],text);
