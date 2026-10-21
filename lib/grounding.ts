@@ -16,7 +16,7 @@ function unformatClaim(value:string):string{
 /** An internal provenance envelope is metadata only with the exact stored date/body. */
 export function verifiedSourceEnvelope(value:string,role:string,source:string,reportedDate?:string):boolean{
  if(!['Harvester','Story Miner','Strategist'].includes(role))return false;
- const text=unformatClaim(value),dated=/^SOURCE DATE:\s*(\d{4}-\d{2}-\d{2})(?:\.\s*|\s+)SOURCE:\s*([\s\S]+)$/i.exec(text);
+ const text=unformatClaim(value),dated=/^SOURCE DATE:\s*(\d{4}-\d{2}-\d{2})(?:[.,]\s*|\s+)SOURCE:\s*([\s\S]+)$/i.exec(text);
  const bare=/^SOURCE:\s*([\s\S]+)$/i.exec(text);
  const body=dated?(reportedDate===dated[1]?dated[2]:null):bare?.[1];
  return typeof body==='string'&&unformatClaim(body)===unformatClaim(source);
