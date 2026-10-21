@@ -1,3 +1,4 @@
+import {reviewReadiness,evidenceApprovalCurrent} from "./evidence-review";
 import {createHash,randomUUID} from "node:crypto";
 import {readFile} from "node:fs/promises";
 import path from "node:path";
@@ -5,7 +6,7 @@ import sharp from "sharp";
 import type {Connection,Database} from "./db";
 import {hash,type Source,type Output,type Task} from "./domain";
 import {assertNoPendingAgentRevision} from "./agent-revisions";
-import {assertBundle,bundleQuality,bundleVersion,type Artifact} from "./grounding";
+import {assertBundle,bundleVersion,type Artifact} from "./grounding";
 import {platformVariants} from "./platform-variants";
 import {assertSourcePrivacy,ownerSourceEligible} from "./sources";
 
@@ -82,9 +83,10 @@ async function approvedContext(tx:Connection,taskId:string,reviewToken:string):P
   const version=latest?bundleVersion(bundle,source.hash):hash(bundle.map(item=>item.hash).join("|"));
   const token=latest?`revision:${latest.id}:${version}`:`original:${version}`;
   if(token!==reviewToken||(latest&&latest.version!==version))throw new MediaValidationError("Final content changed; render the newly approved version");
-  const approval=latest?(await tx.query<{version:string}>("SELECT version FROM revision_approvals WHERE revision_id=$1",[latest.id]))[0]:(await tx.query<{version:string}>("SELECT version FROM approvals WHERE task_id=$1",[taskId]))[0];
+  const approval=latest?(await tx.query<{version:string;evidence_version:string|null}>("SELECT version,evidence_version FROM revision_approvals WHERE revision_id=$1",[latest.id]))[0]:(await tx.query<{version:string;evidence_version:string|null}>("SELECT version,evidence_version FROM approvals WHERE task_id=$1",[taskId]))[0];
   if(approval?.version!==version)throw new MediaValidationError("Approve the exact final content before rendering media");
-  if(bundleQuality(bundle,source.text).flags.length)throw new MediaValidationError("Resolve factual review flags before rendering media");
+  const quality=await reviewReadiness(tx,taskId,bundle,source);
+  if(!await evidenceApprovalCurrent(tx,taskId,reviewToken,quality,approval?.evidence_version))throw new MediaValidationError("Resolve factual review flags before rendering media");
   const variants=platformVariants(bundle.find(item=>item.role==="Platform Adapter")),caption=variants.variants.find(item=>item.platform==="Instagram")?.text;
   if(!variants.complete||!caption)throw new MediaValidationError("An approved Instagram variant is required");
   assertSourcePrivacy(caption);return {source,caption,review_token:reviewToken};

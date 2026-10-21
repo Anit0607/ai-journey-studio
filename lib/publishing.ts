@@ -1,7 +1,8 @@
+import {reviewReadiness,evidenceApprovalCurrent} from "./evidence-review";
 import {randomUUID} from "node:crypto";
 import type {Connection,Database} from "./db";
 import {hash,istMonth,type Output,type Source,type Task} from "./domain";
-import {assertBundle,bundleQuality,bundleVersion,type Artifact} from "./grounding";
+import {assertBundle,bundleVersion,type Artifact} from "./grounding";
 import {assertNoPendingAgentRevision} from "./agent-revisions";
 import {platformVariants,REQUIRED_PLATFORMS,type Platform} from "./platform-variants";
 import {assertSourcePrivacy,sourceEligible} from "./sources";
@@ -103,9 +104,10 @@ async function finalArtifact(tx:Connection,id:string,expected:string,platform:Pl
   const version=latest?bundleVersion(bundle,source.hash):hash(bundle.map(item=>item.hash).join("|"));
   const token=latest?`revision:${latest.id}:${version}`:`original:${version}`;
   if(expected!==token||(latest&&latest.version!==version))throw new PublicationValidationError("Final artifact changed; fresh exact-version approval required");
-  const approval=latest?(await tx.query<{version:string}>("SELECT version FROM revision_approvals WHERE revision_id=$1",[latest.id]))[0]:(await tx.query<{version:string}>("SELECT version FROM approvals WHERE task_id=$1",[id]))[0];
+  const approval=latest?(await tx.query<{version:string;evidence_version:string|null}>("SELECT version,evidence_version FROM revision_approvals WHERE revision_id=$1",[latest.id]))[0]:(await tx.query<{version:string;evidence_version:string|null}>("SELECT version,evidence_version FROM approvals WHERE task_id=$1",[id]))[0];
   if(approval?.version!==version)throw new PublicationValidationError("Approve the exact final artifact before scheduling publication");
-  if(bundleQuality(bundle,source.text).flags.length)throw new PublicationValidationError("Resolve source-grounding flags before publishing");
+  const quality=await reviewReadiness(tx,id,bundle,source);
+  if(!await evidenceApprovalCurrent(tx,id,token,quality,approval?.evidence_version))throw new PublicationValidationError("Resolve source-grounding flags before publishing");
   const artifact=bundle.find(item=>item.role==="Platform Adapter")!,variants=platformVariants(artifact),variant=variants.variants.find(item=>item.platform===platform)!;
   if(!variants.complete||!variant.text||!variant.hash)throw new PublicationValidationError("Final platform variants are incomplete");
   return {task,source,artifact,variant};

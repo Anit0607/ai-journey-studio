@@ -50,7 +50,7 @@ test("only approved exact final Instagram variants render and private staging gr
 }));
 
 test("public Blob consent binds exact media bytes, origin, current review and source clearance",()=>fixture(async db=>{
-  const {task,source,intake,token}=await seed(db),card=await renderApprovedInstagram(db,task.id,token);
+  const {task,source,intake,store,token}=await seed(db),card=await renderApprovedInstagram(db,task.id,token);
   await assert.rejects(approvePublicMedia(db,card.id,card.sha256,ORIGIN,false),/Explicit public Vercel Blob/);
   await assert.rejects(approvePublicMedia(db,card.id,hash("other"),ORIGIN,true),/Media changed/);
   for(const origin of ["http://isolated.public.blob.vercel-storage.com","https://evil.test","https://isolated.public.blob.vercel-storage.com/path","https://user:pass@isolated.public.blob.vercel-storage.com"])await assert.rejects(approvePublicMedia(db,card.id,card.sha256,origin,true),/configured public Vercel Blob/);
@@ -58,7 +58,7 @@ test("public Blob consent binds exact media bytes, origin, current review and so
   assert.equal((await readApprovedPublicMedia(db,card.sha256,ORIGIN,task.id,token)).id,card.id);await assert.rejects(readApprovedPublicMedia(db,card.sha256,"https://other.public.blob.vercel-storage.com",task.id,token),/Separate exact public-media consent/);
   await assert.rejects(db.query("DELETE FROM media_public_approvals WHERE id=$1",[consent.id]),/immutable/);
   await intake.revoke(source.id,source.hash);await assert.rejects(getPrivateMedia(db,card.id),/Current exact owner source clearance/);await assert.rejects(readApprovedPublicMedia(db,card.sha256,ORIGIN,task.id,token),/Current exact owner source clearance/);
-  await intake.clear(source.id,source.hash,true);await assert.rejects(readApprovedPublicMedia(db,card.sha256,ORIGIN,task.id,token),/Separate exact public-media consent/);const refreshed=await renderApprovedInstagram(db,task.id,token);assert.notEqual(refreshed.id,card.id);assert.notEqual(refreshed.source_clearance_id,card.source_clearance_id);assert.equal(refreshed.sha256,card.sha256);
+  await intake.clear(source.id,source.hash,true);await assert.rejects(readApprovedPublicMedia(db,card.sha256,ORIGIN,task.id,token),/factual review/);await assert.rejects(renderApprovedInstagram(db,task.id,token),/factual review/);await store.revise(task.id,token,"Review content against renewed source clearance");const current=(await store.snapshot()).reviews.find((review:any)=>review.task_id===task.id);await store.approveRevision(task.id,current.token,true);await assert.rejects(readApprovedPublicMedia(db,card.sha256,ORIGIN,task.id,current.token),/Separate exact public-media consent/);const refreshed=await renderApprovedInstagram(db,task.id,current.token);assert.notEqual(refreshed.id,card.id);assert.notEqual(refreshed.source_clearance_id,card.source_clearance_id);assert.equal(refreshed.sha256,card.sha256);
 }));
 
 test("a new content revision invalidates older private media and its public approval",()=>fixture(async db=>{
