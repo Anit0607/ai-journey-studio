@@ -11,22 +11,27 @@ type State=Record<string,any>;
 const money=(value:number)=>"$"+(value/1_000_000).toFixed(4);
 export default function Page(){
   const [signedIn,setSignedIn]=useState(false),[authInfo,setAuthInfo]=useState<State|null>(null),[state,setState]=useState<State|null>(null),[input,setInput]=useState(""),[busy,setBusy]=useState(false),[error,setError]=useState(""),[status,setStatus]=useState("Disconnected"),[tab,setTab]=useState("Overview");
+  const [actionError,setActionError]=useState("");
   const inFlight=useRef(false),session=useRef(0),logoutInFlight=useRef(false);
+  const pollInFlight=useRef(false),stateVersion=useRef(0);
   const [logoutPending,setLogoutPending]=useState(false);
   async function request(path:string,body?:unknown){
     const response=await fetch("/api/studio/"+path,{method:body?"POST":"GET",credentials:"same-origin",headers:{"Content-Type":"application/json"},body:body?JSON.stringify(body):undefined,signal:AbortSignal.timeout(path==="integration-sync"?120_000:10_000)});
     const data=await response.json();if(!response.ok){if(response.status===401){setSignedIn(false);setState(null);}throw Error(data.error||"Request failed");}return data;
   }
-  async function refresh(){
-    if(inFlight.current)return;inFlight.current=true;setBusy(true);setStatus("Loading actual workspace");
-    const currentSession=session.current;
-    try{const next=await request("state");if(currentSession!==session.current)return;setState(next);setError("");setStatus("Connected");}
-    catch(e){if(currentSession===session.current){setError(e instanceof Error?e.message:"Connection failed");setStatus("Connection failed · previous state may be stale");}}finally{setBusy(false);inFlight.current=false;}
+  async function refresh(background=false){
+    if(inFlight.current||pollInFlight.current)return;
+    pollInFlight.current=true;
+    if(!background){inFlight.current=true;setBusy(true);setStatus("Loading actual workspace");}
+    const currentSession=session.current,currentVersion=stateVersion.current;
+    try{const next=await request("state");if(currentSession!==session.current||currentVersion!==stateVersion.current)return;setState(next);setError("");setStatus("Connected");}
+    catch(e){if(currentSession===session.current&&currentVersion===stateVersion.current){setError(e instanceof Error?e.message:"Connection failed");setStatus("Connection failed · previous state may be stale");}}
+    finally{pollInFlight.current=false;if(!background){setBusy(false);inFlight.current=false;}}
   }
-  useEffect(()=>{if(!signedIn)return;const timer=setInterval(()=>{void refresh();},5000);return ()=>clearInterval(timer);},[signedIn]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(()=>{if(!signedIn)return;const timer=setInterval(()=>{void refresh(true);},5000);return ()=>clearInterval(timer);},[signedIn]); // eslint-disable-line react-hooks/exhaustive-deps
   async function sourceAction(path:string,body:unknown):Promise<boolean>{
     if(inFlight.current)return false;
-    inFlight.current=true;setBusy(true);setError("");
+    inFlight.current=true;stateVersion.current+=1;setBusy(true);setError("");setActionError("");
     const currentSession=session.current;
     let saved=false;
     try{
@@ -36,7 +41,7 @@ export default function Page(){
       if(currentSession===session.current){setState(next);setStatus("Connected");}
       return true;
     }catch(e){
-      if(currentSession===session.current){setError((saved?"Action saved, but refresh failed. ":"")+(e instanceof Error?e.message:"Action failed"));if(saved)setStatus("Refresh needed · previous state may be stale");}
+      if(currentSession===session.current){setActionError((saved?"Action saved, but refresh failed. ":"")+(e instanceof Error?e.message:"Action failed"));if(saved)setStatus("Refresh needed · previous state may be stale");}
       return saved;
     }finally{setBusy(false);inFlight.current=false;}
   }
@@ -49,7 +54,7 @@ export default function Page(){
   }
     async function login(){if(logoutPending||inFlight.current)return;let loggedIn=false;const password=input;setInput("");setBusy(true);setError("");try{const result=await fetch("/api/auth/login",{method:"POST",credentials:"same-origin",headers:{"Content-Type":"application/json"},body:JSON.stringify({password})});const data=await result.json();if(!result.ok)throw Error(data.error||"Sign-in failed");setSignedIn(true);loggedIn=true;}catch(e){setError(e instanceof Error?e.message:"Sign-in failed");}finally{setBusy(false);}if(loggedIn)await refresh();}
   async function disconnect(){
-    if(logoutInFlight.current)return;logoutInFlight.current=true;session.current+=1;setLogoutPending(true);setSignedIn(false);setInput("");setState(null);setStatus("Verifying sign out");setBusy(true);
+    if(logoutInFlight.current)return;logoutInFlight.current=true;session.current+=1;setLogoutPending(true);setSignedIn(false);setInput("");setActionError("");setState(null);setStatus("Verifying sign out");setBusy(true);
     try{const result=await fetch("/api/auth/logout",{method:"POST",credentials:"same-origin",headers:{"Content-Type":"application/json"},body:"{}",signal:AbortSignal.timeout(10_000)});if(!result.ok)throw Error("Server sign-out failed. Retry sign out before leaving this device.");setLogoutPending(false);setStatus("Signed out");setError("");}
     catch(e){setStatus("Sign-out not confirmed");setError(e instanceof Error?e.message:"Sign-out failed");}
     finally{logoutInFlight.current=false;setBusy(false);}
@@ -62,6 +67,7 @@ export default function Page(){
     <div className="content"><header><div><span className="eyebrow">YOUR LEARNING JOURNEY</span><h1>{tab}</h1></div><span className="pill">Exact-version publishing controls</span></header>
     <div role="status" aria-live="polite" className="connection">{status}{state&&" · Last refreshed "+new Date(state.updated).toLocaleTimeString()}</div>
     {error&&<div role="alert" className="alert">{error}</div>}
+    {actionError&&<div role="alert" className="alert">{actionError}<button type="button" onClick={()=>setActionError("")}>Dismiss action error</button></div>}
     {!state?<section className="login"><span className="eyebrow">OWNER ACCESS</span><h2>Your private studio.</h2><p>{authInfo?.mode==="hosted"?"Private hosted workspace.":"Private workspace."} Sign in with the owner password you set once. Sources, outputs and usage require authentication.</p><label htmlFor="access">Owner password</label><input id="access" type="password" autoComplete="current-password" maxLength={128} value={input} onChange={e=>setInput(e.target.value)}/><button className="primary" disabled={busy||logoutPending||!input||!authInfo||authInfo.setup_required===true} onClick={()=>void login()}>{busy?"Signing in.":"Sign in"}</button>{logoutPending&&<button disabled={busy} onClick={()=>void disconnect()}>Retry sign out</button>}{(!authInfo||authInfo.setup_required)&&<p role="status">{authInfo?"Password setup is required. An approved database and securely provisioned owner account are needed. Public registration is disabled.":"Checking password setup."}</p>}<small>Use your ten-digit password or longer passphrase. Do not send it in chat. Provider credentials never belong here.</small></section>:<>
     <div className="toolbar"><span className="pill blocked">{state.live_enabled?"Execution enabled":"Live execution blocked"}</span><button onClick={()=>void refresh()} disabled={busy}>Refresh</button><button onClick={disconnect}>Sign out</button></div>
     {(tab==="Overview"||tab==="Usage")&&<>

@@ -1,0 +1,22 @@
+// Isolated polling/write-race regression; all API routes intercepted, no database.
+import {chromium} from '@playwright/test';
+import {spawn} from 'node:child_process';
+import assert from 'node:assert/strict';
+const origin='http://127.0.0.1:3138',expectDisabled=process.argv.includes('--expect-disabled');
+const server=spawn(process.execPath,['node_modules/next/dist/bin/next','start','--hostname','127.0.0.1','--port','3138'],{stdio:'ignore',env:{NODE_ENV:'production',NEXT_TELEMETRY_DISABLED:'1'}});
+let browser;let releasePoll=()=>{},releaseWrite=()=>{};
+try{
+ let ready=false;for(let n=0;n<100;n++){try{if((await fetch(origin)).ok){ready=true;break;}}catch{}await new Promise(r=>setTimeout(r,200));}assert.ok(ready);
+ const executablePath=process.argv.find(a=>a.startsWith('--browser-executable='))?.slice('--browser-executable='.length);browser=await chromium.launch({headless:true,...(executablePath?{executablePath}:{})});const page=await browser.newPage();const errors:string[]=[];page.on('pageerror',e=>errors.push(e.message));
+ let polls=0,writes=0,enteredPoll!:()=>void,enteredWrite!:()=>void;const pollEntered=new Promise<void>(r=>enteredPoll=r),writeEntered=new Promise<void>(r=>enteredWrite=r),pollGate=new Promise<void>(r=>releasePoll=r),writeGate=new Promise<void>(r=>releaseWrite=r);
+ const note={id:'12345678-1234-4234-8234-123456789012',text:'Isolated reviewed project note.',category:'project-note',reported_date:'2026-10-21',hash:'a'.repeat(64),cleared:false} as Record<string,unknown>;
+ const state={budget:{committed_microdollars:0,month_IST:'2026-10',warning:false},analyst:{status:'insufficient-data',reason:'Isolated fixture'},blockers:['Execution disabled'],database:'pglite',sources:[note],tasks:[],outputs:[],reviews:[],events:[],ledger:[],updated:new Date().toISOString(),proposed_source:'',source_approved:false,owner_cleared_sources_authorized:false,live_enabled:false};
+ await page.route('**/*',async route=>{const url=new URL(route.request().url());if(url.origin!==origin)return route.abort();if(url.pathname==='/api/auth/status')return route.fulfill({json:{authenticated:true,setup_required:false}});if(url.pathname==='/api/studio/state'){polls++;const snapshot=structuredClone(state);if(polls===2){enteredPoll();await pollGate;}return route.fulfill({json:snapshot});}if(url.pathname==='/api/studio/source-clear'){writes++;const body=route.request().postDataJSON();assert.equal(body.acknowledged,true);enteredWrite();await writeGate;Object.assign(note,{cleared:true,clearance_id:'23456789-1234-4234-8234-123456789012',clearance_hash:note.hash,clearance_provider:'openai',clearance_purpose:'content-drafts-revisions',clearance_owner_acknowledged:true,clearance_acknowledgement:'I am the owner and have reviewed this exact source text and hash. I authorize sending it to OpenAI for content drafts and revisions under the $10 monthly warning and $15 monthly cap. It contains no bank, client, private, confidential, or credential material. This does not authorize Gemini or publishing.',cleared_at:new Date().toISOString()});return route.fulfill({json:{result:note}});}if(url.pathname.startsWith('/api/'))return route.abort();return route.continue();});
+ await page.goto(origin);await page.getByRole('button',{name:'Sources',exact:true}).click();await page.getByRole('checkbox').check();const clear=page.getByRole('button',{name:'Clear this exact note for OpenAI',exact:true});assert.equal(await clear.isEnabled(),true);await pollEntered;
+ // Wait for the asynchronous React state update from refresh to render.
+ await page.waitForTimeout(100);
+ if(expectDisabled){assert.equal(await clear.isDisabled(),true);assert.equal(writes,0);console.log('REPRODUCED: held background state GET disables consent and Clear control without any POST.');}
+ else{
+  assert.equal(await clear.isEnabled(),true);await clear.evaluate((button:HTMLButtonElement)=>{button.click();button.click();});await writeEntered;assert.equal(writes,1);releaseWrite();await page.getByText('Cleared for OpenAI',{exact:true}).waitFor();releasePoll();await page.waitForTimeout(300);await page.getByText('Cleared for OpenAI',{exact:true}).waitFor();assert.equal(writes,1);assert.deepEqual(errors,[]);console.log('PASS: clearance remains enabled during held poll; rapid duplicate clicks issue one POST; stale poll cannot replace cleared state; no live APIs or DB.');
+ }
+}finally{releasePoll();releaseWrite();await browser?.close();server.kill();await new Promise<void>(r=>{if(server.exitCode!==null)r();else server.once('exit',()=>r());});}

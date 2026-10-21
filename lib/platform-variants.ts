@@ -2,7 +2,14 @@ import {hash} from "./domain";
 import type {Artifact} from "./grounding";
 export const REQUIRED_PLATFORMS=["LinkedIn","X","Instagram"] as const;
 export type Platform=typeof REQUIRED_PLATFORMS[number];
-export const PLATFORM_FORMAT="Return exactly three nonempty sections, each beginning with one of these exact headings on its own line, in this order: ### LinkedIn, ### X, ### Instagram. Put only that platform's draft beneath its heading. No preamble, extra platform sections, or empty placeholders. These exact headings are the platform schema; a name mentioned in prose is not a variant. Target the implemented standard-post formats: LinkedIn at most 3000 characters, X one standalone post at most 280 weighted characters (URLs count as 23; do not emit a thread or native Article), and Instagram a concise caption suitable for a single readable text card (prefer at most 600 characters, English or Latin-script Hinglish, no emoji). Do not invent a photo or claim media already exists. Longer material needs a separately reviewed shorter platform variant; never silently truncate.";
+export const PLATFORM_FORMAT="Return exactly three nonempty sections, each beginning with one of these exact headings on its own line, in this order: ### LinkedIn, ### X, ### Instagram. Put only that platform's publishable prose beneath its heading. Reviewer labels Unsupported claims:, Evidence needed:, Proposed advice:, and owner-clearance/source-date footers belong in separate internal artifacts, never these sections. Do not silently trim saved content; contaminated drafts require a fresh reviewed revision. No preamble, extra platform sections, or empty placeholders. These exact headings are the platform schema; a name mentioned in prose is not a variant. Target the implemented standard-post formats: LinkedIn at most 3000 characters, X one standalone post at most 280 weighted characters (URLs count as 23; do not emit a thread or native Article), and Instagram a concise caption suitable for a single readable text card (prefer at most 600 characters, English or Latin-script Hinglish, no emoji). Do not invent a photo or claim media already exists. Longer material needs a separately reviewed shorter platform variant; never silently truncate.";
+
+/** Internal metadata must never be silently included in a publishable variant. */
+export function hasInternalReviewMetadata(text:string):boolean{
+ return /\b(?:Unsupported claims|Evidence needed|Proposed advice)\s*(?:\*{1,2}|_{1,2})?\s*[:\uFF1A]/i.test(text)||
+  /^\s*[*_]*(?:Source:\s*Owner-cleared\b|SOURCE DATE:)/im.test(text);
+}
+
 /** Parse separate, explicit sections without modifying historical artifact bytes or hashes.
  * Exact plain/Markdown headings with an optional colon support existing local output.
  * Incidental names, hashtags, prefixes, partial matches and empty sections fail closed.
@@ -28,6 +35,7 @@ export function platformVariants(artifact?:Pick<Artifact,"text"|"hash">){
     }
   }
   flush();
+  if([...sections.values()].some(hasInternalReviewMetadata))return missing("Internal reviewer metadata must remain in internal artifacts; create a clean exact-version revision before approval or publishing");
   const variants=REQUIRED_PLATFORMS.map(name=>{
     const text=sections.get(name)||null;
     const valid=text!==null&&!/^(?:n\/?a|tbd|todo|pending|not generated|\.\.\.)[.!]?$/i.test(text);
