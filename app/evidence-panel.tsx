@@ -27,6 +27,6 @@ export default function EvidencePanel({quality,task,token,busy,action}:{quality:
  if(!quality.findings)return null;
  return <section aria-label="Evidence review"><h3>Check wording against evidence</h3><p>Review each sentence separately. This does not approve content or allow publishing. Changed content or source clearance invalidates its decisions.</p>
  {quality.critic&&!quality.critic.legacy&&<p>Agent evidence suggestions: {quality.critic.valid?'format checked; owner review still required':'invalid; correct the Critic artifact before approval'}.</p>}
- {quality.findings.map(item=><IndividualReview key={quality.binding+item.id+(item.resolution?.id||'unresolved')} {...{item,quality,task,token,busy,action}}/>)}
+ {quality.findings.map(item=>item.category==='structure'?<article key={quality.binding+item.id} aria-label={'Review blocker '+item.role}><strong>{item.role} · Review blocker</strong><p>{item.claim}</p><p>{item.reason}</p><p>Correct the artifact structure before approval. This is not a sentence to confirm against the source.</p></article>:<IndividualReview key={quality.binding+item.id+(item.resolution?.id||'unresolved')} {...{item,quality,task,token,busy,action}}/>)}
  </section>;
 }
