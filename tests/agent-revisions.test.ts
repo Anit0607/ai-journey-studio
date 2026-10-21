@@ -110,10 +110,10 @@ test("source revocation during final call never attaches the generated revision"
   const state=await store.snapshot();assert.equal(state.reviews[0].history.length,0);assert.equal(state.tasks.find((task:any)=>task.id===child.id).block_reason,"revision_source");assert.equal(state.ledger.length,6);assert(state.ledger.every((row:any)=>row.status==="settled"));
 }));
 
-test("corrupt child artifact blocks attachment while preserving settled accounting",()=>fixture(async(store,parent,token)=>{
+test("corrupt child artifact blocks before another call while preserving settled accounting",()=>fixture(async(store,parent,token)=>{
   const child=await queueAgentRevision(store,config,parent.id,token,feedback);await runRoles(store,5);
   await store.db.query("UPDATE outputs SET text='tampered fixture' WHERE task_id=$1 AND role='Harvester'",[child.id]);await runRoles(store,1);
-  const state=await store.snapshot();assert.equal(state.reviews[0].history.length,0);assert.equal(state.tasks.find((task:any)=>task.id===child.id).block_reason,"revision_invalid");assert.equal(state.ledger.length,6);assert(state.ledger.every((row:any)=>row.status==="settled"));
+  const state=await store.snapshot();assert.equal(state.reviews[0].history.length,0);assert.equal(state.tasks.find((task:any)=>task.id===child.id).block_reason,"revision_invalid");assert.equal(state.tasks.find((task:any)=>task.id===child.id).checkpoint,5);assert.equal(state.ledger.length,5);assert(state.ledger.every((row:any)=>row.status==="settled"));await assert.rejects(store.retry(child.id),/Completed revision/);
 }));
 
 test("cancellation during final call saves in-flight usage without adding a parent revision",()=>fixture(async(store,parent,token)=>{

@@ -26,6 +26,7 @@ type Props = {
   sourceApproved:boolean;
   intakeAuthorized:boolean;
   liveEnabled:boolean;
+  draftingPaused?:boolean;
   busy:boolean;
   action:Action;
 };
@@ -42,7 +43,7 @@ const hasOwnerClearance=(source:Source)=>source.clearance_owner_acknowledged===t
 const field:CSSProperties={display:"block",width:"100%",maxWidth:"100%",boxSizing:"border-box",margin:"8px 0 16px",padding:"12px",borderRadius:"8px",background:"#0d141c",color:"#dce8ed",border:"1px solid #30404b"};
 const row:CSSProperties={display:"flex",gap:"12px",flexWrap:"wrap",alignItems:"center"};
 
-function SourceCard({source,legacyApproved,intakeAuthorized,liveEnabled,busy,action}:{source:Source;legacyApproved:boolean;intakeAuthorized:boolean;liveEnabled:boolean;busy:boolean;action:Action}){
+function SourceCard({source,legacyApproved,intakeAuthorized,liveEnabled,draftingPaused=false,busy,action}:{source:Source;legacyApproved:boolean;intakeAuthorized:boolean;liveEnabled:boolean;draftingPaused?:boolean;busy:boolean;action:Action}){
   const [acknowledged,setAcknowledged]=useState(false),[pending,setPending]=useState("");
   const inFlight=useRef(false);
   const cleared=source.cleared&&!source.revoked_at&&(legacyApproved||(
@@ -67,10 +68,11 @@ function SourceCard({source,legacyApproved,intakeAuthorized,liveEnabled,busy,act
     {cleared?<>
       <p>{legacyApproved?"Consent recorded for this exact capsule.":"Clearance recorded for this exact note and hash: OpenAI, content drafts and revisions only."}</p>
       <div style={row}>
-        <button className="primary" disabled={disabled||!liveEnabled||(!legacyApproved&&!intakeAuthorized)} onClick={()=>void perform("run",{source:source.id})}>{pending==="run"?"Queueing…":"Queue content workflow"}</button>
+        <button className="primary" disabled={disabled||!liveEnabled||(!legacyApproved&&!intakeAuthorized)} onClick={()=>void perform("run",{source:source.id})}>{pending==="run"?"Queueing…":draftingPaused?"Queue only · drafting paused":"Queue content workflow"}</button>
         <button disabled={disabled} onClick={()=>void perform("source-revoke",{source:source.id,expected_hash:source.hash})}>{pending==="source-revoke"?"Revoking…":"Revoke clearance"}</button>
       </div>
       {(!liveEnabled||(!legacyApproved&&!intakeAuthorized))&&<p className="fine">Execution is blocked until runtime transmission permission, secure credential setup, current pricing and the other authorization checks pass.</p>}
+      {draftingPaused&&<p role="status">Hosted drafting is OFF in Calendar. Queueing records a task only; it will not generate content until drafting is explicitly enabled and an authorized worker is invoked. No model call is made by this button.</p>}
       <p className="fine">Revoking stops future use of this note. It cannot recall information already sent or interrupt a call in progress.</p>
     </>:<>
       <label style={{display:"flex",gap:"10px",alignItems:"flex-start",margin:"18px 0"}}>
@@ -84,7 +86,7 @@ function SourceCard({source,legacyApproved,intakeAuthorized,liveEnabled,busy,act
   </article>;
 }
 
-export default function SourcePanel({sources,proposedSource,sourceApproved,intakeAuthorized,liveEnabled,busy,action}:Props){
+export default function SourcePanel({sources,proposedSource,sourceApproved,intakeAuthorized,liveEnabled,draftingPaused=false,busy,action}:Props){
   const [text,setText]=useState(""),[date,setDate]=useState(""),[category,setCategory]=useState("project-note"),[pending,setPending]=useState(false),[notice,setNotice]=useState("");
   const inFlight=useRef(false),fileRead=useRef(0);
   const [readingFile,setReadingFile]=useState(false),[filePreview,setFilePreview]=useState<{name:string;source:ParsedSourceFile}|null>(null),[fileError,setFileError]=useState(""),[replaceConfirmed,setReplaceConfirmed]=useState(false);
@@ -159,7 +161,7 @@ export default function SourcePanel({sources,proposedSource,sourceApproved,intak
       <span className="eyebrow">SEPARATE TRANSMISSION CLEARANCE</span>
       <h2 id="source-review-title">Review saved sources</h2>
       <p>Each note needs its own exact-version review. No source, consent checkbox or workflow is selected automatically.</p>
-      {sources.length===0?<div className="empty"><h3>No sources saved</h3><p>Your workspace stays empty until you stage real evidence. Nothing is sent to a model until separately cleared and run.</p></div>:sources.map(source=><SourceCard key={[source.id,source.hash,source.cleared,source.clearance_id,source.revoked_at].join(":")} source={source} legacyApproved={sourceApproved&&!hasOwnerClearance(source)&&source.text===proposedSource&&source.category==="user-reported-notes"&&source.reported_date==="2026-10-09"} intakeAuthorized={intakeAuthorized} liveEnabled={liveEnabled} busy={busy} action={action}/>)}
+      {sources.length===0?<div className="empty"><h3>No sources saved</h3><p>Your workspace stays empty until you stage real evidence. Nothing is sent to a model until separately cleared and run.</p></div>:sources.map(source=><SourceCard key={[source.id,source.hash,source.cleared,source.clearance_id,source.revoked_at].join(":")} source={source} legacyApproved={sourceApproved&&!hasOwnerClearance(source)&&source.text===proposedSource&&source.category==="user-reported-notes"&&source.reported_date==="2026-10-09"} intakeAuthorized={intakeAuthorized} liveEnabled={liveEnabled} draftingPaused={draftingPaused} busy={busy} action={action}/>)}
     </section>
     {proposedSource&&<section aria-labelledby="legacy-source-title">
       <span className="eyebrow">USER-REPORTED NOTES · 9 OCTOBER 2026</span>

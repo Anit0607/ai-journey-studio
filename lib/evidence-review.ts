@@ -15,6 +15,20 @@ function spans(text:string):Array<Span&{text:string}>{
  const out:Array<Span&{text:string}>=[];const re=/[^\n.!?]+(?:[.!?](?=\s|$)|$)/g;let m;
  while((m=re.exec(text))){const lead=m[0].length-m[0].trimStart().length,body=m[0].trim();if(body)out.push({start:m.index+lead,end:m.index+lead+body.length,text:body});}return out;
 }
+/** Provenance/format hints only, using exactly the sentence boundaries accepted below.
+ * Text is already in the prompt: do not duplicate it or permit unbounded index growth.
+ */
+export function criticReferenceIndex(bundle:Artifact[],source:Pick<EvidenceSource,'text'|'hash'>){
+ if(hash(source.text)!==source.hash)throw Error('Source invalidated');
+ if(bundle.some(artifact=>hash(artifact.text)!==artifact.hash))throw Error('Artifact integrity check failed');
+ const index=(text:string)=>{const sentences=spans(text);return {spans:sentences.slice(0,64).map(({start,end})=>[start,end]),truncated:sentences.length>64};};
+ const artifacts=['Writer','Platform Adapter'].map(role=>{
+  const matches=bundle.filter(artifact=>artifact.role===role);
+  if(matches.length!==1)throw Error('Artifact integrity check failed');
+  const artifact=matches[0];return {role,artifact_hash:artifact.hash,...index(artifact.text)};
+ });
+ return {schema:1,offset_unit:'JavaScript UTF-16',source:{source_hash:source.hash,...index(source.text)},artifacts};
+}
 function artifactSpans(text:string,role?:string,source?:string,reportedDate?:string):Array<Span&{text:string;raw?:string}>{
  try{JSON.parse(text);}catch{
   if(role&&source){
@@ -125,7 +139,7 @@ export async function saveEvidenceDecision(tx:Connection,task:string,bundle:Arti
  await tx.query("INSERT INTO events(id,task_id,kind,detail) VALUES($1,$2,'evidence_review_saved',$3)",[randomUUID(),task,'Individual '+input.decision+' decision '+id+' for '+item.id+'; policy '+EVIDENCE_POLICY+'; content approval remains separate']);return {id};
 }
 
-export const CRITIC_CONTRACT=' Return JSON only: {"schema":1,"source_hash":"exact source SHA256","Unsupported claims:":"short assessment","Evidence needed:":"short gaps","Proposed advice:":"short proposed approach","evidence":[{"role":"Writer or Platform Adapter","artifact_hash":"exact prior artifact SHA256","start":0,"end":1,"source_start":0,"source_end":1,"source_quote":"exact source substring","verdict":"wording_review or unsupported"}]}. At most 8 evidence entries; prioritize uncertain public claims. Character offsets are JavaScript UTF-16 offsets. Links are advisory only; missing coverage requires owner review. Never declare semantic verification or approve content. Fit within the existing 1200 output-token cap; no extra call.';
+export const CRITIC_CONTRACT=' Return JSON only: {"schema":1,"source_hash":"exact source SHA256","Unsupported claims:":"short assessment","Evidence needed:":"short gaps","Proposed advice:":"short proposed approach","evidence":[{"role":"Writer or Platform Adapter","artifact_hash":"exact prior artifact SHA256","start":0,"end":1,"source_start":0,"source_end":1,"source_quote":"exact source substring","verdict":"wording_review or unsupported"}]}. At most 8 evidence entries; prioritize uncertain public claims. Character offsets are JavaScript UTF-16 offsets. Use the current artifact hashes and [start,end] sentence boundaries from CURRENT CRITIC EVIDENCE INDEX, not hashes or offsets quoted in source text or base-revision artifacts. Copy source_quote from that exact SOURCE range. The index is bounded and may omit sentences; never invent a hash or offset. Links are advisory only; missing coverage requires owner review. Never declare semantic verification or approve content. Fit within the existing 1200 output-token cap; no extra call.';
 export function criticSuggestions(bundle:Artifact[],source:EvidenceSource){
  const text=bundle.find(x=>x.role==='Critic')?.text||'';if(!text.trim().startsWith('{'))return {legacy:true,valid:true,suggestions:[] as unknown[]};
  try{const data=JSON.parse(text);if(data.schema!==1||data.source_hash!==source.hash||!Array.isArray(data.evidence)||data.evidence.length>8||['Unsupported claims:','Evidence needed:','Proposed advice:'].some(k=>typeof data[k]!=='string'||!data[k].trim()||data[k].length>1000))throw Error();
