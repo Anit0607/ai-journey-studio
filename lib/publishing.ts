@@ -6,6 +6,7 @@ import {assertBundle,bundleVersion,type Artifact} from "./grounding";
 import {assertNoPendingAgentRevision} from "./agent-revisions";
 import {platformVariants,REQUIRED_PLATFORMS,type Platform} from "./platform-variants";
 import {assertSourcePrivacy,sourceEligible} from "./sources";
+import {xPostTextValidation} from "./x-text";
 
 export class PublicationValidationError extends Error{}
 export function safePublicationError(error:unknown):string|null{return error instanceof PublicationValidationError?error.message:null;}
@@ -34,9 +35,12 @@ function normalizedPayload(platform:Platform,payload:PublishingPayload):Publishi
   objectKeys(payload,["text","media"]);
   if(typeof payload.text!=="string"||!payload.text.trim()||/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/.test(payload.text))throw new PublicationValidationError("Invalid publication text");
   assertSourcePrivacy(payload.text);
-  // Conservative Unicode weight. Never truncate or split an approved draft.
-  const weight=[...payload.text].reduce((n,c)=>n+(c.codePointAt(0)!>0x7f?2:1),0);
-  if(platform==="X"&&weight>280)throw new PublicationValidationError("X single-post limit exceeded; revise the final draft before approval");
+  if(platform==="X"){
+    const {weightedLength,valid}=xPostTextValidation(payload.text);
+    if(weightedLength===null)throw new PublicationValidationError("X draft exceeds the app's 4,096-character input safety limit; shorten URLs or revise the draft before approval");
+    if(weightedLength>280)throw new PublicationValidationError("X single-post limit exceeded; revise the final draft before approval");
+    if(!valid)throw new PublicationValidationError("Invalid X publication text; revise the final draft before approval");
+  }
   if(platform==="LinkedIn"&&payload.text.length>3000)throw new PublicationValidationError("LinkedIn text limit exceeded");
   if(platform==="Instagram"&&payload.text.length>2200)throw new PublicationValidationError("Instagram caption limit exceeded");
   if(platform!=="Instagram"){
