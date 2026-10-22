@@ -1,3 +1,4 @@
+import {calendarRecoverySnapshot} from "./calendar-recovery";
 import {platformVariants} from "./platform-variants";
 import {randomUUID} from "node:crypto";
 import type {Database} from "./db";
@@ -92,6 +93,8 @@ export class Calendar{
   }
   async link(entry:string,source:string|null,task:string|null){
     await this.db.transaction(async tx=>{
+      // Keep explicit links serialized with recovery and dispatch.
+      await tx.query("SELECT id FROM calendar_settings WHERE id=1 FOR UPDATE");
       if(!(await tx.query("SELECT id FROM calendar_entries WHERE id=$1 FOR UPDATE",[entry])).length)throw Error("Unknown calendar entry");
       const intent=(await tx.query<any>("SELECT * FROM calendar_jobs WHERE entry_id=$1 FOR UPDATE",[entry]))[0];
       if(intent?.task_id&&(intent.task_id!==task||intent.source_id!==source))throw Error("Dispatched calendar task cannot be relinked");
@@ -181,7 +184,7 @@ export class Calendar{
       const variants=PLATFORMS.map(platform=>{const variant=parsed.variants.find(item=>item.platform===platform)!;return {platform,...(entry.platform_schedule[platform]||{intended_post:entry.intended_post,draft_due:entry.draft_due,review_due:entry.review_due}),status:content?(variant.hash?review?.approval&&parsed.complete?"user_approved_quality_separate":"review_needed":"not_separately_identified"):"not_generated",artifact_hash:variant.hash,source_artifact_hash:content?.hash||null};});
       const generationLate=!!entry.generation_due&&(job?.dispatched_at?new Date(job.dispatched_at)>new Date(entry.generation_due):!task&&new Date(entry.generation_due)<now);
       const timingNotice=generationLate?(job?.dispatched_at?"Queued after the target generation time; the review deadline is unchanged":"Target generation time has passed. Catch-up is allowed only while the review deadline remains in the future"):null;
-      return {...entry,job,generation_late:generationLate,timing_notice:timingNotice,status:(review?.approval||(!review?.latest_revision&&review?.original_approval))&&!parsed.complete?"historical_approval_completeness_unverified":reviewReady&&review?.quality.flags.length?"changes_needed":review?.approval?"user_approved_quality_separate":review?.latest_revision?"review_needed":task?.status==="review"?"review_needed":task?task.status:due?blockers.length?"due_blocked":"due_ready":blockers.length?"planned_blocked":"planned_ready",blocked_reasons:blockers,variants,linked_task_status:task?.status||null,linked_content_version:review?.token||null};
+      return {...entry,job,recovery:calendarRecoverySnapshot(entry,job,task,source,state.ledger||[],now),generation_late:generationLate,timing_notice:timingNotice,status:(review?.approval||(!review?.latest_revision&&review?.original_approval))&&!parsed.complete?"historical_approval_completeness_unverified":reviewReady&&review?.quality.flags.length?"changes_needed":review?.approval?"user_approved_quality_separate":review?.latest_revision?"review_needed":task?.status==="review"?"review_needed":task?task.status:due?blockers.length?"due_blocked":"due_ready":blockers.length?"planned_blocked":"planned_ready",blocked_reasons:blockers,variants,linked_task_status:task?.status||null,linked_content_version:review?.token||null};
     })};
   }
 }
