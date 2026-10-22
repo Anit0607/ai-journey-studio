@@ -46,3 +46,11 @@ The compact editorial text in lib/drafting-guidance.ts is adapted from selected 
 
 
 Adaptation boundary: LinkedIn hook/payoff and voice discipline; Instagram caption hierarchy and one-idea-per-slide planning; YouTube complementary packaging, script beats and transcript-grounded chapters; X one-point compression and platform-native repurposing. These are writing suggestions, never evidence of the owner's experience or promises of support for extra publication formats.
+
+## X text validation runtime dependencies
+
+- `twitter-text` **3.1.0** is the official parser recommended by [X's character-counting documentation](https://docs.x.com/fundamentals/counting-characters). Source: [twitter/twitter-text](https://github.com/twitter/twitter-text); Apache-2.0 license, included in the package's `LICENSE`. The server imports only `twitter-text/dist/parseTweet.js`, not linkification or HTML rendering functions.
+- The package's old `twemoji-parser` dependency is explicitly overridden with the maintained successor **`@twemoji/parser` 17.0.2**. The [upstream README](https://github.com/jdecked/twemoji-parser) documents the package rename. MIT license, included in the package's `LICENSE.md`; copyright Jason Sofonia, Justine De Caires and Twitter. This supplies modern emoji data through the same `parse(text)` entity API. No emoji image assets are used or fetched.
+- Transitive runtime packages: `@babel/runtime` 7.29.10, `core-js` 2.6.12 and `punycode` 1.4.1, all MIT. Exact registry URLs, aliases, versions and integrity hashes are in `package-lock.json`.
+
+All new packages came from `https://registry.npmjs.org`; installation was performed with lifecycle scripts disabled. No upstream repository scripts were run. `twitter-text` was released in March 2020 and still depends on deprecated `core-js` 2. Its age and legacy polyfill side effects are maintenance/performance risks, even when a vulnerability scan is clean. The Twemoji override is a deliberate, tested compatibility boundary, not an official new X parser release. Keep it pinned and rerun the Unicode/URL and publication regressions when either parser changes. See [the local validation review](docs/x-text-validation-2026-10-22.md) for verification and remaining limits.
