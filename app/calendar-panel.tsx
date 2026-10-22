@@ -1,15 +1,17 @@
 "use client";
 import {useState,type CSSProperties} from "react";
 import {PLATFORMS,BENCHMARK_PRESET} from "../lib/schedule-presets";
+import CalendarRecoveryForm from "./calendar-recovery-form";
 import type {PlatformTimes} from "../lib/calendar";
 const weekdays=["Sunday","Monday","Tuesday","Wednesday","Thursday","Friday","Saturday"];
 const field:CSSProperties={display:"block",margin:"8px 0 16px",padding:"10px",background:"#0d141c",color:"#dce8ed",border:"1px solid #30404b"};
 const displayDate=(value:string|null)=>value?new Date(value).toLocaleString("en-IN",{timeZone:"Asia/Kolkata",dateStyle:"medium",timeStyle:"short"})+" IST":"Not chosen";
-function Entry({entry,sources,tasks,busy,action}:{entry:any;sources:any[];tasks:any[];busy:boolean;action:(path:string,body:unknown)=>Promise<void>}){
+function Entry({entry,sources,tasks,busy,action,minimumLeadHours}:{minimumLeadHours:number;entry:any;sources:any[];tasks:any[];busy:boolean;action:(path:string,body:unknown)=>Promise<void>}){
   const [source,setSource]=useState(entry.source_id||""),[task,setTask]=useState(entry.task_id||"");
   return <article><h3>{entry.planned_date} · {entry.kind} <span className="pill">{entry.status.replaceAll("_"," ")}</span></h3>
     <p>Intended posting: {displayDate(entry.intended_post)}<br/>Draft ready / review deadline: {displayDate(entry.review_due)}<br/>Generation due: {displayDate(entry.generation_due)}</p>
     {entry.timing_notice&&<p role="status">{entry.timing_notice}</p>}
+    <CalendarRecoveryForm entryId={entry.id} recovery={entry.recovery} minimumLeadHours={minimumLeadHours} busy={busy} action={action}/>
     <label>Cleared source<select style={field} aria-label={"Source for "+entry.planned_date} value={source} onChange={event=>{setSource(event.target.value);setTask("");}}><option value="">No source linked</option>{sources.map(item=><option key={item.id} value={item.id}>{item.category} · {item.reported_date} · {item.id.slice(0,8)}</option>)}</select></label>
     <label>Existing content task<select style={field} aria-label={"Task for "+entry.planned_date} value={task} onChange={event=>setTask(event.target.value)}><option value="">No task linked</option>{tasks.filter(item=>item.source_id===source&&!item.revision_parent_task_id).map(item=><option key={item.id} value={item.id}>{item.id.slice(0,8)} · {item.status}</option>)}</select></label>
     <button disabled={busy} onClick={()=>void action("calendar-link",{entry:entry.id,source:source||null,task:task||null})}>Save explicit links</button>
@@ -45,6 +47,6 @@ export default function CalendarPanel({calendar,sources,tasks,busy,action}:{cale
     <button disabled={busy} onClick={()=>void action("calendar-configure",{start_date:date||null,post_time:time||null,short_days:short,long_day:long,generation_lead_hours:lead?Number(lead):null,timing_mode:mode,platform_times:times,timing_basis:basis,generation_enabled:generationEnabled})}>Save calendar settings</button>
     <label>Weeks to plan<select style={field} aria-label="Weeks to plan" value={weeks} onChange={event=>setWeeks(Number(event.target.value))}>{[1,2,3,4].map(value=><option key={value} value={value}>{value}</option>)}</select></label>
     <button disabled={busy||calendar.configuration_needed} onClick={()=>void action("calendar-plan",{weeks})}>Create or update planned dates</button> <button disabled={busy} onClick={()=>void action("calendar-prepare",{})}>Check due queue — no model calls</button> <button disabled={busy||!settings.generation_enabled} onClick={()=>void action("calendar-dispatch",{})}>Queue eligible due drafts — no model calls</button>
-    {calendar.entries.length===0?<div className="empty"><h3>No calendar entries yet</h3><p>Save timing and explicitly create planned dates. No source or task is selected automatically.</p></div>:calendar.entries.map((entry:any)=><Entry key={entry.id+entry.updated} entry={entry} sources={sources} tasks={tasks} busy={busy} action={action}/>)}
+    {calendar.entries.length===0?<div className="empty"><h3>No calendar entries yet</h3><p>Save timing and explicitly create planned dates. No source or task is selected automatically.</p></div>:calendar.entries.map((entry:any)=><Entry key={entry.id+entry.updated} minimumLeadHours={calendar.minimum_generation_lead_hours||49} entry={entry} sources={sources} tasks={tasks} busy={busy} action={action}/>)}
   </section>;
 }
