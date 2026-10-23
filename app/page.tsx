@@ -18,8 +18,15 @@ export default function Page(){
   const pollInFlight=useRef(false),stateVersion=useRef(0);
   const [logoutPending,setLogoutPending]=useState(false);
   async function request(path:string,body?:unknown){
-    const response=await fetch("/api/studio/"+path,{method:body?"POST":"GET",credentials:"same-origin",headers:{"Content-Type":"application/json"},body:body?JSON.stringify(body):undefined,signal:AbortSignal.timeout(path==="integration-sync"?120_000:10_000)});
-    const data=await response.json();if(!response.ok){if(response.status===401){setSignedIn(false);setState(null);}throw Error(data.error||"Request failed");}return data;
+    let response:Response,data:State;
+    try{
+      response=await fetch("/api/studio/"+path,{method:body?"POST":"GET",credentials:"same-origin",headers:{"Content-Type":"application/json"},body:body?JSON.stringify(body):undefined,signal:AbortSignal.timeout(path==="publication-publish"?170_000:path==="integration-sync"?120_000:10_000)});
+      data=await response.json();
+    }catch(e){
+      if(path==="publication-publish")throw Error("Publication outcome is not confirmed. The server may still be completing this exact plan. Check its saved status and provider receipt; do not retry an uncertain publication.");
+      throw e;
+    }
+    if(!response.ok){if(response.status===401){setSignedIn(false);setState(null);}throw Error(data.error||"Request failed");}return data;
   }
   async function refresh(background=false){
     if(inFlight.current||pollInFlight.current)return;
@@ -43,7 +50,12 @@ export default function Page(){
       if(currentSession===session.current){setState(next);setStatus("Connected");}
       return true;
     }catch(e){
-      if(currentSession===session.current){setActionError((saved?"Action saved, but refresh failed. ":"")+(e instanceof Error?e.message:"Action failed"));if(saved)setStatus("Refresh needed · previous state may be stale");}
+      if(currentSession===session.current){
+        setActionError((saved?"Action saved, but refresh failed. ":"")+(e instanceof Error?e.message:"Action failed"));
+        if(saved||path==="publication-publish")setStatus("Refresh needed · previous state may be stale");
+        // A failed client response is not proof that delivery failed. Read durable state, never POST again.
+        if(path==="publication-publish"&&!saved){try{const next=await request("state");if(currentSession===session.current){setState(next);setStatus("Check saved publication status and receipt");}}catch{/* Keep the explicit uncertainty warning and locked job control. */}}
+      }
       return saved;
     }finally{setBusy(false);inFlight.current=false;}
   }

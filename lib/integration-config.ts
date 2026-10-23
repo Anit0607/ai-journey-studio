@@ -16,5 +16,5 @@ export function schedulerStatus(config:IntegrationSettings){
  const authorized=s?.authorized===true&&mode!=='unconfigured';
  const cadence=s?.cadence_seconds;
  return {mode,authorized,exact_time:false,publication_ready:authorized&&mode==='external'&&Number.isSafeInteger(cadence)&&cadence!>=15&&cadence!<=300,
- notice:mode==='daily'?'Daily delivery has an hour-wide window and cannot meet exact posting times. Publishing is blocked.':mode==='external'?'An independently provisioned authorized scheduler must invoke this endpoint. Saved configuration does not provision delivery.':'No integration scheduler is configured.'};
+ notice:mode==='daily'?'Daily delivery has an hour-wide window and cannot meet exact posting times. Scheduled publishing is blocked. Manual plans require the owner to return within their approved time window.':mode==='external'?'An independently provisioned authorized scheduler must invoke this endpoint. Saved configuration does not provision delivery.':'No integration scheduler is configured.'};
 }

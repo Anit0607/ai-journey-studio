@@ -2,7 +2,7 @@ import {renderApprovedInstagram,getPrivateMedia,approvePublicMedia,safeMediaErro
 import {integrationConfig} from "../../../../lib/integration-config";
 import {mediaPublicOrigin,mediaPublicUrl} from "../../../../lib/publication-media-storage";
 import {safeIngestionError} from "../../../../lib/source-ingestion";
-import {safePublicationError} from "../../../../lib/publishing";
+import {PublicationValidationError,safePublicationError} from "../../../../lib/publishing";
 import {createIntegrations} from "../../../../lib/integrations";
 import {OwnerReports,REPORT_ERRORS} from "../../../../lib/owner-reports";
 import {allowedOrigin,response} from "../../../../lib/auth";
@@ -14,7 +14,7 @@ import {liveReady} from "../../../../lib/providers";
 import {step} from "../../../../lib/workflow";
 import {SourceIntake,sourceAuthorized} from "../../../../lib/sources";
 import {queueAgentRevision} from "../../../../lib/agent-revisions";
-import {ownerApiAuthenticated} from "../../../../lib/owner-password";
+import {ownerApiAuthenticated,passwordOwnerAuthenticated} from "../../../../lib/owner-password";
 import {hostedEnvironment,hostedBlockers,hostedCronReady} from "../../../../lib/hosted";
 import {recoverOverdueCalendarDraft,safeCalendarRecoveryError} from "../../../../lib/calendar-recovery";
 import {Calendar} from "../../../../lib/calendar";
@@ -51,10 +51,11 @@ export async function GET(request:Request,context:Context){
   }catch{return response({error:"Relational database unavailable. Configure an approved PostgreSQL connection or use the laptop-only embedded option."},503);}
 }
 export async function POST(request:Request,context:Context){
-  if(!await ownerApiAuthenticated(request))return response({error:"Private access required"},401);
-  if(!allowedOrigin(request))return response({error:"Origin rejected"},403);
   const {action}=await context.params;
-  if(!["publication-media-stage","publication-media-approve","integration-sync","integration-import","publication-enqueue","publication-approve","publication-cancel","publication-revise","metrics-save","money-add","money-void","coverage-confirm","source-stage","source-clear","source-revoke","agent-revise","calendar-dispatch","source","run","approve","cancel","retry","step","evidence-review","request-changes","revise","approve-revision","calendar-configure","calendar-plan","calendar-link","calendar-prepare","calendar-recover"].includes(action))return response({error:"Unknown action"},404);
+  // A local worker bearer is not an owner action-time publication confirmation.
+  if(!await (action==="publication-publish"?passwordOwnerAuthenticated(request):ownerApiAuthenticated(request)))return response({error:"Private access required"},401);
+  if(!allowedOrigin(request))return response({error:"Origin rejected"},403);
+  if(!["publication-media-stage","publication-media-approve","integration-sync","integration-import","publication-enqueue","publication-approve","publication-cancel","publication-revise","publication-publish","metrics-save","money-add","money-void","coverage-confirm","source-stage","source-clear","source-revoke","agent-revise","calendar-dispatch","source","run","approve","cancel","retry","step","evidence-review","request-changes","revise","approve-revision","calendar-configure","calendar-plan","calendar-link","calendar-prepare","calendar-recover"].includes(action))return response({error:"Unknown action"},404);
   if(hostedEnvironment()&&action==="step")return response({error:"Hosted checkpoints run only through the protected daily scheduler"},403);
   const limit=action==="evidence-review"?12000:action==="integration-import"?1_050_000:action==="publication-enqueue"||action==="publication-revise"?40000:["revise","source-stage"].includes(action)?40000:4096;
   if(Number(request.headers.get("content-length")||0)>limit)return response({error:"Request too large"},413);
@@ -79,6 +80,12 @@ export async function POST(request:Request,context:Context){
     if(action==="publication-approve")value=await (await createIntegrations(store.db)).publishing.approve(body.id,body.expected_version,body.acknowledged);
     if(action==="publication-cancel")value=await (await createIntegrations(store.db)).publishing.cancel(body.id,body.expected_version);
     if(action==="publication-revise")value=await (await createIntegrations(store.db)).publishing.revise(body.id,body.expected_version,body.plan);
+    if(action==="publication-publish"){
+      if(!body||typeof body!=="object"||Array.isArray(body)||Object.keys(body).some(key=>!["id","expected_version","expected_account_id","acknowledged"].includes(key)))throw new PublicationValidationError("Unsupported publish-now request field");
+      const result=await (await createIntegrations(store.db)).publishing.publishNow(body.id,body.expected_version,body.expected_account_id,body.acknowledged);
+      if(result.status!=="published")return response({error:result.status==="uncertain"?"Provider outcome uncertain. Do not retry; reconcile the provider receipt first.":result.status==="failed"?"Publication stopped or rejected. Review the saved plan and attempts; no automatic retry is allowed.":result.status==="disabled"?"Publishing is disabled by server configuration":("reason" in result?result.reason:"Publication is not eligible for delivery"),result},409);
+      value=result;
+    }
 
     if(action==="metrics-save")value=await new OwnerReports(store.db).metrics(body);
     if(action==="money-add")value=await new OwnerReports(store.db).money(body);

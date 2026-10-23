@@ -11,6 +11,8 @@ import {xPostTextValidation} from "./x-text";
 export class PublicationValidationError extends Error{}
 export function safePublicationError(error:unknown):string|null{return error instanceof PublicationValidationError?error.message:null;}
 export const PUBLICATION_ACKNOWLEDGEMENT="I approve publishing this exact final platform draft and media to this specific account at this scheduled time. Source clearance and content review alone do not authorize publishing.";
+export const MANUAL_PUBLICATION_ACKNOWLEDGEMENT="I approve publishing this exact final platform draft and media to this specific account only when I deliberately choose Publish now within its approved scheduled time window. No scheduler will deliver this manual plan.";
+export type PublicationDeliveryMode="scheduled"|"manual";
 export type PublishingMedia={url:string;sha256:string;mime_type:"image/jpeg"};
 export type PublishingPayload={text:string;media?:PublishingMedia[]};
 export type PublishingAccount={id:string;platform:Platform;remote_id:string;label:string;enabled?:boolean;verified?:boolean;authorization_version:string;credential_env?:string;credential_configured?:boolean;scopes:string[];linkedin_version?:string;instagram_api_version?:string;instagram_login?:"instagram"|"facebook";professional?:boolean};
@@ -22,8 +24,8 @@ export type PublishingRuntime={
   verifyMedia?:(media:PublishingMedia,context:PublishRow)=>Promise<boolean>;
   x_cost_authorized?:boolean;x_max_create_microdollars?:number;x_max_identity_microdollars?:number;monthly_cap_microdollars?:number;
 };
-export type PublishInput={request_id:string;task_id:string;review_token:string;platform:Platform;account_id:string;scheduled_at:string;payload:PublishingPayload};
-export type PublishRow={id:string;request_id:string;task_id:string;source_id:string;source_hash:string;source_clearance_token:string;review_token:string;artifact_hash:string;variant_hash:string;platform:Platform;account_id:string;account_version:string;remote_id:string;payload:PublishingPayload;scheduled_at:string|Date;version:string;status:string;reason:string|null;claim_token:string|null;claimed_at:string|Date|null;published_at?:string|Date|null;provider_id:string|null;receipt:PublicationReceipt|null;reserved_microdollars:number|string;budget_month:string|null};
+export type PublishInput={request_id:string;task_id:string;review_token:string;platform:Platform;account_id:string;scheduled_at:string;payload:PublishingPayload;delivery_mode?:PublicationDeliveryMode};
+export type PublishRow={id:string;request_id:string;task_id:string;source_id:string;source_hash:string;source_clearance_token:string;review_token:string;artifact_hash:string;variant_hash:string;platform:Platform;account_id:string;account_version:string;remote_id:string;payload:PublishingPayload;scheduled_at:string|Date;delivery_mode:PublicationDeliveryMode;version:string;status:string;reason:string|null;claim_token:string|null;claimed_at:string|Date|null;published_at?:string|Date|null;provider_id:string|null;receipt:PublicationReceipt|null;reserved_microdollars:number|string;budget_month:string|null};
 export type PublicationReceipt={platform:Platform;provider_id:string;http_status:number;url?:string};
 const UUID=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i,SHA=/^[0-9a-f]{64}$/;
 const ID=/^[A-Za-z0-9:_-]{1,200}$/;
@@ -83,19 +85,21 @@ function accountBlocker(account:PublishingAccount){
   }
   return null;
 }
-function runtimeBlocker(runtime:PublishingRuntime,account:PublishingAccount){
+function runtimeBlocker(runtime:PublishingRuntime,account:PublishingAccount,mode:PublicationDeliveryMode="scheduled"){
   if(runtime.enabled!==true)return "Publishing is disabled by server configuration";
   if(runtime.credential_use_authorized!==true||!runtime.credential||account.credential_configured===false)return "Authorized server-side publishing credentials are not configured";
   const lateness=runtime.max_lateness_seconds??300;
-  if(!Number.isInteger(lateness)||lateness<1||lateness>3600||runtime.scheduler_authorized!==true||!Number.isInteger(runtime.scheduler_interval_seconds)||runtime.scheduler_interval_seconds!<1||runtime.scheduler_interval_seconds!>lateness)return "A sufficiently frequent authorized publishing scheduler is required";
+  if(!Number.isInteger(lateness)||lateness<1||lateness>3600)return "A valid bounded publishing window is required";
+  if(mode==="scheduled"&&(runtime.scheduler_authorized!==true||!Number.isInteger(runtime.scheduler_interval_seconds)||runtime.scheduler_interval_seconds!<1||runtime.scheduler_interval_seconds!>lateness))return "A sufficiently frequent authorized publishing scheduler is required";
   const blocked=accountBlocker(account);if(blocked)return blocked;
   if(account.platform==="Instagram"&&!runtime.verifyMedia)return "Verified immutable public Instagram media is required";
   if(account.platform==="X"&&(runtime.x_cost_authorized!==true||!Number.isSafeInteger(runtime.x_max_create_microdollars)||runtime.x_max_create_microdollars!<200000||runtime.x_max_create_microdollars!>1000000||!Number.isSafeInteger(runtime.x_max_identity_microdollars)||runtime.x_max_identity_microdollars!<=0||runtime.x_max_identity_microdollars!>1000000||!Number.isSafeInteger(runtime.monthly_cap_microdollars)||runtime.monthly_cap_microdollars!<=0))return "X paid API cost approval and a separate X monthly budget are required";
   return null;
 }
-function intentVersion(row:Pick<PublishRow,"task_id"|"source_id"|"source_hash"|"source_clearance_token"|"review_token"|"artifact_hash"|"variant_hash"|"platform"|"account_id"|"account_version"|"remote_id"|"payload"|"scheduled_at">){
-  return hash(JSON.stringify({schema:1,task_id:row.task_id,source_id:row.source_id,source_hash:row.source_hash,source_clearance_token:row.source_clearance_token,review_token:row.review_token,artifact_hash:row.artifact_hash,variant_hash:row.variant_hash,platform:row.platform,account_id:row.account_id,account_version:row.account_version,remote_id:row.remote_id,payload:normalizedPayload(row.platform,row.payload),scheduled_at:iso(row.scheduled_at)}));
+function intentVersion(row:Pick<PublishRow,"task_id"|"source_id"|"source_hash"|"source_clearance_token"|"review_token"|"artifact_hash"|"variant_hash"|"platform"|"account_id"|"account_version"|"remote_id"|"payload"|"scheduled_at"|"delivery_mode">){
+  return hash(JSON.stringify({schema:row.delivery_mode==="manual"?2:1,...(row.delivery_mode==="manual"?{delivery_mode:"manual"}:{}),task_id:row.task_id,source_id:row.source_id,source_hash:row.source_hash,source_clearance_token:row.source_clearance_token,review_token:row.review_token,artifact_hash:row.artifact_hash,variant_hash:row.variant_hash,platform:row.platform,account_id:row.account_id,account_version:row.account_version,remote_id:row.remote_id,payload:normalizedPayload(row.platform,row.payload),scheduled_at:iso(row.scheduled_at)}));
 }
+const acknowledgementFor=(row:Pick<PublishRow,"delivery_mode">)=>row.delivery_mode==="manual"?MANUAL_PUBLICATION_ACKNOWLEDGEMENT:PUBLICATION_ACKNOWLEDGEMENT;
 const clearanceToken=(source:Source)=>hash(JSON.stringify({source_hash:source.hash,clearance_id:source.clearance_id||"legacy",cleared_at:source.cleared_at?iso(source.cleared_at):null}));
 async function finalArtifact(tx:Connection,id:string,expected:string,platform:Platform){
   const task=(await tx.query<Task>("SELECT * FROM tasks WHERE id=$1 FOR UPDATE",[id]))[0];
@@ -121,25 +125,46 @@ async function finalArtifact(tx:Connection,id:string,expected:string,platform:Pl
 export class Publishing{
   constructor(readonly db:Database,readonly runtime:PublishingRuntime={}){}
   async snapshot(){
-    const jobs=await this.db.query<PublishRow>("SELECT * FROM publishing_outbox ORDER BY created,id");
+    const rows=await this.db.query<PublishRow>("SELECT * FROM publishing_outbox ORDER BY created,id");
+    // Read-only eligibility is a UI hint, not permission. Delivery rechecks every gate under its claim.
+    const jobs=await Promise.all(rows.map(async row=>{
+      if(row.delivery_mode!=="manual")return {...row,manual_ready:false,manual_reason:null};
+      let reason:string|null=null;
+      try{
+        reason=await this.db.transaction(async tx=>{
+          if(row.status!=="approved")return "Only an exact approved manual plan can be published";
+          const account=await this.validate(tx,row),blocked=runtimeBlocker(this.runtime,account,"manual");if(blocked)return blocked;
+          if(!await this.hasExactApproval(tx,row))return "Exact manual publication approval missing";
+          const now=(this.runtime.now||(()=>new Date()))().getTime(),scheduled=new Date(row.scheduled_at).getTime();
+          if(!Number.isFinite(now)||now<scheduled)return "Approved publication time has not arrived";
+          if(now-scheduled>(this.runtime.max_lateness_seconds??300)*1000)return "Scheduled time missed; reschedule and approve again";
+          if(rows.some(other=>other.id!==row.id&&other.task_id===row.task_id&&other.platform===row.platform&&other.account_id===row.account_id&&["claimed","uncertain"].includes(other.status)))return "Uncertain publication blocks replay";
+          return null;
+        });
+      }catch{reason="Source, final artifact, evidence, or account approval changed; review again";}
+      return {...row,manual_ready:!reason,manual_reason:reason};
+    }));
     const approvals=await this.db.query("SELECT * FROM publishing_approvals ORDER BY created,id");
     const attempts=await this.db.query("SELECT * FROM publishing_attempts ORDER BY created,id");
     const accounts=(this.runtime.accounts||[]).map(account=>{
-      let reason:string|null=null;try{reason=runtimeBlocker(this.runtime,accountFor(this.runtime,account.id,account.platform));}catch(error){reason=(error as Error).message;}
+      let reason:string|null=null,manualReason:string|null=null;
+      try{const configured=accountFor(this.runtime,account.id,account.platform);reason=runtimeBlocker(this.runtime,configured);manualReason=runtimeBlocker(this.runtime,configured,"manual");}catch(error){reason=manualReason=(error as Error).message;}
       const lastSuccess=jobs.filter(job=>job.account_id===account.id&&job.account_version===account.authorization_version&&job.remote_id===account.remote_id&&job.status==="published"&&job.receipt).at(-1);
-      return {readiness_kind:"configuration_only",live_connection_tested:!!lastSuccess,last_successful_publication:lastSuccess?{id:lastSuccess.id,published_at:lastSuccess.published_at,receipt:lastSuccess.receipt}:null,id:account.id,platform:account.platform,remote_id:account.remote_id,label:account.label,enabled:account.enabled===true,ready:!reason,reason};
+      return {readiness_kind:"configuration_only",live_connection_tested:!!lastSuccess,last_successful_publication:lastSuccess?{id:lastSuccess.id,published_at:lastSuccess.published_at,receipt:lastSuccess.receipt}:null,id:account.id,platform:account.platform,remote_id:account.remote_id,label:account.label,enabled:account.enabled===true,ready:!reason,reason,scheduled_ready:!reason,scheduled_reason:reason,manual_ready:!manualReason,manual_reason:manualReason};
     });
-    return {enabled:this.runtime.enabled===true,accounts,jobs,approvals,attempts,acknowledgement:PUBLICATION_ACKNOWLEDGEMENT};
+    return {enabled:this.runtime.enabled===true,accounts,jobs,approvals,attempts,acknowledgement:PUBLICATION_ACKNOWLEDGEMENT,manual_acknowledgement:MANUAL_PUBLICATION_ACKNOWLEDGEMENT,max_lateness_seconds:this.runtime.max_lateness_seconds??300};
   }
   private async prepare(tx:Connection,input:PublishInput){
     reference(input.request_id);reference(input.task_id);
     if(!REQUIRED_PLATFORMS.includes(input.platform))throw new PublicationValidationError("Unsupported publishing platform");
     if(typeof input.review_token!=="string"||input.review_token.length>200)throw new PublicationValidationError("Exact artifact review token required");
     if(typeof input.scheduled_at!=="string"||!/(?:Z|[+-]\d{2}:\d{2})$/.test(input.scheduled_at)||!Number.isFinite(Date.parse(input.scheduled_at)))throw new PublicationValidationError("Scheduled publication must include a time zone");
+    const deliveryMode=input.delivery_mode??"scheduled";
+    if(!["scheduled","manual"].includes(deliveryMode))throw new PublicationValidationError("Invalid publication delivery mode");
     const account=accountFor(this.runtime,input.account_id,input.platform),payload=normalizedPayload(input.platform,input.payload);
     const context=await finalArtifact(tx,input.task_id,input.review_token,input.platform);
     if(payload.text!==context.variant.text)throw new PublicationValidationError("Publication text must exactly match the approved final platform variant");
-    const values={task_id:input.task_id,source_id:context.source.id,source_hash:context.source.hash,source_clearance_token:clearanceToken(context.source),review_token:input.review_token,artifact_hash:context.artifact.hash,variant_hash:context.variant.hash!,platform:input.platform,account_id:account.id,account_version:account.authorization_version,remote_id:account.remote_id,payload,scheduled_at:iso(input.scheduled_at)};
+    const values={task_id:input.task_id,source_id:context.source.id,source_hash:context.source.hash,source_clearance_token:clearanceToken(context.source),review_token:input.review_token,artifact_hash:context.artifact.hash,variant_hash:context.variant.hash!,platform:input.platform,account_id:account.id,account_version:account.authorization_version,remote_id:account.remote_id,payload,scheduled_at:iso(input.scheduled_at),delivery_mode:deliveryMode};
     return {...values,version:intentVersion(values)};
   }
   async enqueue(input:PublishInput){
@@ -148,7 +173,7 @@ export class Publishing{
       const prior=(await tx.query<{outbox_id:string;version:string}>("SELECT * FROM publishing_requests WHERE request_id=$1",[input.request_id]))[0];
       if(prior){if(prior.version!==draft.version)throw new PublicationValidationError("Publication request id reused for a different intent");return (await tx.query<PublishRow>("SELECT * FROM publishing_outbox WHERE id=$1",[prior.outbox_id]))[0];}
       if((await tx.query("SELECT id FROM publishing_outbox WHERE task_id=$1 AND platform=$2 AND account_id=$3 AND status IN ('claimed','uncertain')",[input.task_id,input.platform,input.account_id])).length)throw new PublicationValidationError("Uncertain publication requires reconciliation; replay is blocked");
-      let row=(await tx.query<PublishRow>("INSERT INTO publishing_outbox(id,request_id,task_id,source_id,source_hash,review_token,artifact_hash,variant_hash,platform,account_id,account_version,remote_id,payload,scheduled_at,version,source_clearance_token) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16) ON CONFLICT(version) DO NOTHING RETURNING *",[randomUUID(),input.request_id,draft.task_id,draft.source_id,draft.source_hash,draft.review_token,draft.artifact_hash,draft.variant_hash,draft.platform,draft.account_id,draft.account_version,draft.remote_id,JSON.stringify(draft.payload),draft.scheduled_at,draft.version,draft.source_clearance_token]))[0];
+      let row=(await tx.query<PublishRow>("INSERT INTO publishing_outbox(id,request_id,task_id,source_id,source_hash,review_token,artifact_hash,variant_hash,platform,account_id,account_version,remote_id,payload,scheduled_at,version,source_clearance_token,delivery_mode) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17) ON CONFLICT(version) DO NOTHING RETURNING *",[randomUUID(),input.request_id,draft.task_id,draft.source_id,draft.source_hash,draft.review_token,draft.artifact_hash,draft.variant_hash,draft.platform,draft.account_id,draft.account_version,draft.remote_id,JSON.stringify(draft.payload),draft.scheduled_at,draft.version,draft.source_clearance_token,draft.delivery_mode]))[0];
       row||=(await tx.query<PublishRow>("SELECT * FROM publishing_outbox WHERE version=$1",[draft.version]))[0];
       await tx.query("INSERT INTO publishing_requests(request_id,outbox_id,version) VALUES($1,$2,$3)",[input.request_id,row.id,draft.version]);
       return row;
@@ -162,7 +187,7 @@ export class Publishing{
       const draft=await this.prepare(tx,{...input,request_id:row.request_id});
       if(draft.task_id!==row.task_id)throw new PublicationValidationError("Publication task cannot change");
       if(draft.version===row.version)return row;
-      return (await tx.query<PublishRow>("UPDATE publishing_outbox SET source_id=$2,source_hash=$3,review_token=$4,artifact_hash=$5,variant_hash=$6,platform=$7,account_id=$8,account_version=$9,remote_id=$10,payload=$11,scheduled_at=$12,version=$13,source_clearance_token=$14,status='staged',reason='Changed publication requires fresh owner approval',updated=now() WHERE id=$1 RETURNING *",[id,draft.source_id,draft.source_hash,draft.review_token,draft.artifact_hash,draft.variant_hash,draft.platform,draft.account_id,draft.account_version,draft.remote_id,JSON.stringify(draft.payload),draft.scheduled_at,draft.version,draft.source_clearance_token]))[0];
+      return (await tx.query<PublishRow>("UPDATE publishing_outbox SET source_id=$2,source_hash=$3,review_token=$4,artifact_hash=$5,variant_hash=$6,platform=$7,account_id=$8,account_version=$9,remote_id=$10,payload=$11,scheduled_at=$12,version=$13,source_clearance_token=$14,delivery_mode=$15,status='staged',reason='Changed publication requires fresh owner approval',updated=now() WHERE id=$1 RETURNING *",[id,draft.source_id,draft.source_hash,draft.review_token,draft.artifact_hash,draft.variant_hash,draft.platform,draft.account_id,draft.account_version,draft.remote_id,JSON.stringify(draft.payload),draft.scheduled_at,draft.version,draft.source_clearance_token,draft.delivery_mode]))[0];
     });
   }
   private async lock(tx:Connection,id:string,version:string){
@@ -184,7 +209,7 @@ export class Publishing{
     return this.db.transaction(async tx=>{
       const row=await this.lock(tx,id,expectedVersion);if(!["staged","approved"].includes(row.status))throw new PublicationValidationError("Publication is not available for approval");
       await this.validate(tx,row);
-      await tx.query("INSERT INTO publishing_approvals(id,outbox_id,version,acknowledgement) VALUES($1,$2,$3,$4) ON CONFLICT(outbox_id,version) DO NOTHING",[randomUUID(),id,row.version,PUBLICATION_ACKNOWLEDGEMENT]);
+      await tx.query("INSERT INTO publishing_approvals(id,outbox_id,version,acknowledgement) VALUES($1,$2,$3,$4) ON CONFLICT(outbox_id,version) DO NOTHING",[randomUUID(),id,row.version,acknowledgementFor(row)]);
       return (await tx.query<PublishRow>("UPDATE publishing_outbox SET status='approved',reason=NULL,updated=now() WHERE id=$1 RETURNING *",[id]))[0];
     });
   }
@@ -196,18 +221,40 @@ export class Publishing{
       return (await tx.query<PublishRow>("UPDATE publishing_outbox SET status='cancelled',reason='Owner cancelled before dispatch',updated=now() WHERE id=$1 RETURNING *",[id]))[0];
     });
   }
-  /** At most one item per call. Crash/timeout after claim is terminal uncertain, never requeued. */
+  private async hasExactApproval(tx:Connection,row:PublishRow){
+    return !!(await tx.query("SELECT id FROM publishing_approvals WHERE outbox_id=$1 AND version=$2 AND acknowledgement=$3",[row.id,row.version,acknowledgementFor(row)])).length;
+  }
+  /** Owner-triggered delivery of this exact approved manual plan, never the next due job. */
+  async publishNow(id:string,expectedVersion:string,expectedAccountId:string,ownerAcknowledged:boolean){
+    reference(id);
+    if(typeof expectedVersion!=="string"||!SHA.test(expectedVersion))throw new PublicationValidationError("Exact publication version required");
+    if(typeof expectedAccountId!=="string"||!ID.test(expectedAccountId))throw new PublicationValidationError("Exact publishing account required");
+    if(ownerAcknowledged!==true)throw new PublicationValidationError("Explicit publish-now acknowledgement is required");
+    const signal=AbortSignal.timeout(150_000);
+    return this.deliver((this.runtime.now||(()=>new Date()))(),{id,version:expectedVersion,accountId:expectedAccountId},this.runtime.signal?AbortSignal.any([signal,this.runtime.signal]):signal);
+  }
+  /** At most one scheduled item per call. Manual plans are never scheduler-selected. */
   async dispatch(now=new Date()){
+    return this.deliver(now);
+  }
+  /** Crash/timeout after claim is terminal uncertain, never requeued. */
+  private async deliver(now:Date,target?:{id:string;version:string;accountId:string},signal=this.runtime.signal){
     if(!Number.isFinite(now.getTime()))throw new PublicationValidationError("Invalid dispatch time");
     if(this.runtime.enabled!==true)return {status:"disabled"};
     const claim=await this.db.transaction(async tx=>{
-      await tx.query("UPDATE publishing_outbox SET status='uncertain',reason='Claim expired; reconcile provider receipt before any further publication',updated=now() WHERE status='claimed' AND claimed_at<$1",[new Date(now.getTime()-10*60_000)]);
-      const row=(await tx.query<PublishRow>("SELECT * FROM publishing_outbox WHERE status='approved' AND scheduled_at<=$1 ORDER BY scheduled_at,id FOR UPDATE SKIP LOCKED LIMIT 1",[now]))[0];
+      await tx.query("UPDATE publishing_outbox SET status='uncertain',reason='Claim expired; reconcile provider receipt before any further publication',updated=now() WHERE status='claimed' AND claimed_at<$1"+(target?" AND id=$2":""),[new Date(now.getTime()-10*60_000),...(target?[target.id]:[])]);
+      const row=target?await this.lock(tx,target.id,target.version):(await tx.query<PublishRow>("SELECT * FROM publishing_outbox WHERE delivery_mode='scheduled' AND status='approved' AND scheduled_at<=$1 ORDER BY scheduled_at,id FOR UPDATE SKIP LOCKED LIMIT 1",[now]))[0];
       if(!row)return null;
+      if(target){
+        if(row.account_id!==target.accountId)throw new PublicationValidationError("Publishing account does not match the exact requested plan");
+        if(row.delivery_mode!=="manual")throw new PublicationValidationError("This is not an approved manual delivery plan; revise and approve its delivery mode first");
+        if(row.status!=="approved")return {blocked:row.id,reason:"Only an approved, unclaimed manual plan can be published"};
+        if(now.getTime()<new Date(row.scheduled_at).getTime())return {blocked:row.id,reason:"Approved publication time has not arrived"};
+      }
       let account:PublishingAccount;
       try{account=await this.validate(tx,row);}catch{await tx.query("UPDATE publishing_outbox SET status='invalidated',reason='Source, final artifact, or account approval changed; review again',updated=now() WHERE id=$1",[row.id]);return {blocked:row.id,reason:"Publication approval invalidated"};}
-      if(!(await tx.query("SELECT id FROM publishing_approvals WHERE outbox_id=$1 AND version=$2",[row.id,row.version])).length){await tx.query("UPDATE publishing_outbox SET status='invalidated',reason='Exact publication approval missing' WHERE id=$1",[row.id]);return {blocked:row.id,reason:"Exact publication approval missing"};}
-      const blocker=runtimeBlocker(this.runtime,account);
+      if(!await this.hasExactApproval(tx,row)){await tx.query("UPDATE publishing_outbox SET status='invalidated',reason='Exact publication approval missing' WHERE id=$1",[row.id]);return {blocked:row.id,reason:"Exact publication approval missing"};}
+      const blocker=runtimeBlocker(this.runtime,account,row.delivery_mode);
       if(blocker)return {blocked:row.id,reason:blocker};
       if(now.getTime()-new Date(row.scheduled_at).getTime()>(this.runtime.max_lateness_seconds??300)*1000){await tx.query("UPDATE publishing_outbox SET status='missed',reason='Scheduled time missed; reschedule and approve again',updated=now() WHERE id=$1",[row.id]);return {blocked:row.id,reason:"Scheduled time missed"};}
       if((await tx.query("SELECT id FROM publishing_outbox WHERE id<>$1 AND task_id=$2 AND platform=$3 AND account_id=$4 AND status IN ('claimed','uncertain')",[row.id,row.task_id,row.platform,row.account_id])).length)return {blocked:row.id,reason:"Uncertain publication blocks replay"};
@@ -227,22 +274,24 @@ export class Publishing{
     const {row,account}=claim;
     try{
       let credential:string;
+      if(signal?.aborted)throw new PublishFailure("Publishing invocation deadline reached before credential use",false);
       try{credential=await this.runtime.credential!(account);}catch{await this.db.query("UPDATE publishing_outbox SET reserved_microdollars=0 WHERE id=$1 AND claim_token=$2 AND status='claimed'",[row.id,row.claim_token]);throw new PublishFailure("Authorized publishing credential unavailable before publication",false);}
       if(typeof credential!=="string"||!credential.trim()||/[\r\n]/.test(credential))throw new PublishFailure("Authorized publishing credential unavailable",false);
       if(row.platform==="Instagram")for(const media of row.payload.media!)if(!await this.runtime.verifyMedia!(media,row))throw new PublishFailure("Immutable Instagram media verification failed",false);
       const receipt=await publishOfficial(row,account,credential,this.runtime.fetch||fetch,{
         before:async(stage)=>{
-          if(this.runtime.signal?.aborted)throw new PublishFailure("Publishing invocation deadline reached before request",false);
+          if(signal?.aborted)throw new PublishFailure("Publishing invocation deadline reached before request",false);
           await this.db.transaction(async tx=>{
             const current=await this.lock(tx,row.id,row.version);if(current.status!=="claimed"||current.claim_token!==row.claim_token)throw new PublishFailure("Publication claim is no longer active",false);
-            const checked=await this.validate(tx,current,true),blocked=runtimeBlocker(this.runtime,checked);if(blocked)throw new PublishFailure(blocked,false);
+            const checked=await this.validate(tx,current,true),blocked=runtimeBlocker(this.runtime,checked,current.delivery_mode);if(blocked)throw new PublishFailure(blocked,false);
+            if(!await this.hasExactApproval(tx,current))throw new PublishFailure("Exact publication approval is no longer current",false);
             const currentTime=(this.runtime.now||(()=>new Date()))();
             if(!Number.isFinite(currentTime.getTime())||currentTime.getTime()<new Date(row.scheduled_at).getTime()||currentTime.getTime()-new Date(row.scheduled_at).getTime()>(this.runtime.max_lateness_seconds??300)*1000)throw new PublishFailure("Scheduled publishing window expired before request; reschedule and approve again",false);
             await tx.query("INSERT INTO publishing_attempts(id,outbox_id,claim_token,stage,state) VALUES($1,$2,$3,$4,'started')",[randomUUID(),row.id,row.claim_token,stage]);
           });
         },
         after:async(stage,status,providerId,state)=>{await this.db.query("UPDATE publishing_attempts SET state=$3,http_status=$4,provider_id=$5,updated=now() WHERE outbox_id=$1 AND stage=$2 AND claim_token=$6",[row.id,stage,state,status,providerId||null,row.claim_token]);}
-      },this.runtime.sleep,this.runtime.signal);
+      },this.runtime.sleep,signal);
       const saved=await this.db.query("UPDATE publishing_outbox SET status='published',provider_id=$3,receipt=$4,published_at=$5,updated=now() WHERE id=$1 AND claim_token=$2 AND status='claimed' RETURNING id",[row.id,row.claim_token,receipt.provider_id,JSON.stringify(receipt),(this.runtime.now||(()=>new Date()))()]);
       if(!saved.length)return {status:"uncertain",id:row.id,reason:"Receipt could not finalize the active claim; reconciliation required"};
       return {status:"published",id:row.id,receipt};
