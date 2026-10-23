@@ -88,3 +88,7 @@ Configure `scheduler.provider=qstash`, explicit scheduler authorization and both
 References: https://upstash.com/docs/qstash/features/schedules ; https://upstash.com/docs/qstash/features/security ; https://upstash.com/pricing/qstash ; https://vercel.com/docs/functions/limitations
 
 Facebook Login primary implementation reference: https://github.com/fbsamples/reels_publishing_apis/blob/7bf98f94e75d841ecc9612c0061881d1d713c6bd/insta_reels_publishing_api_sample/index.js
+
+## Owner-triggered manual publication
+
+Publication plans can explicitly select manual delivery instead of an authorized scheduler. Existing plans remain scheduled, and publishing stays off unless its existing server and credential-use gates are authorized. Manual delivery requires a fresh exact-plan approval plus a separate deliberate owner action during the approved time window; it cannot deliver early, late, to another account, or select the next job. No scheduler is claimed or provisioned. See [Exact owner-triggered publication](docs/manual-publication-delivery.md) for the workflow, migration 020 and no-replay boundaries.

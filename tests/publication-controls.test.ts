@@ -9,8 +9,8 @@ const require=createRequire(import.meta.url);
 type Node={type:any;key?:string;props:Record<string,any>};
 // Exercise component handlers with isolated hooks and mocked actions. This is
 // not a rendered-browser check; no server, database or provider is contacted.
-function ui(file:string,search=''){
- const values:any[]=[],effects:(()=>void)[]=[];let cursor=0;
+function ui(file:string,search='',fetcher?:(path:string,init?:RequestInit)=>Promise<unknown>){
+ const values:any[]=[],effects:(()=>void)[]=[],timeouts:number[]=[];let cursor=0;
  const hooks={
   useState:(initial:any)=>{const index=cursor++;if(!(index in values))values[index]=typeof initial==='function'?initial():initial;return [values[index],(next:any)=>{values[index]=typeof next==='function'?next(values[index]):next;}];},
   useRef:(initial:any)=>{const index=cursor++;return values[index]??=( {current:initial});},
@@ -19,8 +19,8 @@ function ui(file:string,search=''){
  const output=ts.transpileModule(readFileSync(new URL(file,import.meta.url),'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,jsx:ts.JsxEmit.ReactJSX,esModuleInterop:true}}).outputText;
  const exports:Record<string,any>={};
  const mockRequire=(name:string)=>name==='react'?hooks:name==='react/jsx-runtime'?require(name):name.endsWith('/execution-readiness')?{executionReadiness:()=>({})}:{__esModule:true,default:()=>null};
- new Function('require','exports','window','fetch',output)(mockRequire,exports,{location:{search}},async(path:string)=>{assert.equal(path,'/api/auth/status');return {json:async()=>({authenticated:false})};});
- return {exports,values,effects,reset:()=>{values.length=0;effects.length=0;},render:(component:any,props:Record<string,any>={})=>{cursor=0;return component(props) as Node;}};
+ new Function('require','exports','window','fetch','AbortSignal',output)(mockRequire,exports,{location:{search}},fetcher|| (async(path:string)=>{assert.equal(path,'/api/auth/status');return {json:async()=>({authenticated:false})};}),{timeout:(ms:number)=>{timeouts.push(ms);return new AbortController().signal;}});
+ return {exports,values,effects,timeouts,reset:()=>{values.length=0;effects.length=0;},render:(component:any,props:Record<string,any>={})=>{cursor=0;return component(props) as Node;}};
 }
 function nodes(node:any):Node[]{
  if(Array.isArray(node))return node.flatMap(nodes);
@@ -102,4 +102,81 @@ test('all supported OAuth callback names open Connections, while unrelated queri
   const harness=ui('../app/page.tsx','?connection='+provider);harness.render(harness.exports.default);for(const effect of harness.effects)effect();await settle();
   assert.equal(harness.values.includes('Connections'),['x','linkedin','instagram_facebook'].includes(provider),provider);
  }
+});
+
+test('manual delivery is an explicit staging choice and never renders a publish control for ineligible jobs',()=>{
+ const harness=ui('../app/publication-panel.tsx');
+ const panel=harness.render(harness.exports.default,{publishing:{jobs:[],accounts:[]},media:{},reviews:[],busy:false,action:async()=>assert.fail('Rendering must not act')});
+ const delivery=nodes(panel).find(n=>n.type==='select'&&nodes(n).some(option=>option.type==='option'&&option.props.value==='manual'));assert.ok(delivery);assert.equal(delivery.props.value,'scheduled');
+ for(const job of [
+  {...plan,delivery_mode:'scheduled',status:'approved',manual_ready:true},
+  {...plan,delivery_mode:'manual',status:'staged',manual_ready:true},
+  {...plan,delivery_mode:'manual',status:'approved',manual_ready:false},
+  {...plan,delivery_mode:'manual',status:'uncertain',manual_ready:true},
+  {...plan,delivery_mode:'manual',status:'published',manual_ready:true},
+ ]){
+  const jobHarness=jobUi(async()=>assert.fail('Rendering must not act'),job);
+  assert.equal(nodes(jobHarness.render()).filter(n=>n.type==='button'&&text(n)==='Publish this exact approved plan now').length,0);
+ }
+});
+
+test('manual publish requires a fresh visible acknowledgement and sends only this exact job once',async()=>{
+ const calls:{path:string;body:any}[]=[];let finish!:(ok:boolean)=>void;
+ const job={...plan,delivery_mode:'manual',status:'approved',manual_ready:true,scheduled_at:new Date(Date.now()-1000).toISOString()};
+ const harness=jobUi(async(path,body)=>{calls.push({path,body});return new Promise(resolve=>{finish=resolve;});},job);
+ let tree=harness.render();assert.match(text(tree),/exact text, media, account, version and approved time/);assert.match(text(tree),/No scheduler delivers this plan/);
+ assert.equal(button(tree,'Publish this exact approved plan now').props.disabled,true);button(tree,'Publish this exact approved plan now').props.onClick();assert.equal(calls.length,0);
+ const ack=nodes(tree).find(n=>n.type==='input'&&n.props.type==='checkbox')!;assert.equal(ack.props.checked,false);ack.props.onChange({target:{checked:true}});
+ tree=harness.render();const publish=button(tree,'Publish this exact approved plan now');assert.equal(publish.props.disabled,false);publish.props.onClick();publish.props.onClick();
+ assert.deepEqual(calls,[{path:'publication-publish',body:{id:job.id,expected_version:job.version,expected_account_id:job.account_id,acknowledged:true}}]);
+ assert.equal(button(harness.render(),'Publish this exact approved plan now').props.disabled,true);
+ finish(false);await settle();button(harness.render(),'Publish this exact approved plan now').props.onClick();assert.equal(calls.length,1);assert.match(text(harness.render()),/uncertain result must not be replayed/);
+ const fresh=jobUi(async()=>assert.fail('New exact version must not inherit acknowledgement'),{...job,version:'exact-v2'});assert.equal(button(fresh.render(),'Publish this exact approved plan now').props.disabled,true);
+});
+
+test('stale manual readiness cannot publish future or expired jobs and editing clears confirmation',()=>{
+ for(const scheduled_at of [new Date(Date.now()+60_000).toISOString(),new Date(Date.now()-301_000).toISOString()]){
+  const harness=jobUi(async()=>assert.fail('Time window must be rechecked'),{...plan,delivery_mode:'manual',status:'approved',manual_ready:true,scheduled_at} as typeof plan);
+  nodes(harness.render()).find(n=>n.type==='input'&&n.props.type==='checkbox')!.props.onChange({target:{checked:true}});
+  button(harness.render(),'Publish this exact approved plan now').props.onClick();
+ }
+ const harness=jobUi(async()=>assert.fail('Editing must not publish'),{...plan,delivery_mode:'manual',status:'approved',manual_ready:true,scheduled_at:new Date(Date.now()-1000).toISOString()} as typeof plan);
+ nodes(harness.render()).find(n=>n.type==='input'&&n.props.type==='checkbox')!.props.onChange({target:{checked:true}});
+ button(harness.render(),'Reschedule publication').props.onClick();assert.equal(nodes(harness.render()).filter(n=>n.type==='button'&&text(n)==='Publish this exact approved plan now').length,0);
+ button(harness.render(),'Keep current time').props.onClick();assert.equal(button(harness.render(),'Publish this exact approved plan now').props.disabled,true);
+});
+
+function pageActionHarness(fetcher:(path:string,init?:RequestInit)=>Promise<unknown>){
+ const harness=ui('../app/page.tsx','',fetcher);
+ harness.render(harness.exports.default);
+ harness.values[0]=true;
+ harness.values[2]={budget:{committed_microdollars:0,warning:false},analyst:{status:'insufficient-data'},blockers:[],sources:[],tasks:[],outputs:[],reviews:[],events:[],ledger:[],integrations:{publishing:{jobs:[]},media:{}}};
+ harness.values[7]='Publishing';
+ const tree=harness.render(harness.exports.default);
+ const panel=nodes(tree).find(n=>n.props.publishing);assert.ok(panel);
+ return {...harness,action:panel.props.action as (path:string,body:unknown)=>Promise<boolean>};
+}
+
+test('page publishing request waits beyond the server deadline and does not post twice while pending',async()=>{
+ const calls:string[]=[];let resolve!:(response:Response)=>void;
+ const harness=pageActionHarness(async path=>{calls.push(path);if(path.endsWith('/publication-publish'))return new Promise<Response>(done=>{resolve=done;});return Response.json({integrations:{publishing:{jobs:[]}},reviews:[],budget:{committed_microdollars:0}});});
+ const pending=harness.action('publication-publish',{id:'exact-job'});
+ assert.deepEqual(harness.timeouts,[170_000]);assert.equal(await harness.action('publication-publish',{id:'other-job'}),false);assert.deepEqual(calls,['/api/studio/publication-publish']);
+ resolve(Response.json({result:{status:'published',id:'exact-job'}}));assert.equal(await pending,true);
+ assert.deepEqual(calls,['/api/studio/publication-publish','/api/studio/state']);assert.deepEqual(harness.timeouts,[170_000,10_000]);
+});
+
+test('page network loss warns of unconfirmed delivery and refreshes durable status without retrying',async()=>{
+ const calls:string[]=[];
+ const state={integrations:{publishing:{jobs:[{id:'exact-job',status:'uncertain'}]}},reviews:[],budget:{committed_microdollars:0}};
+ const harness=pageActionHarness(async path=>{calls.push(path);if(path.endsWith('/publication-publish'))throw new TypeError('Failed to fetch');return Response.json(state);});
+ assert.equal(await harness.action('publication-publish',{id:'exact-job'}),false);
+ assert.deepEqual(calls,['/api/studio/publication-publish','/api/studio/state']);assert.match(harness.values[8],/outcome is not confirmed/);assert.match(harness.values[8],/server may still be completing/);assert.match(harness.values[8],/do not retry/);assert.deepEqual(harness.values[2],state);
+});
+
+test('page preserves a known uncertain server result and warns if its status refresh also fails',async()=>{
+ const calls:string[]=[];
+ const harness=pageActionHarness(async path=>{calls.push(path);if(path.endsWith('/publication-publish'))return Response.json({error:'Provider outcome uncertain. Do not retry; reconcile the provider receipt first.',result:{status:'uncertain'}},{status:409});throw new Error('Status unavailable');});
+ assert.equal(await harness.action('publication-publish',{id:'exact-job'}),false);
+ assert.deepEqual(calls,['/api/studio/publication-publish','/api/studio/state']);assert.match(harness.values[8],/Provider outcome uncertain/);assert.match(harness.values[6],/previous state may be stale/);
 });
