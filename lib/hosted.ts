@@ -71,3 +71,10 @@ export function hostedReady(c:RuntimeConfig,env:HostedEnvironment=process.env):b
 export function hostedCronReady(c:RuntimeConfig,env:HostedEnvironment=process.env):boolean{
   return c.hosted?.cron_authorized===true&&hostedReady(c,env);
 }
+
+/** Deliberate owner execution, not scheduler authentication or scheduling consent. */
+export function hostedOwnerDraftReady(c:RuntimeConfig,env:HostedEnvironment=process.env):boolean{
+  return ownerBlockers(c,env).length===0&&c.hosted?.persistent_key_authorized===true&&
+    c.hosted?.fluid_compute_verified===true&&c.owner_cleared_sources_authorized===true&&
+    (c.fallback_authorized===undefined||c.fallback_authorized===false)&&configReady(c)&&!!env.OPENAI_API_KEY;
+}

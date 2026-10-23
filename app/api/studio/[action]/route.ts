@@ -1,3 +1,4 @@
+import {runOwnerDraft,ownerDraftSnapshot,validOwnerDraftRequest} from "../../../../lib/owner-draft";
 import {renderApprovedInstagram,getPrivateMedia,approvePublicMedia,safeMediaError} from "../../../../lib/publication-media";
 import {integrationConfig} from "../../../../lib/integration-config";
 import {mediaPublicOrigin,mediaPublicUrl} from "../../../../lib/publication-media-storage";
@@ -18,7 +19,7 @@ import {ownerApiAuthenticated,passwordOwnerAuthenticated} from "../../../../lib/
 import {hostedEnvironment,hostedBlockers,hostedCronReady} from "../../../../lib/hosted";
 import {recoverOverdueCalendarDraft,safeCalendarRecoveryError} from "../../../../lib/calendar-recovery";
 import {Calendar} from "../../../../lib/calendar";
-export const runtime="nodejs",dynamic="force-dynamic",maxDuration=180;
+export const runtime="nodejs",dynamic="force-dynamic",maxDuration=300;
 async function readBody(request:Request,limit=4096){
   const reader=request.body?.getReader();if(!reader)return "{}";
   const chunks:Uint8Array[]=[];let size=0;
@@ -47,15 +48,15 @@ export async function GET(request:Request,context:Context){
     if(state.pricing_blocked)blockers.push("Unexpected provider billing tier requires reconciliation");
     const enabled=liveReady(c)&&(!hostedEnvironment()||hostedCronReady(c))&&!state.pricing_blocked;
     const hosted=hostedEnvironment()?{mode:"vercel-hobby",daily_batches:await store.db.query("SELECT day,status,attempts,steps,reason,started_at,heartbeat,finished_at FROM hosted_batches ORDER BY day DESC LIMIT 14"),notice:"One bounded daily batch, with up to an hour of scheduling variation. Backlog or slow calls may miss a review deadline; nothing is published automatically."}:null;
-    return response({...state,integrations:await (await createIntegrations(store.db)).snapshot(),hosted,calendar:await new Calendar(store.db,hostedEnvironment()?120:49).snapshot(state,c,enabled),blockers,live_enabled:enabled,source_approved:sourceApproved,owner_cleared_sources_authorized:c.owner_cleared_sources_authorized===true,proposed_source:CAPSULE});
+    return response({...state,owner_draft:await ownerDraftSnapshot(store.db,c),integrations:await (await createIntegrations(store.db)).snapshot(),hosted,calendar:await new Calendar(store.db,hostedEnvironment()?120:49).snapshot(state,c,enabled),blockers,live_enabled:enabled,source_approved:sourceApproved,owner_cleared_sources_authorized:c.owner_cleared_sources_authorized===true,proposed_source:CAPSULE});
   }catch{return response({error:"Relational database unavailable. Configure an approved PostgreSQL connection or use the laptop-only embedded option."},503);}
 }
 export async function POST(request:Request,context:Context){
   const {action}=await context.params;
   // A local worker bearer is not an owner action-time publication confirmation.
-  if(!await (action==="publication-publish"?passwordOwnerAuthenticated(request):ownerApiAuthenticated(request)))return response({error:"Private access required"},401);
+  if(!await (["publication-publish","owner-draft-run"].includes(action)?passwordOwnerAuthenticated(request):ownerApiAuthenticated(request)))return response({error:"Private access required"},401);
   if(!allowedOrigin(request))return response({error:"Origin rejected"},403);
-  if(!["publication-media-stage","publication-media-approve","integration-sync","integration-import","publication-enqueue","publication-approve","publication-cancel","publication-revise","publication-publish","metrics-save","money-add","money-void","coverage-confirm","source-stage","source-clear","source-revoke","agent-revise","calendar-dispatch","source","run","approve","cancel","retry","step","evidence-review","request-changes","revise","approve-revision","calendar-configure","calendar-plan","calendar-link","calendar-prepare","calendar-recover"].includes(action))return response({error:"Unknown action"},404);
+  if(!["owner-draft-run","publication-media-stage","publication-media-approve","integration-sync","integration-import","publication-enqueue","publication-approve","publication-cancel","publication-revise","publication-publish","metrics-save","money-add","money-void","coverage-confirm","source-stage","source-clear","source-revoke","agent-revise","calendar-dispatch","source","run","approve","cancel","retry","step","evidence-review","request-changes","revise","approve-revision","calendar-configure","calendar-plan","calendar-link","calendar-prepare","calendar-recover"].includes(action))return response({error:"Unknown action"},404);
   if(hostedEnvironment()&&action==="step")return response({error:"Hosted checkpoints run only through the protected daily scheduler"},403);
   const limit=action==="evidence-review"?12000:action==="integration-import"?1_050_000:action==="publication-enqueue"||action==="publication-revise"?40000:["revise","source-stage"].includes(action)?40000:4096;
   if(Number(request.headers.get("content-length")||0)>limit)return response({error:"Request too large"},413);
@@ -63,6 +64,11 @@ export async function POST(request:Request,context:Context){
     const raw=await readBody(request,limit);
     const body=JSON.parse(raw),store=new Store(await database()),c=runtimeConfig();
     let value:unknown;
+    if(action==="owner-draft-run"){
+      if(!validOwnerDraftRequest(body))return response({error:"Exact owner draft acknowledgement required"},400);
+      const result=await runOwnerDraft(store.db,body,{readConfig:runtimeConfig,signal:request.signal});
+      return response({result,...(result.status!=="review"?{error:result.status==="uncertain"?"Draft execution outcome uncertain. Check saved run and ledger; do not retry.":result.status==="duplicate"?"This task already has a one-shot draft attempt. Check saved status; do not retry.":"Selected draft stopped or is not eligible. Check saved run and ledger; no automatic retry."}:{})},result.status==="review"?200:409);
+    }
     if(action==="publication-media-stage"){
       const media=await renderApprovedInstagram(store.db,String(body.task),String(body.review_token));
       const {bytes,...metadata}=media;void bytes;
@@ -121,7 +127,7 @@ export async function POST(request:Request,context:Context){
     }
     return response({result:value??true});
   }catch(error){
-    const safe=safeCalendarRecoveryError(error)||safeMediaError(error)||safePublicationError(error)||safeIngestionError(error)||(error instanceof Error&&[...REPORT_ERRORS,"Dispatched calendar task cannot be relinked","Invalid generation activation","Invalid dispatch time","Completed revision cannot be retried; review its parent content","Revision feedback required (maximum 1000 characters)","Standing OpenAI draft and revision permission required","Revise the parent content task instead","Source not authorized for OpenAI revision","This exact version already has an agent revision request","Agent revision pending; review or cancel it before approval","Invalid source text","Invalid source category","Invalid source date","Source already staged with different metadata","Explicit owner source acknowledgement required","Unknown source","Stale source hash; review the exact source again","Invalid source id","Exact source hash required","Source transmission is not authorized","Source not cleared","Source invalidated","Stale artifact version","Task is not ready for approval","Unknown completion; reconciliation required before retry","Task cannot be retried","Safety termination cannot be retried","Approved task cannot be cancelled","Unknown task","Task is not ready for revision","Stale revision; refresh before editing","Revision note required","Invalid revision text","Excluded private material","No content change","Human factual review acknowledgement required","No revision to approve","Resolve source-grounding flags before approval","Fresh revision approval required","Invalid calendar date or time","Invalid cadence","Generation lead must be 49 to 336 hours or unset","Generation lead must be 120 to 336 hours or unset","Choose one to four weeks","Choose start date and posting time first","Unknown calendar entry","Task must match the linked source","Invalid platform timing","Preset provenance does not match selected hours","Choose every platform/day posting time first"].includes(error.message)?error.message:"Action blocked or database unavailable");
+    const safe=safeCalendarRecoveryError(error)||safeMediaError(error)||safePublicationError(error)||safeIngestionError(error)||(error instanceof Error&&[...REPORT_ERRORS,"Dispatched calendar task cannot be relinked","Invalid generation activation","Invalid dispatch time","Completed revision cannot be retried; review its parent content","Revision feedback required (maximum 1000 characters)","Standing OpenAI draft and revision permission required","Revise the parent content task instead","Source not authorized for OpenAI revision","This exact version already has an agent revision request","Agent revision pending; review or cancel it before approval","Invalid source text","Invalid source category","Invalid source date","Source already staged with different metadata","Explicit owner source acknowledgement required","Unknown source","Stale source hash; review the exact source again","Invalid source id","Exact source hash required","Source transmission is not authorized","Source not cleared","Source invalidated","Stale artifact version","Task is not ready for approval","Unknown completion; reconciliation required before retry","Task cannot be retried","Owner draft attempt cannot be replayed","Safety termination cannot be retried","Approved task cannot be cancelled","Unknown task","Task is not ready for revision","Stale revision; refresh before editing","Revision note required","Invalid revision text","Excluded private material","No content change","Human factual review acknowledgement required","No revision to approve","Resolve source-grounding flags before approval","Fresh revision approval required","Invalid calendar date or time","Invalid cadence","Generation lead must be 49 to 336 hours or unset","Generation lead must be 120 to 336 hours or unset","Choose one to four weeks","Choose start date and posting time first","Unknown calendar entry","Task must match the linked source","Invalid platform timing","Preset provenance does not match selected hours","Choose every platform/day posting time first"].includes(error.message)?error.message:"Action blocked or database unavailable");
     return response({error:safe},400);
   }
 }

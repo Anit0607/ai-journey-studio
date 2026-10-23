@@ -7,11 +7,12 @@ import {Store} from "./store";
 import {ROLES,hash,type RuntimeConfig,type Source,type Output,tokenCost} from "./domain";
 import {providerCall,ProviderFailure,AccountingFailure,TerminationFailure,liveReady,type ProviderName} from "./providers";
 import {groundingRules,bundleQuality} from "./grounding";
+import type {OwnerDraftScope} from "./owner-draft-policy";
 const goals=["Extract factual claims and provenance.","Find an honest learning-story angle supported by the source.","Produce a content brief for practical agent users.","Write a draft with no unsupported claims.","Produce LinkedIn, X and Instagram variants.","Critique factual support and privacy for each exact variant; flag unsupported claims. "+CRITIC_CONTRACT];
-export async function step(store:Store,c:RuntimeConfig,call=providerCall,enabled=liveReady(c),policy:{ownerClearedOnly?:boolean;minimumGenerationLeadHours?:number}={}){
+export async function step(store:Store,c:RuntimeConfig,call=providerCall,enabled=liveReady(c),policy:{ownerClearedOnly?:boolean;minimumGenerationLeadHours?:number;ownerDraft?:OwnerDraftScope;beforeProvider?:()=>Promise<void>}={}){
   await store.heartbeat(enabled);
   if(!enabled)return {status:"blocked",reason:"Consent, credentials, current pricing or safety verification pending"};
-  const task=await store.claim();
+  const task=await store.claim(policy.ownerDraft);
   if(!task)return {status:"idle"};
   let reservation:string|null=null;
   try{
@@ -35,8 +36,9 @@ export async function step(store:Store,c:RuntimeConfig,call=providerCall,enabled
     if(!c.owner_cleared_sources_authorized&&sourceAuthorized(c,s,"gemini")&&c.fallback_authorized&&process.env.GEMINI_API_KEY)providers.push("gemini");
     for(let index=0;index<providers.length;index++){
       const provider=providers[index],p=c[provider]!;
-      reservation=await store.reserve(task,provider,p,tokenCost(p,Buffer.byteLength(groundedPrompt)+256,1200));
+      reservation=await store.reserve(task,provider,p,tokenCost(p,Buffer.byteLength(groundedPrompt)+256,1200),undefined,policy.ownerDraft);
       try{
+        await policy.beforeProvider?.();
         const result=await call(provider,groundedPrompt,p);
         if(provider==="openai"&&result.report.serviceTier!=="default")throw new AccountingFailure(result.report);
         await store.report(reservation,result.report);
@@ -62,7 +64,7 @@ export async function step(store:Store,c:RuntimeConfig,call=providerCall,enabled
       return {status:"blocked",task:task.id,reason:error.message};
     }
     // Never store raw SDK/network errors: they may contain request details or credentials.
-    const safe=error instanceof Error&&["Artifact integrity check failed","Hosted generation timing requires explicit replanning","Excluded private material","Scheduled review deadline passed; reschedule before generating","Input size cap reached","Monthly cap including internal buffer reached","Cancelled or stale lease","Source invalidated","Unverified billing tier; all provider execution paused"].includes(error.message)?error.message:"Completion blocked; any uncertain reservation retained; automatic replay disabled";
+    const safe=error instanceof Error&&["Owner draft execution stopped","Owner draft reservation limit reached","Owner draft accounting unresolved","Artifact integrity check failed","Hosted generation timing requires explicit replanning","Excluded private material","Scheduled review deadline passed; reschedule before generating","Input size cap reached","Monthly cap including internal buffer reached","Cancelled or stale lease","Source invalidated","Unverified billing tier; all provider execution paused"].includes(error.message)?error.message:"Completion blocked; any uncertain reservation retained; automatic replay disabled";
     await store.uncertain(task,reservation,safe,safe==="Artifact integrity check failed"&&task.revision_parent_task_id?"revision_invalid":null);
     return {status:"blocked",task:task.id,reason:safe};
   }
