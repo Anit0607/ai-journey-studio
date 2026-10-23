@@ -6,7 +6,8 @@
   "scripts": {
     "dev": "tsx scripts/local.ts dev",
     "start": "tsx scripts/local.ts start",
-    "build": "next build",
+    "build": "node --import tsx scripts/release-migration.ts && next build",
+    "build:vercel": "node --import tsx scripts/release-migration.ts --vercel-build && next build",
     "typecheck": "tsc --noEmit",
     "lint": "eslint .",
     "test": "tsx --test tests/*.test.ts",
