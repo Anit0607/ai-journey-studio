@@ -1,3 +1,5 @@
+import {resolveScopedSource} from "./github-source-policy";
+import {scopedSourceProof,scopedTaskMatches} from "./scoped-source-proof";
 import {taskPlatformPolicyHash} from "./platform-policy-binding";
 import {newTaskPlatformBrief,taskPlatformPolicy} from "./platform-policy";
 import {evidenceQuality,reviewReadiness,saveEvidenceDecision,saveEvidenceApproval,type Decision} from "./evidence-review";
@@ -39,6 +41,7 @@ export class Store{
     const tables=["sources","tasks","outputs","events","ledger","approvals"] as const;
     const data:Record<string,any>={};
     for(const table of tables)data[table]=await this.db.query("SELECT * FROM "+table+" ORDER BY "+(table==="outputs"?"created,id":table==="approvals"?"created":table==="tasks"?"updated":"created"));
+    data.sources=await Promise.all(data.sources.map((source:Source)=>resolveScopedSource(this.db,source)));
     const month=istMonth();
     const used=data.ledger.filter((r:any)=>r.month===month||r.status!=="settled").reduce((sum:number,r:any)=>sum+Number(r.status==="settled"?r.estimated:r.reserved),0);
     const unresolved=data.ledger.filter((r:any)=>r.status!=="settled").length;
@@ -96,8 +99,8 @@ export class Store{
       if(!current||current.status!=="running"||current.lease_token!==task.lease_token||current.checkpoint!==task.checkpoint||!ROLES[current.checkpoint])throw Error("Cancelled or stale lease");
       if(scope)await assertOwnerDraftScope(tx,current,scope);
       else if((await tx.query("SELECT id FROM events WHERE task_id=$1 AND kind=$2",[task.id,OWNER_DRAFT_STARTED])).length)throw Error("Owner draft execution stopped");
-      const source=(await tx.query<Source>("SELECT * FROM sources WHERE id=$1 FOR UPDATE",[current.source_id]))[0];
-      if(!source?.cleared||source.hash!==current.source_hash||!sourceEligible(source))throw Error("Source invalidated");
+      const source=(await resolveScopedSource(tx,(await tx.query<Source>("SELECT * FROM sources WHERE id=$1 FOR UPDATE",[current.source_id]))[0]))!;
+      if(!source?.cleared||source.hash!==current.source_hash||!sourceEligible(source)||!scopedTaskMatches(source,current)||(scopedSourceProof(source)&&provider!=="openai"))throw Error("Source invalidated");
       // Include unresolved prior-month calls: completion/billing date can cross the IST boundary.
       await tx.query("INSERT INTO budget_months(month) VALUES('__combined_guard__') ON CONFLICT DO NOTHING");
       await tx.query("SELECT month FROM budget_months WHERE month='__combined_guard__' FOR UPDATE");
@@ -133,10 +136,19 @@ export class Store{
         return;
       }
       await tx.query("INSERT INTO outputs(id,task_id,role,text,hash) VALUES($1,$2,$3,$4,$5)",[randomUUID(),task.id,ROLES[task.checkpoint],text,hash(text)]);
+      let scopedInvalid=false;
+      if(current.content_brief?.source_policy){
+        // Match parent review/edit/finalization order before taking the source lock.
+        // Otherwise final child settlement can hold source while waiting on parent.
+        if(current.revision_parent_task_id)await tx.query("SELECT id FROM tasks WHERE id=$1 FOR UPDATE",[current.revision_parent_task_id]);
+        const source=await resolveScopedSource(tx,(await tx.query<Source>("SELECT * FROM sources WHERE id=$1 FOR UPDATE",[current.source_id]))[0]);
+        scopedInvalid=!source||!sourceEligible(source,current.source_hash)||!scopedTaskMatches(source,current);
+      }
       const cancelled=current.status==="cancelled",exceeded=cost>Number(ledger.reserved);
-      const status=cancelled?"cancelled":exceeded?"blocked":task.checkpoint===5?"review":"queued";
+      const status=cancelled?"cancelled":exceeded||scopedInvalid?"blocked":task.checkpoint===5?"review":"queued";
       await tx.query("UPDATE tasks SET checkpoint=$2,status=$3,lease_token=NULL,lease_until=NULL,updated=now() WHERE id=$1",[task.id,task.checkpoint+1,status]);
       await this.event(tx,task.id,"artifact_saved",ROLES[task.checkpoint]);
+      if(scopedInvalid){await tx.query("UPDATE tasks SET block_reason='scoped_source_invalid' WHERE id=$1",[task.id]);await this.event(tx,task.id,"blocked","Source policy revoked or changed while provider call was in flight; usage and output retained; no further calls");}
       if(exceeded)await this.event(tx,task.id,"blocked","Usage exceeded upper-bound reservation; investigation required");
       if(status==="review"){
         const revision=await finalizeAgentRevision(tx,{...task,checkpoint:task.checkpoint+1,status});
@@ -170,7 +182,7 @@ export class Store{
       const t=(await tx.query<Task>("SELECT * FROM tasks WHERE id=$1 FOR UPDATE",[id]))[0];
       if(!t||t.status!=="blocked")throw Error("Task cannot be retried");
       if((await tx.query("SELECT id FROM events WHERE task_id=$1 AND kind=$2",[id,OWNER_DRAFT_STARTED])).length)throw Error("Owner draft attempt cannot be replayed");
-      if(t.checkpoint>=6||["revision_stale","revision_source","revision_invalid","revision_accounting"].includes((t as Task&{block_reason:string|null}).block_reason||""))throw Error("Completed revision cannot be retried; review its parent content");
+      if(t.checkpoint>=6||["revision_stale","revision_source","revision_invalid","revision_accounting","scoped_source_invalid"].includes((t as Task&{block_reason:string|null}).block_reason||""))throw Error("Completed revision cannot be retried; review its parent content");
       if((t as Task&{block_reason:string|null}).block_reason==="safety")throw Error("Safety termination cannot be retried");
       const unknown=await tx.query("SELECT id FROM ledger WHERE task_id=$1 AND status IN ('reserved','unknown')",[id]);
       if(unknown.length)throw Error("Unknown completion; reconciliation required before retry");
@@ -190,8 +202,8 @@ export class Store{
       if((await tx.query("SELECT id FROM content_revisions WHERE task_id=$1 LIMIT 1",[id])).length)throw Error("Fresh revision approval required");
       const outputs=await tx.query<Output>("SELECT * FROM outputs WHERE task_id=$1 ORDER BY created,id",[id]);
       if(outputs.length!==6||!ROLES.every(role=>outputs.some(o=>o.role===role))||outputs.some(o=>hash(o.text)!==o.hash)||hash(outputs.map(o=>o.hash).join("|"))!==version)throw Error("Stale artifact version");
-      const source=(await tx.query<Source>("SELECT * FROM sources WHERE id=$1 FOR UPDATE",[t.source_id]))[0];
-      if(!source.cleared||source.hash!==t.source_hash||hash(source.text)!==source.hash||!sourceEligible(source))throw Error("Source invalidated");
+      const source=(await resolveScopedSource(tx,(await tx.query<Source>("SELECT * FROM sources WHERE id=$1 FOR UPDATE",[t.source_id]))[0]))!;
+      if(!source?.cleared||source.hash!==t.source_hash||hash(source.text)!==source.hash||!sourceEligible(source)||!scopedTaskMatches(source,t))throw Error("Source invalidated");
       const quality=await reviewReadiness(tx,id,outputs,source);
       if(quality.flags.length)throw Error("Resolve source-grounding flags before approval");
       await tx.query("INSERT INTO approvals(task_id,version,evidence_version) VALUES($1,$2,$3) ON CONFLICT(task_id) DO NOTHING",[id,version,quality.evidence_version]);
@@ -203,8 +215,8 @@ export class Store{
   async revisionContext(tx:Connection,id:string,expected:string){
     const task=(await tx.query<Task>("SELECT * FROM tasks WHERE id=$1 FOR UPDATE",[id]))[0];
     if(!task||task.revision_parent_task_id||!["review","approved"].includes(task.status))throw Error("Task is not ready for revision");
-    const source=(await tx.query<Source>("SELECT * FROM sources WHERE id=$1 FOR UPDATE",[task.source_id]))[0];
-    if(!source?.cleared||source.hash!==task.source_hash||hash(source.text)!==source.hash||!sourceEligible(source))throw Error("Source invalidated");
+    const source=(await resolveScopedSource(tx,(await tx.query<Source>("SELECT * FROM sources WHERE id=$1 FOR UPDATE",[task.source_id]))[0]))!;
+    if(!source?.cleared||source.hash!==task.source_hash||hash(source.text)!==source.hash||!sourceEligible(source)||!scopedTaskMatches(source,task))throw Error("Source invalidated");
     const latest:any=(await tx.query("SELECT * FROM content_revisions WHERE task_id=$1 ORDER BY sequence DESC LIMIT 1",[id]))[0];
     const bundle:Artifact[]=latest?.bundle||await tx.query<Output>("SELECT * FROM outputs WHERE task_id=$1 ORDER BY created,id",[id]);assertBundle(bundle);
     if(latest&&bundleVersion(bundle,source.hash)!==latest.version)throw Error("Stale artifact version");

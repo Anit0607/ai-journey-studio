@@ -23,7 +23,7 @@ export type Pricing={model:string;pricing_version:string;pricing_tier:"standard"
 export type RuntimeConfig={owner_cleared_sources_authorized?:boolean;source_approved?:boolean;approved_source_hash?:string;transmission_authorized?:boolean;credential_use_authorized?:boolean;security_tests_passed?:boolean;pricing_verified_date?:string;pricing_window_authorized?:boolean;pricing_valid_until?:string;fallback_authorized?:boolean;openai?:Pricing;gemini?:Pricing;
   hosted?:{enabled?:boolean;persistent_key_authorized?:boolean;owner_auth_authorized?:boolean;cron_authorized?:boolean;fluid_compute_verified?:boolean};
 };
-export type Source={id:string;text:string;category:string;reported_date:string;cleared:boolean;hash:string;
+export type Source={scoped_authorization?:import("./scoped-source-proof").ScopedSourceProof;id:string;text:string;category:string;reported_date:string;cleared:boolean;hash:string;
   clearance_id?:string|null;clearance_hash?:string|null;clearance_provider?:string|null;clearance_purpose?:string|null;
   clearance_owner_acknowledged?:boolean;clearance_acknowledgement?:string|null;cleared_at?:string|Date|null;revoked_at?:string|Date|null;
 };

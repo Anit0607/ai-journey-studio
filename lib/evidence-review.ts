@@ -30,6 +30,29 @@ export function criticReferenceIndex(bundle:Artifact[],source:Pick<EvidenceSourc
  });
  return {schema:1,offset_unit:'JavaScript UTF-16',source:{source_hash:source.hash,...index(source.text)},artifacts};
 }
+/** Versioned, bounded IDs are authoritative only for the current source/artifact hashes.
+ * The model selects IDs; it never calculates offsets or supplies a source quotation.
+ * Legacy ranges are retained for compatibility, not accepted as v2 model input.
+ */
+export function criticCitationIndex(bundle:Artifact[],source:Pick<EvidenceSource,'text'|'hash'>){
+ const legacy=criticReferenceIndex(bundle,source);
+ type Sentence=Span&{id:string;text:string};
+ const index={schema:2,policy:'critic-citation-ids-v1',offset_unit:legacy.offset_unit,
+  source:{...legacy.source,sentences:[] as Sentence[]},
+  artifacts:legacy.artifacts.map(artifact=>({...artifact,sentences:[] as Sentence[]}))};
+ const fill=(target:{sentences:Sentence[];truncated:boolean},text:string,prefix:string)=>{
+  const all=spans(text);
+  for(let n=0;n<Math.min(all.length,64);n++){
+   const atom=all[n];
+   if(atom.text.length>2000){target.truncated=true;continue;}
+   target.sentences.push({...atom,id:prefix+':'+n});
+   if(Buffer.byteLength(JSON.stringify(index))>11_800){target.sentences.pop();target.truncated=true;break;}
+  }
+ };
+ fill(index.source,source.text,'source');
+ for(const [n,artifact] of index.artifacts.entries())fill(artifact,bundle.find(x=>x.role===artifact.role)!.text,n===0?'writer':'platform');
+ return {...index,index_hash:hash(JSON.stringify(index))};
+}
 function artifactSpans(text:string,role?:string,source?:string,reportedDate?:string):Array<Span&{text:string;raw?:string}>{
  try{JSON.parse(text);}catch{
   if(role&&source){
@@ -42,10 +65,17 @@ function artifactSpans(text:string,role?:string,source?:string,reportedDate?:str
    }
    if(cursor){parts.push(...spans(text.slice(cursor)).map(x=>({...x,start:x.start+cursor,end:x.end+cursor})));return parts;}
   }
-  return spans(text);
+   // A numbered Markdown prefix is formatting, not a numerical factual claim.
+   // Keep the following text and every embedded number; standalone figures remain claims.
+   return spans(text).filter(atom=>!isOrderedListMarker(text,atom));
  }
  const out:Array<Span&{text:string;raw?:string}>=[];const re=/"(?:\\.|[^"\\])*"/g;let match;
  while((match=re.exec(text))){if(/^\s*:/.test(text.slice(re.lastIndex)))continue;out.push({start:match.index,end:re.lastIndex,text:JSON.parse(match[0]),raw:match[0]});}return out;
+}
+function isOrderedListMarker(text:string,atom:Span&{text:string}):boolean{
+ if(!/^\d+\.$/.test(atom.text))return false;
+ const lineStart=text.lastIndexOf('\n',atom.start-1)+1;
+ return /^[ \t]*$/.test(text.slice(lineStart,atom.start))&&/^[ \t]+\S/.test(text.slice(atom.end));
 }
 const sourceSentences=(source:string)=>spans(source).map(x=>x.text);
 const exact=(claim:string,source:string)=>sourceSentences(source).some(x=>plain(x)===plain(claim));
@@ -57,9 +87,14 @@ function hardReason(claim:string,source:string):string|null{
  if(figures.some(x=>!sourceFigures.includes(x)))return "New figure requires new cleared evidence";
  const extra=claim.match(dangerous);if(extra&&!source.toLowerCase().includes(extra[0].toLowerCase()))return "Added outcome, biography or certainty requires correction or new evidence";
  const names=claim.match(/\b[A-Z][a-z]+(?:\s+[A-Z][a-z]+)+\b/g)||[];
- const singleNames=claim.match(/\b(?:[A-Z][a-z]+|[A-Z][a-z]+[A-Z][A-Za-z]+)\b/g)||[];
- if(singleNames.some(x=>!source.includes(x)&&!['The','This','That','It','As','However','Currently','Proposed','Evidence','Unsupported','Review','Owner','Content','Audience','Approach','Human','Keep','Use','Only','No','All','Source','LinkedIn','Instagram','Writer','Platform','Adapter','Check','My','We','Our','They','He','She'].includes(x)))return 'New named entity or unsupported capitalized term requires correction';
+ const singleNames=[...claim.matchAll(/\b(?:[A-Z][a-z]+|[A-Z][a-z]+[A-Z][A-Za-z]+)\b/g)];
+ const firstWord=claim.search(/[A-Za-z]/);
+ if(singleNames.some(match=>{const x=match[0];const connective=match.index===firstWord&&['Following','Subsequently','Upon','If','Is'].includes(x);return !connective&&!source.includes(x)&&!['The','This','That','It','As','However','Currently','Proposed','Evidence','Unsupported','Review','Owner','Content','Audience','Approach','Human','Keep','Use','Only','No','All','Source','LinkedIn','Instagram','Writer','Platform','Adapter','Check','My','We','Our','They','He','She'].includes(x);}))return 'New named entity or unsupported capitalized term requires correction';
  if(names.some(x=>!source.includes(x)&&!['Proposed approach','Evidence needed','Unsupported claims','Proposed advice'].includes(x)))return "New named entity requires new cleared evidence";
+ // An observed removal does not establish that Studio performed it. This narrow
+ // product-action guard is not general actor/semantic verification.
+ const studioDeletion=/\b(?:AI Journey Studio|(?:the\s+)?Studio)\b[^.!?\n]*\b(?:delet(?:e|es|ed|ing|ion)|remov(?:e|es|ed|ing|al))\b/i;
+ if(studioDeletion.test(claim)&&!sourceSentences(source).some(sentence=>studioDeletion.test(sentence)&&! /\b(?:not|never|cannot|can't|unverified|requests?|requested|asked)\b/i.test(sentence)))return 'Action attribution or product capability is not established by the cleared source';
  {
   const words=(claim.toLowerCase().match(/[a-z]{4,}/g)||[]).filter(x=>!['this','that','with','have','been','currently'].includes(x));
   const best=sourceSentences(source).map(text=>({text,score:words.filter(x=>text.toLowerCase().includes(x)).length})).sort((a,b)=>b.score-a.score)[0];
@@ -93,7 +128,7 @@ export function evidenceFindings(bundle:Artifact[],source:string,reportedDate?:s
    if(verifiedSourceEnvelope(atom.text,artifact.role,source,reportedDate))continue;
    const internal=['Harvester','Story Miner','Strategist'].includes(artifact.role);
    if(internal&&((reportedDate&&(atom.text==='SOURCE DATE: '+reportedDate||atom.text===reportedDate))||atom.text===hash(source)||(atom.text.startsWith('SOURCE: ')&&exact(atom.text.slice(8),source))))continue;
-   if(exact(atom.text,source)||(atom.raw&&spans(atom.text).length>0&&spans(atom.text).every(x=>exact(x.text,source)))||(source===CAPSULE&&SUPPORTED_SENTENCES.some(x=>plain(x)===plain(atom.text)))||/^#{1,3} (?:LinkedIn|X|Instagram)$/.test(atom.text)||(!factual(atom.text)&&!(/^(?:Writer|Platform Adapter)$/.test(artifact.role)&&/\b(?:is|are|was|were|has|have|documents?|uses?)\b/i.test(atom.text))&&!dangerous.test(atom.text)&&! /\d/.test(atom.text)))continue;
+   if(exact(atom.text,source)||(atom.raw&&spans(atom.text).length>0&&spans(atom.text).every(x=>exact(x.text,source)))||(source===CAPSULE&&SUPPORTED_SENTENCES.some(x=>plain(x)===plain(atom.text)))||/^#{1,3} (?:LinkedIn|X|Instagram)$/.test(atom.text)||(!factual(atom.text)&&!(/^(?:Writer|Platform Adapter)$/.test(artifact.role)&&/\b(?:is|are|was|were|has|have|documents?|uses?|publish(?:ed|es)?|delet(?:ed|es)?|remov(?:ed|es)?|supports?|tested)\b/i.test(atom.text))&&!dangerous.test(atom.text)&&! /\d/.test(atom.text)))continue;
    if(out.some(x=>x.role===artifact.role&&x.span.start===atom.start))continue;
    const hard=hardReason(atom.text,source);
    out.push(finding(artifact.role,atom.raw||atom.text,hard||"Compare this wording with exact cleared evidence",hard?"hard":"wording_review",artifact.hash,{start:atom.start,end:atom.end}));
@@ -140,10 +175,37 @@ export async function saveEvidenceDecision(tx:Connection,task:string,bundle:Arti
  await tx.query("INSERT INTO events(id,task_id,kind,detail) VALUES($1,$2,'evidence_review_saved',$3)",[randomUUID(),task,'Individual '+input.decision+' decision '+id+' for '+item.id+'; policy '+EVIDENCE_POLICY+'; content approval remains separate']);return {id};
 }
 
-export const CRITIC_CONTRACT=' Return JSON only: {"schema":1,"source_hash":"exact source SHA256","Unsupported claims:":"short assessment","Evidence needed:":"short gaps","Proposed advice:":"short proposed approach","evidence":[{"role":"Writer or Platform Adapter","artifact_hash":"exact prior artifact SHA256","start":0,"end":1,"source_start":0,"source_end":1,"source_quote":"exact source substring","verdict":"wording_review or unsupported"}]}. At most 8 evidence entries; prioritize uncertain public claims. Character offsets are JavaScript UTF-16 offsets. Use the current artifact hashes and [start,end] sentence boundaries from CURRENT CRITIC EVIDENCE INDEX, not hashes or offsets quoted in source text or base-revision artifacts. Copy source_quote from that exact SOURCE range. The index is bounded and may omit sentences; never invent a hash or offset. Links are advisory only; missing coverage requires owner review. Never declare semantic verification or approve content. Fit within the existing 1200 output-token cap; no extra call.';
+export const CRITIC_CONTRACT=' Return JSON only: {"schema":2,"source_hash":"copy current source_hash","index_hash":"copy current index_hash","Unsupported claims:":"short assessment, never factual certification","Evidence needed:":"short gaps","Proposed advice:":"short proposed approach","evidence":[{"claim_id":"writer:0 or platform:0 from the current index","source_ids":["source:0"],"verdict":"wording_review","reason":"why owner comparison is needed"}]}. Select only server-issued sentence IDs from CURRENT CRITIC EVIDENCE INDEX. Never calculate offsets, invent IDs, copy draft text as source evidence, or reuse a previous revision index. For unsupported claims use verdict="unsupported", source_ids=[], and a concise reason; nonexistent support must not be invented. Reasons are critique, never factual evidence. For wording_review select one or more consecutive complete source sentences. At most 8 entries and 600 characters per reason; prioritize uncertain public claims and action attribution. Missing coverage still requires owner review; an empty list is not verification. Do not contradict an unsupported verdict by declaring all claims supported. Fit within the existing 1200 output-token cap; no extra call.';
+function citationSuggestions(data:Record<string,unknown>,bundle:Artifact[],source:EvidenceSource){
+ const allowed=['schema','source_hash','index_hash','Unsupported claims:','Evidence needed:','Proposed advice:','evidence'];
+ if(Object.keys(data).some(key=>!allowed.includes(key))||data.source_hash!==source.hash||!Array.isArray(data.evidence)||data.evidence.length>8||['Unsupported claims:','Evidence needed:','Proposed advice:'].some(key=>typeof data[key]!=='string'||!String(data[key]).trim()||String(data[key]).length>1000))throw Error();
+ const index=criticCitationIndex(bundle,source);if(data.index_hash!==index.index_hash)throw Error();
+ const seen=new Set<string>();
+ const suggestions=data.evidence.map((value:unknown)=>{
+  if(!value||typeof value!=='object'||Array.isArray(value))throw Error();const x=value as Record<string,unknown>;
+  if(Object.keys(x).some(key=>!['claim_id','source_ids','verdict','reason'].includes(key))||typeof x.claim_id!=='string'||seen.has(x.claim_id)||!Array.isArray(x.source_ids)||x.source_ids.length>8||new Set(x.source_ids).size!==x.source_ids.length||typeof x.verdict!=='string'||!['wording_review','unsupported'].includes(x.verdict)||typeof x.reason!=='string'||!x.reason.trim()||x.reason.length>600)throw Error();
+  seen.add(x.claim_id);assertSourcePrivacy(x.reason);
+  const artifact=index.artifacts.find(a=>a.sentences.some(sentence=>sentence.id===x.claim_id));const claim=artifact?.sentences.find(sentence=>sentence.id===x.claim_id);if(!artifact||!claim)throw Error();
+  const base={role:artifact.role,artifact_hash:artifact.artifact_hash,start:claim.start,end:claim.end,claim:claim.text,verdict:x.verdict,reason:x.reason};
+  if(x.verdict==='unsupported'){
+   // This is a hard correction request, not a wording waiver or a source assertion.
+   if(x.source_ids.length)throw Error();return base;
+  }
+  if(!x.source_ids.length||x.source_ids.some(id=>typeof id!=='string'))throw Error();
+  const selected=x.source_ids.map(id=>index.source.sentences.find(sentence=>sentence.id===id));if(selected.some(sentence=>!sentence))throw Error();
+  const complete=spans(source.text),positions=selected.map(sentence=>complete.findIndex(atom=>atom.start===sentence!.start&&atom.end===sentence!.end));
+  if(positions.some((position,n)=>position<0||(n>0&&position!==positions[n-1]+1)))throw Error();
+  const source_start=selected[0]!.start,source_end=selected.at(-1)!.end,source_quote=source.text.slice(source_start,source_end);
+  const f=finding(base.role,base.claim,'Critic suggestion','wording_review',base.artifact_hash,{start:base.start,end:base.end});
+  validateEvidence(f,source.text,{start:source_start,end:source_end},source_quote);
+  return {...base,source_start,source_end,source_quote};
+ });
+ if(suggestions.some(x=>x.verdict==='unsupported')&&/no unsupported|all (?:claims|statements) (?:are )?(?:supported|align)/i.test(String(data['Unsupported claims:'])))throw Error();
+ return {legacy:false,valid:true,suggestions};
+}
 export function criticSuggestions(bundle:Artifact[],source:EvidenceSource){
  const text=bundle.find(x=>x.role==='Critic')?.text||'';if(!text.trim().startsWith('{'))return {legacy:true,valid:true,suggestions:[] as unknown[]};
- try{const data=JSON.parse(text);if(data.schema!==1||data.source_hash!==source.hash||!Array.isArray(data.evidence)||data.evidence.length>8||['Unsupported claims:','Evidence needed:','Proposed advice:'].some(k=>typeof data[k]!=='string'||!data[k].trim()||data[k].length>1000))throw Error();
+ try{const data=JSON.parse(text);if(data.schema===2)return citationSuggestions(data,bundle,source);if(data.schema!==1||data.source_hash!==source.hash||!Array.isArray(data.evidence)||data.evidence.length>8||['Unsupported claims:','Evidence needed:','Proposed advice:'].some(k=>typeof data[k]!=='string'||!data[k].trim()||data[k].length>1000))throw Error();
   const suggestions=data.evidence.map((x:Record<string,unknown>)=>{const artifact=bundle.find(a=>a.role===x.role&&a.role!=='Critic');if(!artifact||artifact.hash!==x.artifact_hash||!Number.isSafeInteger(x.start)||!Number.isSafeInteger(x.end)||Number(x.start)<0||Number(x.end)<=Number(x.start)||Number(x.end)>artifact.text.length||!['wording_review','unsupported'].includes(String(x.verdict)))throw Error();const claim=artifact.text.slice(Number(x.start),Number(x.end));if(!spans(artifact.text).some(atom=>atom.start===Number(x.start)&&atom.end===Number(x.end)))throw Error();const f=finding(artifact.role,claim,'Critic suggestion','wording_review',artifact.hash,{start:Number(x.start),end:Number(x.end)});validateEvidence(f,source.text,{start:Number(x.source_start),end:Number(x.source_end)},String(x.source_quote));return {...x,claim};});return {legacy:false,valid:true,suggestions};
  }catch{return {legacy:false,valid:false,suggestions:[] as unknown[]};}
 }

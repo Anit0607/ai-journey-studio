@@ -1,10 +1,12 @@
+import {githubSelectionPool} from "./github-source-selection";
+import {githubEvidenceEligibility,githubProvenanceHash,resolveScopedSource} from "./github-source-policy";
 import {NEW_PLATFORM_POLICY,NEW_PLATFORMS,activePlatforms,calendarPlatformPolicy,taskPlatformPolicy} from "./platform-policy";
 import {calendarRecoverySnapshot} from "./calendar-recovery";
 import {platformVariants} from "./platform-variants";
 import {randomUUID} from "node:crypto";
 import type {Database} from "./db";
 import {CAPSULE,CAP,BUFFER,configReady,istMonth,tokenCost,type RuntimeConfig,type Source,type Task} from "./domain";
-import {sourceEligible,ownerSourceEligible,sourceAuthorized} from "./sources";
+import {sourceEligible,draftSourceEligible,sourceAuthorized} from "./sources";
 const DAY=86400000;
 export const LEGACY_CALENDAR_BLOCKER="This unbound legacy calendar slot cannot create new three-platform work. Create a fresh LinkedIn-only plan on an unused date and explicitly link a cleared source; this historical slot is unchanged.";
 import {PLATFORMS,BENCHMARK_PRESET} from "./schedule-presets";
@@ -24,13 +26,13 @@ type DispatchEntry={entry_id:string;task_id:string|null;status:string;reason?:st
 // A due task must fit at least one maximum-size ordinary checkpoint. The worker
 // reserves again immediately before every provider call under its budget lock.
 const CHECKPOINT_MAX_INPUT_BYTES=48_000;
-function dispatchBlockers(settings:any,entry:any,source:Source|undefined,c:RuntimeConfig,runtimeEnabled:boolean,budget:BudgetState,now:Date,minimumLeadHours=49){
+function dispatchBlockers(settings:any,entry:any,source:Source|undefined,c:RuntimeConfig,runtimeEnabled:boolean,budget:BudgetState,now:Date,minimumLeadHours=49,scopedSelection=false){
   const reasons:string[]=[];
   if(!entry.task_id&&!calendarPlatformPolicy(entry))reasons.push(LEGACY_CALENDAR_BLOCKER);
   if(settings.generation_enabled!==true)reasons.push("Recurring paid calendar generation is not activated");
   if(c.owner_cleared_sources_authorized!==true)reasons.push("Standing consent for owner-cleared OpenAI sources is missing");
-  if(!source)reasons.push("Link a cleared source; no evidence is auto-selected");
-  else if(!ownerSourceEligible(source,undefined,"openai",now)||!sourceAuthorized(c,source,"openai",now))reasons.push("Source requires explicit owner clearance and provider transmission consent");
+  if(!source)reasons.push("No source is available for this entry. Link a cleared source, or use an active bounded GitHub policy with eligible unused evidence");
+  else if(!scopedSelection&&(!draftSourceEligible(source,undefined,"openai",now)||!sourceAuthorized(c,source,"openai",now)))reasons.push("Source requires explicit owner clearance and provider transmission consent");
   if(!entry.generation_due)reasons.push("Generation timing is unset");
   else if(settings.generation_lead_hours===48||Math.min(new Date(entry.draft_due).getTime(),new Date(entry.review_due).getTime())-new Date(entry.generation_due).getTime()<3_600_000)reasons.push("Generation timing needs at least a one-hour cushion before draft/review; choose a lead of 49 hours or more and explicitly replan");
   if(minimumLeadHours>49&&(!entry.generation_due||new Date(entry.intended_post).getTime()-new Date(entry.generation_due).getTime()<minimumLeadHours*3_600_000))reasons.push("Hosted daily generation requires a lead of at least "+minimumLeadHours+" hours; explicitly replan without changing the 48-hour review deadline");
@@ -71,7 +73,7 @@ export class Calendar{
       if(input.platform_times!==undefined)await tx.query("UPDATE calendar_settings SET platform_times=$1 WHERE id=1",[JSON.stringify(input.platform_times)]);
       if(input.platform_times!==undefined||input.timing_basis!==undefined)await tx.query("UPDATE calendar_settings SET timing_basis=$1 WHERE id=1",[input.timing_basis||"custom"]);
       if(input.generation_enabled!==undefined)await tx.query("UPDATE calendar_settings SET generation_enabled=$1 WHERE id=1",[input.generation_enabled]);
-      await tx.query("INSERT INTO events(id,kind,detail) VALUES($1,'calendar_configured',$2)",[randomUUID(),input.generation_enabled===undefined?"Owner saved IST cadence and timing; generation activation unchanged":input.generation_enabled?"Owner enabled due generation from explicitly cleared sources; runtime and budget gates still apply":"Owner disabled future calendar dispatch; existing tasks retain their state"]);
+      await tx.query("INSERT INTO events(id,kind,detail) VALUES($1,'calendar_configured',$2)",[randomUUID(),input.generation_enabled===undefined?"Owner saved IST cadence and timing; generation activation unchanged":input.generation_enabled?"Owner enabled due generation; source authorization, runtime and budget gates still apply":"Owner disabled future calendar dispatch; existing tasks retain their state"]);
     });
   }
   async plan(weeks:number){
@@ -92,7 +94,7 @@ export class Calendar{
         const post=new Date(Math.min(...Object.values(schedule).map(item=>Date.parse(item.intended_post)))),review=new Date(post.getTime()-48*3600000),generation=s.generation_lead_hours===null?null:new Date(post.getTime()-s.generation_lead_hours*3600000);
         await tx.query("INSERT INTO calendar_entries(id,planned_date,kind,intended_post,draft_due,review_due,generation_due,platform_schedule) VALUES($1,$2,$3,$4,$5,$5,$6,$7) ON CONFLICT(planned_date,kind) DO NOTHING",[randomUUID(),planned,kind,post,review,generation,JSON.stringify({...schedule,platform_policy:NEW_PLATFORM_POLICY})]);
       }
-      await tx.query("INSERT INTO events(id,kind,detail) VALUES($1,'calendar_planned','User created LinkedIn-only planned dates; existing entries unchanged; sources require explicit links; no paid generation')",[randomUUID()]);
+      await tx.query("INSERT INTO events(id,kind,detail) VALUES($1,'calendar_planned','User requested LinkedIn-only planned dates; existing entries unchanged; no source selected and no paid generation')",[randomUUID()]);
     });
   }
   async link(entry:string,source:string|null,task:string|null){
@@ -132,8 +134,10 @@ export class Calendar{
       const result={queued:0,blocked:0,existing:0,paid_execution:false as const,entries:[] as DispatchEntry[]};
       if(!due.length)return result;
       // Lock all source rows before the shared budget guard to match worker order.
-      const sourceIds=[...new Set(due.map(entry=>entry.source_id).filter(Boolean))].sort();
-      const sources=sourceIds.length?await tx.query<Source>("SELECT * FROM sources WHERE id=ANY($1::uuid[]) ORDER BY id FOR UPDATE",[sourceIds]):[];
+      const selection=await githubSelectionPool(tx,c,now),usedEvidence=new Set<string>();
+      const sourceIds=[...new Set([...due.map(entry=>entry.source_id).filter(Boolean),...selection.candidates.map(item=>item.source.id)])].sort();
+      const rawSources=sourceIds.length?await tx.query<Source>("SELECT * FROM sources WHERE id=ANY($1::uuid[]) ORDER BY id FOR UPDATE",[sourceIds]):[];
+      const sources=await Promise.all(rawSources.map(source=>resolveScopedSource(tx,source,now)));
       await tx.query("INSERT INTO budget_months(month) VALUES('__combined_guard__') ON CONFLICT DO NOTHING");
       await tx.query("SELECT month FROM budget_months WHERE month='__combined_guard__' FOR UPDATE");
       const accounting=(await tx.query<any>("SELECT COALESCE(SUM(CASE WHEN status='settled' THEN estimated ELSE reserved END) FILTER (WHERE month=$1 OR status!='settled'),0) AS used,COUNT(*) FILTER (WHERE status!='settled') AS unresolved,COUNT(*) FILTER (WHERE pricing_anomaly=true AND status!='settled') AS pricing_anomalies FROM ledger",[istMonth(now)]))[0];
@@ -145,7 +149,19 @@ export class Calendar{
           result.blocked++;result.entries.push({entry_id:entry.id,task_id:null,status:"blocked",reason:LEGACY_CALENDAR_BLOCKER});continue;
         }
         await tx.query("INSERT INTO calendar_jobs(id,entry_id,status) VALUES($1,$2,'blocked') ON CONFLICT(entry_id) DO NOTHING",[randomUUID(),entry.id]);
-        const job=(await tx.query<any>("SELECT * FROM calendar_jobs WHERE entry_id=$1 FOR UPDATE",[entry.id]))[0],source=sources.find(item=>item.id===entry.source_id);
+        const job=(await tx.query<any>("SELECT * FROM calendar_jobs WHERE entry_id=$1 FOR UPDATE",[entry.id]))[0];
+        let source=sources.find(item=>item?.id===entry.source_id);
+        let selected:typeof selection.candidates[number]|undefined;
+        if(!entry.source_id&&!entry.task_id&&!job.source_id&&!job.task_id&&calendarPlatformPolicy(entry)&&selection.policy){
+          for(const candidate of selection.candidates){
+            const current=rawSources.find(item=>item.id===candidate.source.id);
+            if(!current||current.cleared||current.clearance_id||current.revoked_at||usedEvidence.has(candidate.evidence_key))continue;
+            const eligible=githubEvidenceEligibility(current,candidate.provenance,selection.policy.scope,now);
+            if(!eligible.eligible||eligible.evidence_key!==candidate.evidence_key)continue;
+            if((await tx.query("SELECT id FROM tasks WHERE source_id=$1",[current.id])).length||(await tx.query("SELECT id FROM github_source_grants WHERE source_id=$1 OR evidence_key=$2",[current.id,candidate.evidence_key])).length)continue;
+            selected={...candidate,source:current};source=current;break;
+          }
+        }
         // Once any task is bound, neither retries, edits, cancellation nor time
         // passing can create a replacement task for this scheduled slot.
         if(job.task_id||entry.task_id){
@@ -158,22 +174,33 @@ export class Calendar{
           result.entries.push({entry_id:entry.id,task_id:task?.id||job.task_id||entry.task_id,status:reason?"blocked":task?.status||"linked",...(reason?{reason}:{})});
           continue;
         }
-        const blockers=dispatchBlockers(settings,entry,source,c,runtimeEnabled,budget,now,this.minimumGenerationLeadHours);
+        const blockers=dispatchBlockers(settings,entry,source,c,runtimeEnabled,budget,now,this.minimumGenerationLeadHours,!!selected);
+        if(!source&&selection.policy)blockers.push(selection.reason||"All eligible evidence has already been selected; no duplicate reuse");
         if(blockers.length){
           const reason=blockers.join("; ");
           await tx.query("UPDATE calendar_jobs SET status='blocked',block_reason=$2,updated=$3 WHERE id=$1",[job.id,reason,now]);
           result.blocked++;result.entries.push({entry_id:entry.id,task_id:null,status:"blocked",reason});continue;
         }
-        const policy=calendarPlatformPolicy(entry),origin="calendar:"+entry.id,brief={kind:entry.kind,planned_date:entry.planned_date,platforms:activePlatforms(policy),...(policy?{platform_policy:policy}:{}),intended_post:new Date(entry.intended_post).toISOString(),review_due:new Date(entry.review_due).toISOString(),generation_due:new Date(entry.generation_due).toISOString()};
+        const grantId=selected?randomUUID():null;
+        const policy=calendarPlatformPolicy(entry),origin="calendar:"+entry.id,brief={kind:entry.kind,planned_date:entry.planned_date,platforms:activePlatforms(policy),...(policy?{platform_policy:policy}:{}),intended_post:new Date(entry.intended_post).toISOString(),review_due:new Date(entry.review_due).toISOString(),generation_due:new Date(entry.generation_due).toISOString(),...(selected?{source_policy:{id:selection.policy!.id,hash:selection.policy!.scope_hash,grant_id:grantId,provenance_id:selected.provenance.id}}:{})};
+        if(selected){
+          await tx.query("INSERT INTO events(id,kind,detail) VALUES($1,'github_source_selected',$2)",[grantId,JSON.stringify({policy_id:selection.policy!.id,source_hash:source!.hash,provenance_hash:githubProvenanceHash(selected.provenance),entry_id:entry.id,evidence_key:selected.evidence_key})]);
+          await tx.query("INSERT INTO github_source_grants(id,policy_id,policy_hash,provenance_id,provenance_hash,source_id,source_hash,evidence_key,entry_id) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9)",[grantId,selection.policy!.id,selection.policy!.scope_hash,selected.provenance.id,githubProvenanceHash(selected.provenance),source!.id,source!.hash,selected.evidence_key,entry.id]);
+        }
         const inserted=await tx.query<Task>("INSERT INTO tasks(id,source_id,source_hash,status,origin_key,content_brief) VALUES($1,$2,$3,'queued',$4,$5) ON CONFLICT(source_id,source_hash,origin_key) DO NOTHING RETURNING *",[randomUUID(),source!.id,source!.hash,origin,JSON.stringify(brief)]);
         const task=inserted[0]||(await tx.query<Task>("SELECT * FROM tasks WHERE source_id=$1 AND source_hash=$2 AND origin_key=$3",[source!.id,source!.hash,origin]))[0];
         if(!task)throw Error("Scheduled task linkage unavailable");
+        if(selected){
+          await tx.query("UPDATE github_source_grants SET task_id=$2 WHERE id=$1",[grantId,task.id]);
+          await tx.query("UPDATE calendar_entries SET source_id=$2 WHERE id=$1",[entry.id,source!.id]);
+          usedEvidence.add(selected.evidence_key);
+        }
         const reason=task.status==="cancelled"?"Linked task was cancelled; automatic replacement and replay are disabled":task.status==="blocked"?"Linked task is blocked; explicit reconciliation or retry is required":null;
         await tx.query("UPDATE calendar_entries SET task_id=$2,updated=$3 WHERE id=$1",[entry.id,task.id,now]);
         await tx.query("UPDATE calendar_jobs SET status='dispatched',task_id=$2,source_id=$3,source_hash=$4,block_reason=$5,dispatched_at=$6,updated=$6 WHERE id=$1",[job.id,task.id,source!.id,source!.hash,reason,now]);
         if(inserted.length){
           result.queued++;
-          await tx.query("INSERT INTO events(id,task_id,kind,detail) VALUES($1,$2,'calendar_dispatched',$3)",[randomUUID(),task.id,"Due entry "+entry.id+" queued once from owner-cleared source "+source!.hash+"; no publication"]);
+          await tx.query("INSERT INTO events(id,task_id,kind,detail) VALUES($1,$2,'calendar_dispatched',$3)",[randomUUID(),task.id,"Due entry "+entry.id+" queued once from authorized source "+source!.hash+"; no publication"]);
         }else result.existing++;
         if(reason)result.blocked++;
         result.entries.push({entry_id:entry.id,task_id:task.id,status:task.status,...(reason?{reason}:{})});
@@ -183,10 +210,13 @@ export class Calendar{
   }
   async snapshot(state:any,c:RuntimeConfig,runtimeEnabled:boolean,now=new Date()){
     const settings=await this.settings(),jobs=await this.db.query<any>("SELECT * FROM calendar_jobs ORDER BY created,id"),entries=await this.db.query<any>("SELECT * FROM calendar_entries ORDER BY intended_post,id");
+    const selection=await githubSelectionPool(this.db,c,now);
     const budget={used:Number(state.budget.committed_microdollars),unresolved:Number(state.budget.unresolved_reservations),pricingBlocked:!!state.pricing_blocked};
-    return {settings,new_platform_policy:NEW_PLATFORM_POLICY,new_active_platforms:NEW_PLATFORMS,minimum_generation_lead_hours:this.minimumGenerationLeadHours,paid_activation:settings.generation_enabled===true,scheduler:"Due dispatch requires an active worker or external scheduler invocation; saving does not start a scheduler",configuration_needed:!settings.start_date||timingMissing(settings),entries:entries.map(entry=>{
+    return {automatic_source_selection:{enabled:!!selection.policy,eligible_candidates:selection.candidates.length,notice:selection.reason||"Due dispatch selects one unused GitHub evidence item atomically; source availability may change"},settings,new_platform_policy:NEW_PLATFORM_POLICY,new_active_platforms:NEW_PLATFORMS,minimum_generation_lead_hours:this.minimumGenerationLeadHours,paid_activation:settings.generation_enabled===true,scheduler:"Due dispatch requires an active worker or external scheduler invocation; saving does not start a scheduler",configuration_needed:!settings.start_date||timingMissing(settings),entries:entries.map(entry=>{
       const source=state.sources.find((item:any)=>item.id===entry.source_id),task=state.tasks.find((item:any)=>item.id===entry.task_id),review=state.reviews.find((item:any)=>item.task_id===entry.task_id),job=jobs.find(item=>item.entry_id===entry.id)||null;
-      const blockers=dispatchBlockers(settings,entry,source,c,runtimeEnabled,budget,now,this.minimumGenerationLeadHours);
+      const candidate=!entry.source_id&&!entry.task_id&&!job?.source_id&&!job?.task_id&&calendarPlatformPolicy(entry)?selection.candidates[0]:undefined;
+      const blockers=dispatchBlockers(settings,entry,source||candidate?.source,c,runtimeEnabled,budget,now,this.minimumGenerationLeadHours,!!candidate);
+      if(!source&&!candidate&&selection.policy)blockers.push(selection.reason||"No unused eligible GitHub evidence is currently available");
       if(source?.text===CAPSULE)blockers.push("Source lacks concrete events and emotional context; do not invent personal lessons or feelings");
       const reviewReady=task?.status==="review"||task?.status==="approved";
       if(reviewReady&&review?.quality.flags.length)blockers.push("Linked content has source-grounding flags");

@@ -1,3 +1,4 @@
+import {scopedSourceProof,githubDraftRuntimeBinding} from "./scoped-source-proof";
 import {randomUUID} from "node:crypto";
 import type {Connection,Database} from "./db";
 import {CAPSULE,configReady,hash,sourceAllowed,type RuntimeConfig,type Source} from "./domain";
@@ -42,15 +43,22 @@ function hasOwnerClearance(source:Source):boolean {
 }
 /** Use only on a persisted source row. Text acceptance or cleared=true alone is insufficient. */
 export function sourceEligible(source:Source|undefined|null,expectedHash?:string,provider="openai"):boolean {
-  return intact(source,expectedHash)&&(hasOwnerClearance(source)?ownerCleared(source,provider):sourceAllowed(source.text,source.category,source.reported_date));
+  return intact(source,expectedHash)&&(provider==="openai"&&!!scopedSourceProof(source)|| (hasOwnerClearance(source)?ownerCleared(source,provider):sourceAllowed(source.text,source.category,source.reported_date)));
 }
 /** Owner-reviewed provenance only; excludes the legacy capsule exception. */
 export function ownerSourceEligible(source:Source|undefined|null,expectedHash?:string,provider="openai",now=new Date()):boolean {
   return intact(source,expectedHash)&&ownerCleared(source,provider,now);
 }
+/** Verified policy-derived evidence is distinct from the exact-review-only owner contract. */
+export function draftSourceEligible(source:Source|undefined|null,expectedHash?:string,provider="openai",now=new Date()):boolean {
+  if(ownerSourceEligible(source,expectedHash,provider,now))return true;
+  if(provider!=="openai"||!intact(source,expectedHash)||!scopedSourceProof(source))return false;
+  try{validateSourceInput(source,now);return true;}catch{return false;}
+}
 /** Per-source transmission scope, in addition to the shared credential/pricing/security gates. */
 export function sourceAuthorized(config:RuntimeConfig,source:Source|undefined|null,provider="openai",now=new Date()):boolean {
   if(!configReady(config,now)||!intact(source)||!(provider==="openai"||(provider==="gemini"&&config.fallback_authorized===true)))return false;
+  if(scopedSourceProof(source))return config.owner_cleared_sources_authorized===true&&provider==="openai"&&config.fallback_authorized!==true&&source.scoped_authorization!.runtime_binding===githubDraftRuntimeBinding(config);
   if(hasOwnerClearance(source))return config.owner_cleared_sources_authorized===true&&ownerCleared(source,provider,now);
   return config.source_approved===true&&config.approved_source_hash===hash(CAPSULE)&&config.transmission_authorized===true&&sourceAllowed(source.text,source.category,source.reported_date);
 }

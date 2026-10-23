@@ -235,8 +235,8 @@ test("different manual job IDs for the same task and account cannot overlap an i
 }));
 
 test("v20 migration preserves an approved pre-v20 schema-1 scheduled intent and its approval",async()=>{
-  const instance=new PGlite();assert(SCHEMA.endsWith(MANUAL_PUBLICATION_SCHEMA));
-  await instance.exec(SCHEMA.slice(0,-MANUAL_PUBLICATION_SCHEMA.length));
+  const instance=new PGlite();assert(SCHEMA.includes(MANUAL_PUBLICATION_SCHEMA));
+  await instance.exec(SCHEMA.slice(0,SCHEMA.indexOf(MANUAL_PUBLICATION_SCHEMA)));
   const db:Database={kind:"pglite",query:async<T>(sql:string,params:unknown[]=[]) => (await instance.query<T>(sql,params)).rows,transaction:work=>instance.transaction(async tx=>work({query:async<T>(sql:string,params:unknown[]=[]) => (await tx.query<T>(sql,params)).rows})),close:()=>instance.close()};
   try{
     const {input,source:seededSource}=await seed(db),source=(await db.query<Source>("SELECT * FROM sources WHERE id=$1",[seededSource.id]))[0];

@@ -1,3 +1,5 @@
+import {scopedTaskMatches} from "./scoped-source-proof";
+import {resolveScopedSource} from "./github-source-policy";
 import {randomUUID} from "node:crypto";
 import type {Connection} from "./db";
 import {hash,type Output,type RuntimeConfig,type Source,type Task} from "./domain";
@@ -89,8 +91,8 @@ export async function finalizeAgentRevision(tx:Connection,task:AgentRevisionTask
   if(current.status!=="review"||current.checkpoint!==6)return block("Agent revision is incomplete");
   const parent=(await tx.query<AgentRevisionTask>("SELECT * FROM tasks WHERE id=$1 FOR UPDATE",[current.revision_parent_task_id]))[0];
   if(!parent||isAgentRevision(parent)||!["review","approved"].includes(parent.status))return block("Parent task is no longer reviewable","revision_stale");
-  const source=(await tx.query<Source>("SELECT * FROM sources WHERE id=$1 FOR UPDATE",[parent.source_id]))[0];
-  if(!sourceEligible(source,parent.source_hash)||source.id!==current.source_id||source.hash!==current.source_hash)return block("Agent revision source invalidated","revision_source");
+  const source=(await resolveScopedSource(tx,(await tx.query<Source>("SELECT * FROM sources WHERE id=$1 FOR UPDATE",[parent.source_id]))[0]))!;
+  if(!sourceEligible(source,parent.source_hash)||source.id!==current.source_id||source.hash!==current.source_hash||!scopedTaskMatches(source,parent)||!scopedTaskMatches(source,current))return block("Agent revision source invalidated","revision_source");
   const latest=(await tx.query<RevisionRow>("SELECT * FROM content_revisions WHERE task_id=$1 ORDER BY sequence DESC LIMIT 1",[parent.id]))[0];
   const base:Artifact[]=latest?.bundle||await tx.query<Output>("SELECT * FROM outputs WHERE task_id=$1 ORDER BY created,id",[parent.id]);
   const outputs=await tx.query<Output>("SELECT * FROM outputs WHERE task_id=$1 ORDER BY created,id",[current.id]);
