@@ -1,3 +1,4 @@
+import {enqueueLegacy} from "./legacy-task-fixture";
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {bundleQuality,groundingRules} from '../lib/grounding';
@@ -45,7 +46,7 @@ test('review metadata stays internal and contaminated variants fail without muta
 
 test('contaminated saved copy cannot be approved and evidence notes remain intact',async()=>{
  const {embedded}=await import('../lib/db');const {Store}=await import('../lib/store');const {SourceIntake}=await import('../lib/sources');const {ROLES}=await import('../lib/domain');const {randomUUID}=await import('node:crypto');const db=await embedded();
- try{const store=new Store(db),intake=new SourceIntake(db),s=await intake.stage({text:'I reviewed a draft.',category:'project-note',reported_date:new Date().toISOString().slice(0,10)});await intake.clear(s.id,s.hash,true);const task=await store.enqueue(s.id);
+ try{const store=new Store(db),intake=new SourceIntake(db),s=await intake.stage({text:'I reviewed a draft.',category:'project-note',reported_date:new Date().toISOString().slice(0,10)});await intake.clear(s.id,s.hash,true);const task=await enqueueLegacy(store,s.id);
   const copy='### LinkedIn\nI reviewed a draft.\nEvidence needed: end-to-end verification.\n### X\nI reviewed a draft.\n### Instagram\nI reviewed a draft.';
   for(const role of ROLES){const text=role==='Platform Adapter'?copy:role==='Critic'?critic.text:'I reviewed a draft.';await db.query('INSERT INTO outputs(id,task_id,role,text,hash) VALUES($1,$2,$3,$4,$5)',[randomUUID(),task.id,role,text,hash(text)]);}await db.query("UPDATE tasks SET checkpoint=6,status='review' WHERE id=$1",[task.id]);const rows=await db.query<{role:string;text:string;hash:string}>('SELECT * FROM outputs WHERE task_id=$1 ORDER BY created,id',[task.id]);const version=hash(rows.map(row=>row.hash).join('|'));
   await assert.rejects(()=>store.approve(task.id,version),/source-grounding|flags|Resolve/);assert.equal((await db.query('SELECT * FROM approvals')).length,0);const saved=(await db.query<{text:string;hash:string}>("SELECT text,hash FROM outputs WHERE task_id=$1 AND role='Platform Adapter'",[task.id]))[0];assert.equal(saved.text,copy);assert.equal(saved.hash,hash(copy));assert.equal((await db.query<{text:string}>("SELECT text FROM outputs WHERE task_id=$1 AND role='Critic'",[task.id]))[0].text,critic.text);

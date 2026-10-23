@@ -1,3 +1,4 @@
+import {taskPlatformPolicy,activePlatforms} from "./platform-policy";
 import {reviewReadiness,evidenceApprovalCurrent} from "./evidence-review";
 import {createHash,randomUUID} from "node:crypto";
 import {readFile} from "node:fs/promises";
@@ -87,7 +88,9 @@ async function approvedContext(tx:Connection,taskId:string,reviewToken:string):P
   if(approval?.version!==version)throw new MediaValidationError("Approve the exact final content before rendering media");
   const quality=await reviewReadiness(tx,taskId,bundle,source);
   if(!await evidenceApprovalCurrent(tx,taskId,reviewToken,quality,approval?.evidence_version))throw new MediaValidationError("Resolve factual review flags before rendering media");
-  const variants=platformVariants(bundle.find(item=>item.role==="Platform Adapter")),caption=variants.variants.find(item=>item.platform==="Instagram")?.text;
+  const platformPolicy=taskPlatformPolicy(task);
+  if(!activePlatforms(platformPolicy).includes("Instagram"))throw new MediaValidationError("Instagram is not active for this task");
+  const variants=platformVariants(bundle.find(item=>item.role==="Platform Adapter"),platformPolicy),caption=variants.variants.find(item=>item.platform==="Instagram")?.text;
   if(!variants.complete||!caption)throw new MediaValidationError("An approved Instagram variant is required");
   assertSourcePrivacy(caption);return {source,caption,review_token:reviewToken};
 }

@@ -1,3 +1,4 @@
+import {taskPlatformPolicyHash} from "./platform-policy-binding";
 import {randomUUID} from "node:crypto";
 import type {Database,Connection} from "./db";
 import {CAP,BUFFER,istMonth,type RuntimeConfig,type Task,type Source} from "./domain";
@@ -10,14 +11,14 @@ import {assertOwnerDraftScope,OWNER_DRAFT_BUDGET_MS,OWNER_DRAFT_MAX_CALLS,OWNER_
 export {ownerDraftConfigHash} from "./owner-draft-policy";
 const UUID=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i,SHA=/^[a-f0-9]{64}$/;
 const HEADROOM=70_000;
-export type OwnerDraftRequest={task_id:string;expected_source_id:string;expected_source_hash:string;expected_clearance_id:string;expected_updated:string;expected_checkpoint:0;expected_config_hash:string;acknowledged:true};
+export type OwnerDraftRequest={task_id:string;expected_source_id:string;expected_source_hash:string;expected_clearance_id:string;expected_updated:string;expected_checkpoint:0;expected_config_hash:string;expected_platform_policy_hash:string;acknowledged:true};
 export type OwnerDraftResult={task_id:string;run_id?:string;status:"review"|"blocked"|"uncertain"|"duplicate";steps:number};
 type Options={readConfig:()=>RuntimeConfig;isReady?:(config:RuntimeConfig)=>boolean;provider?:typeof providerCall;signal?:AbortSignal;elapsed?:()=>number;providerTimeoutMs?:number};
 export function validOwnerDraftRequest(value:unknown):value is OwnerDraftRequest{
   if(!value||typeof value!=="object"||Array.isArray(value))return false;
   const b=value as OwnerDraftRequest;
-  if(![b.task_id,b.expected_source_id,b.expected_clearance_id,b.expected_source_hash,b.expected_config_hash].every(field=>typeof field==="string"))return false;
-  return Object.keys(b).length===8&&Object.keys(b).every(key=>["task_id","expected_source_id","expected_source_hash","expected_clearance_id","expected_updated","expected_checkpoint","expected_config_hash","acknowledged"].includes(key))&&UUID.test(b.task_id)&&UUID.test(b.expected_source_id)&&UUID.test(b.expected_clearance_id)&&SHA.test(b.expected_source_hash)&&SHA.test(b.expected_config_hash)&&b.expected_checkpoint===0&&b.acknowledged===true&&typeof b.expected_updated==="string"&&Number.isFinite(Date.parse(b.expected_updated));
+  if(![b.task_id,b.expected_source_id,b.expected_clearance_id,b.expected_source_hash,b.expected_config_hash,b.expected_platform_policy_hash].every(field=>typeof field==="string"))return false;
+  return Object.keys(b).length===9&&Object.keys(b).every(key=>["task_id","expected_source_id","expected_source_hash","expected_clearance_id","expected_updated","expected_checkpoint","expected_config_hash","expected_platform_policy_hash","acknowledged"].includes(key))&&UUID.test(b.task_id)&&UUID.test(b.expected_source_id)&&UUID.test(b.expected_clearance_id)&&SHA.test(b.expected_source_hash)&&SHA.test(b.expected_config_hash)&&SHA.test(b.expected_platform_policy_hash)&&b.expected_checkpoint===0&&b.acknowledged===true&&typeof b.expected_updated==="string"&&Number.isFinite(Date.parse(b.expected_updated));
 }
 async function generationAndAccounting(tx:Connection){
   if((await tx.query<{generation_enabled:boolean}>("SELECT generation_enabled FROM calendar_settings WHERE id=1"))[0]?.generation_enabled!==true)throw Error("Owner draft gate blocked");
@@ -67,12 +68,12 @@ export async function runOwnerDraft(rawDb:Database,input:OwnerDraftRequest,optio
       await tx.query("SET LOCAL lock_timeout='5s'");await tx.query("SET LOCAL statement_timeout='10s'");
       const task=(await tx.query<Task>("SELECT * FROM tasks WHERE id=$1 FOR UPDATE",[input.task_id]))[0];
       if((await tx.query("SELECT id FROM events WHERE task_id=$1 AND kind=$2",[input.task_id,OWNER_DRAFT_STARTED])).length)return false;
-      if(!task||task.status!=="queued"||task.checkpoint!==0||task.origin_key!=="manual"||task.revision_parent_task_id||task.source_id!==input.expected_source_id||task.source_hash!==input.expected_source_hash||new Date(task.updated).getTime()!==Date.parse(input.expected_updated))throw Error("Owner draft target changed");
+      if(!task||taskPlatformPolicyHash(task)!==input.expected_platform_policy_hash||task.status!=="queued"||task.checkpoint!==0||task.origin_key!=="manual"||task.revision_parent_task_id||task.source_id!==input.expected_source_id||task.source_hash!==input.expected_source_hash||new Date(task.updated).getTime()!==Date.parse(input.expected_updated))throw Error("Owner draft target changed");
       if((await tx.query("SELECT id FROM outputs WHERE task_id=$1 UNION ALL SELECT id FROM ledger WHERE task_id=$1 UNION ALL SELECT id FROM calendar_entries WHERE task_id=$1",[task.id])).length)throw Error("Owner draft target changed");
       const source=(await tx.query<Source>("SELECT * FROM sources WHERE id=$1 FOR UPDATE",[task.source_id]))[0];
       if(!ownerSourceEligible(source,task.source_hash)||source.clearance_id!==input.expected_clearance_id||!sourceAuthorized(initial,source))throw Error("Owner draft source changed");
       await generationAndAccounting(tx);runtime();time();
-      const next:OwnerDraftScope={run_id:randomUUID(),task_id:task.id,source_id:source.id,source_hash:source.hash,clearance_id:source.clearance_id!,config_hash:input.expected_config_hash,deadline:new Date(Date.now()+OWNER_DRAFT_BUDGET_MS).toISOString(),checkpoint:0};
+      const next:OwnerDraftScope={run_id:randomUUID(),task_id:task.id,source_id:source.id,source_hash:source.hash,clearance_id:source.clearance_id!,config_hash:input.expected_config_hash,platform_policy_hash:input.expected_platform_policy_hash,deadline:new Date(Date.now()+OWNER_DRAFT_BUDGET_MS).toISOString(),checkpoint:0};
       await tx.query("INSERT INTO events(id,task_id,kind,detail) VALUES($1,$2,$3,$4)",[next.run_id,task.id,OWNER_DRAFT_STARTED,JSON.stringify({...next,max_calls:OWNER_DRAFT_MAX_CALLS,max_reserved_microdollars:OWNER_DRAFT_MAX_RESERVED})]);
       return next;
     });

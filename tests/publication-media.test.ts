@@ -1,3 +1,4 @@
+import {enqueueLegacy} from "./legacy-task-fixture";
 import test from "node:test";
 import assert from "node:assert/strict";
 import {randomUUID,createHash} from "node:crypto";
@@ -20,7 +21,7 @@ async function fixture(work:(db:Database)=>Promise<void>){
   try{await work(db);}finally{await db.close();}
 }
 async function seed(db:Database,approve=true,text=TEXT){
-  const intake=new SourceIntake(db),store=new Store(db),source=await intake.stage({text:"I built a source-linked outline and reviewed each generated statement.",category:"build-log",reported_date:new Date().toISOString().slice(0,10)});await intake.clear(source.id,source.hash,true);const task=await store.enqueue(source.id);
+  const intake=new SourceIntake(db),store=new Store(db),source=await intake.stage({text:"I built a source-linked outline and reviewed each generated statement.",category:"build-log",reported_date:new Date().toISOString().slice(0,10)});await intake.clear(source.id,source.hash,true);const task=await enqueueLegacy(store,source.id);
   for(const role of ROLES){const value=role==="Platform Adapter"?variantFixture(text):role==="Critic"?"Unsupported claims: none\nEvidence needed: no personal claims in proposed advice\nProposed advice: inspect the source":text;await db.query("INSERT INTO outputs(id,task_id,role,text,hash) VALUES($1,$2,$3,$4,$5)",[randomUUID(),task.id,role,value,hash(value)]);}
   await db.query("UPDATE tasks SET checkpoint=6,status='review' WHERE id=$1",[task.id]);const outputs=await db.query<Output>("SELECT * FROM outputs WHERE task_id=$1 ORDER BY created,id",[task.id]),version=hash(outputs.map(row=>row.hash).join("|"));if(approve)await store.approve(task.id,version);return {task,source,intake,store,version,token:"original:"+version};
 }

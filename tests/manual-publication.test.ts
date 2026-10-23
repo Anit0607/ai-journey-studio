@@ -1,3 +1,4 @@
+import {enqueueLegacy} from "./legacy-task-fixture";
 import test from "node:test";
 import assert from "node:assert/strict";
 import {randomUUID} from "node:crypto";
@@ -25,7 +26,7 @@ function runtime(fetcher:typeof fetch,extra:Partial<PublishingRuntime>={}):Publi
   return {enabled:true,credential_use_authorized:true,scheduler_authorized:false,max_lateness_seconds:300,now:()=>NOW,accounts:[{...ACCOUNT},{...OTHER}],credential:async()=>"isolated-manual-test-token",fetch:fetcher,...extra};
 }
 async function seed(db:Database){
-  const store=new Store(db),source=await store.source(CAPSULE,"user-reported-notes","2026-10-09",true),task=await store.enqueue(source.id);
+  const store=new Store(db),source=await store.source(CAPSULE,"user-reported-notes","2026-10-09",true),task=await enqueueLegacy(store,source.id);
   for(const role of ROLES){
     const text=role==="Critic"?"Unsupported claims: none\nEvidence needed: a concrete cleared project note\nProposed advice: inspect a draft":role==="Platform Adapter"?variantFixture(TEXT):TEXT;
     await db.query("INSERT INTO outputs(id,task_id,role,text,hash) VALUES($1,$2,$3,$4,$5)",[randomUUID(),task.id,role,text,hash(text)]);

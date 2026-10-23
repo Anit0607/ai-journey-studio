@@ -1,3 +1,4 @@
+import {taskPlatformPolicy,activePlatforms} from "./platform-policy";
 import {reviewReadiness,evidenceApprovalCurrent} from "./evidence-review";
 import {randomUUID} from "node:crypto";
 import type {Connection,Database} from "./db";
@@ -104,6 +105,8 @@ const clearanceToken=(source:Source)=>hash(JSON.stringify({source_hash:source.ha
 async function finalArtifact(tx:Connection,id:string,expected:string,platform:Platform){
   const task=(await tx.query<Task>("SELECT * FROM tasks WHERE id=$1 FOR UPDATE",[id]))[0];
   if(!task||task.revision_parent_task_id||task.checkpoint!==6||!["review","approved"].includes(task.status))throw new PublicationValidationError("Final task is not ready for publishing");
+  const platformPolicy=taskPlatformPolicy(task);
+  if(!activePlatforms(platformPolicy).includes(platform))throw new PublicationValidationError("Platform is not active for this task");
   await assertNoPendingAgentRevision(tx,id);
   const source=(await tx.query<Source>("SELECT * FROM sources WHERE id=$1 FOR UPDATE",[task.source_id]))[0];
   if(!sourceEligible(source,task.source_hash))throw new PublicationValidationError("Source clearance was revoked or invalidated");
@@ -116,8 +119,8 @@ async function finalArtifact(tx:Connection,id:string,expected:string,platform:Pl
   if(approval?.version!==version)throw new PublicationValidationError("Approve the exact final artifact before scheduling publication");
   const quality=await reviewReadiness(tx,id,bundle,source);
   if(!await evidenceApprovalCurrent(tx,id,token,quality,approval?.evidence_version))throw new PublicationValidationError("Resolve source-grounding flags before publishing");
-  const artifact=bundle.find(item=>item.role==="Platform Adapter")!,variants=platformVariants(artifact),variant=variants.variants.find(item=>item.platform===platform)!;
-  if(!variants.complete||!variant.text||!variant.hash)throw new PublicationValidationError("Final platform variants are incomplete");
+  const artifact=bundle.find(item=>item.role==="Platform Adapter")!,variants=platformVariants(artifact,platformPolicy),variant=variants.variants.find(item=>item.platform===platform)!;
+  if(!variants.complete||!variant?.text||!variant.hash)throw new PublicationValidationError("Final platform variants are incomplete");
   return {task,source,artifact,variant};
 }
 

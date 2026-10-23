@@ -1,4 +1,6 @@
-export const PLATFORMS=["LinkedIn","X","Instagram"] as const;
+import {ALL_PLATFORMS,NEW_PLATFORMS} from "./platform-policy";
+export const PLATFORMS=ALL_PLATFORMS;
+export const ACTIVE_PLATFORMS=NEW_PLATFORMS;
 export const BENCHMARK_PRESET={
   id:"india-first-buffer-hypothesis-v1",
   label:"India-first engagement benchmark — hypothesis, not proven viral",

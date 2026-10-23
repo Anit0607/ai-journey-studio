@@ -14,6 +14,6 @@ test("recovery is an explicit action, absent without an overdue draft, disabled 
 test("form captures an exact version, resets consent on edits, avoids immediate queue and guards duplicate submission",()=>{
  const form=readFileSync(new URL("../app/calendar-recovery-form.tsx",import.meta.url),"utf8"),calendar=readFileSync(new URL("../app/calendar-panel.tsx",import.meta.url),"utf8");
  assert.match(form,/setExpected\(recovery.expected\)/);assert.match(form,/expected!==recovery.expected/);assert.match(form,/inFlight.current=true/);assert.match(form,/acknowledged:true/);assert.match(form,/setAck\(false\)/);
- assert.match(form,/No draft is queued now/);assert.match(form,/same exact cleared source/);assert.match(form,/without copying approvals/);assert.match(form,/LinkedIn, X and Instagram/);assert.match(form,/Keep old draft/);assert.doesNotMatch(form,/action\("(?:step|run|calendar-dispatch)"/);
+ assert.match(form,/No draft is queued now/);assert.match(form,/same exact cleared source/);assert.match(form,/without copying approvals/);assert.match(form,/LinkedIn only for this new plan/);assert.match(form,/cancelled original keeps its historical platform scope/);assert.match(form,/Keep old draft/);assert.doesNotMatch(form,/action\("(?:step|run|calendar-dispatch)"/);
  assert.match(calendar,/<CalendarRecoveryForm/);
 });

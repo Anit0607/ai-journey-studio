@@ -1,3 +1,4 @@
+import {enqueueLegacy} from "./legacy-task-fixture";
 import test from "node:test";
 import assert from "node:assert/strict";
 import {randomUUID} from "node:crypto";
@@ -18,7 +19,7 @@ const IG:PublishingAccount={id:"instagram-owner",platform:"Instagram",remote_id:
 const media={url:"https://media.example.test/immutable/"+hash("test-jpeg")+".jpg",sha256:hash("test-jpeg"),mime_type:"image/jpeg" as const};
 function runtime(fetcher:typeof fetch,extra:Partial<PublishingRuntime>={}):PublishingRuntime{return {now:()=>NOW,enabled:true,credential_use_authorized:true,scheduler_authorized:true,scheduler_interval_seconds:60,max_lateness_seconds:300,accounts:[{...LI},{...X},{...IG}],credential:async()=>"test-only-placeholder",fetch:fetcher,...extra};}
 async function seed(db:Database,approve=true){
-  const store=new Store(db),source=await store.source(CAPSULE,"user-reported-notes","2026-10-09",true),task=await store.enqueue(source.id);
+  const store=new Store(db),source=await store.source(CAPSULE,"user-reported-notes","2026-10-09",true),task=await enqueueLegacy(store,source.id);
   for(const role of ROLES){const text=role==="Critic"?"Unsupported claims: none\nEvidence needed: a concrete cleared project note\nProposed advice: inspect a draft":role==="Platform Adapter"?variantFixture(TEXT):TEXT;await db.query("INSERT INTO outputs(id,task_id,role,text,hash) VALUES($1,$2,$3,$4,$5)",[randomUUID(),task.id,role,text,hash(text)]);}
   await db.query("UPDATE tasks SET status='review',checkpoint=6 WHERE id=$1",[task.id]);
   const outputs=await db.query<{hash:string}>("SELECT hash FROM outputs WHERE task_id=$1 ORDER BY created,id",[task.id]);

@@ -2,7 +2,7 @@ import {randomUUID} from "node:crypto";
 import type {Database} from "./db";
 import {hash,type Source,type Task} from "./domain";
 import {assertSourcePrivacy,ownerSourceEligible} from "./sources";
-import {PLATFORMS} from "./schedule-presets";
+import {NEW_PLATFORM_POLICY,NEW_PLATFORMS} from "./platform-policy";
 
 const HOUR=3_600_000;
 const UUID=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -59,11 +59,11 @@ export async function recoverOverdueCalendarDraft(db:Database,input:RecoveryInpu
     const reason=blocker(entry,job,task,source,usage,clock());if(reason)throw new CalendarRecoveryError(reason);
     if((await tx.query("SELECT id FROM calendar_entries WHERE task_id=$1 AND id!=$2",[task.id,entry.id])).length||(await tx.query("SELECT id FROM calendar_jobs WHERE task_id=$1 AND entry_id!=$2",[task.id,entry.id])).length)throw new CalendarRecoveryError("This task is linked to another calendar entry; review its links first");
     if((await tx.query("SELECT id FROM tasks WHERE revision_parent_task_id=$1",[task.id])).length||(await tx.query("SELECT task_id FROM approvals WHERE task_id=$1",[task.id])).length||(await tx.query("SELECT id FROM content_revisions WHERE task_id=$1",[task.id])).length||(await tx.query("SELECT id FROM publishing_outbox WHERE task_id=$1",[task.id])).length)throw new CalendarRecoveryError("This draft has review, revision or publication history; use its existing review workflow");
-    const id=randomUUID(),schedule=Object.fromEntries(PLATFORMS.map(platform=>[platform,{intended_post:post.toISOString(),draft_due:review.toISOString(),review_due:review.toISOString()}]));
+    const id=randomUUID(),schedule=Object.fromEntries(NEW_PLATFORMS.map(platform=>[platform,{intended_post:post.toISOString(),draft_due:review.toISOString(),review_due:review.toISOString()}]));
     // Lock waits and validation queries can cross the chosen generation time.
     // Re-read the clock at the write boundary, never the request-start time.
     assertFuture(clock());
-    const created=await tx.query<any>("INSERT INTO calendar_entries(id,planned_date,kind,intended_post,draft_due,review_due,generation_due,platform_schedule,source_id) VALUES($1,$2,$3,$4,$5,$5,$6,$7,$8) ON CONFLICT(planned_date,kind) DO NOTHING RETURNING *",[id,input.planned_date,entry.kind,post,review,generation,JSON.stringify(schedule),task.source_id]);
+    const created=await tx.query<any>("INSERT INTO calendar_entries(id,planned_date,kind,intended_post,draft_due,review_due,generation_due,platform_schedule,source_id) VALUES($1,$2,$3,$4,$5,$5,$6,$7,$8) ON CONFLICT(planned_date,kind) DO NOTHING RETURNING *",[id,input.planned_date,entry.kind,post,review,generation,JSON.stringify({...schedule,platform_policy:NEW_PLATFORM_POLICY}),task.source_id]);
     if(!created.length)throw new CalendarRecoveryError("A calendar entry already exists for that date and format; choose an unused date");
     await tx.query("UPDATE tasks SET status='cancelled',updated=now() WHERE id=$1",[task.id]);
     await tx.query("INSERT INTO events(id,task_id,kind,detail) VALUES($1,$2,'calendar_draft_replanned',$3)",[randomUUID(),task.id,JSON.stringify({old_entry:entry.id,old_task:task.id,old_version:input.expected,new_entry:id,source_id:task.source_id,source_hash:task.source_hash,reason:input.reason.trim(),intended_post:post.toISOString(),generation_due:generation.toISOString(),review_due:review.toISOString(),note:"Owner cancelled an expired dormant task. Original brief, artifacts, usage and links retained. New plan has no task; future dispatch and fresh approval remain separate."})]);

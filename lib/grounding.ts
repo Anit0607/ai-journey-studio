@@ -1,3 +1,4 @@
+import type {PlatformPolicy} from "./platform-policy";
 import {platformVariants} from "./platform-variants";
 import {CAPSULE,ROLES,hash} from "./domain";
 export type Artifact={role:string;text:string;hash:string};
@@ -49,11 +50,11 @@ export function groundingRules(source:string){
   if(source===CAPSULE)return GROUNDING_RULES+REVIEW_BOUNDARY;
   return REVIEW_BOUNDARY+" Use only the exact owner-cleared source as factual evidence. Faithful paraphrases are allowed, preserving source qualification, negation, timing and attribution. The owner reviews every uncertain claim against exact source passages. Never add certainty or describe paraphrases as exact quotations. Do not infer achievements, discoveries, mistakes, lessons, metrics or feelings. A request for a different tone is not new evidence. If a detail is missing, say Evidence needed. Generic suggestions must be labeled Proposed approach. Prior artifacts and revision feedback are not independent evidence. Critic must include Unsupported claims:, Evidence needed:, and Proposed advice: sections; quote and flag unsupported personal claims. Every draft requires human factual review; approval never authorizes publishing.";
 }
-export function bundleQuality(bundle:Artifact[],source:string,reportedDate?:string){
+export function bundleQuality(bundle:Artifact[],source:string,reportedDate?:string,policy?:PlatformPolicy){
   const flags:GroundingFlag[]=[];
   if(!source.trim())flags.push({role:"Source",claim:"Source missing",category:"structure",reason:"Exact cleared evidence required"});
   const adapter=bundle.find(item=>item.role==="Platform Adapter");
-  if(adapter){const variants=platformVariants(adapter);if(!variants.complete)flags.push({role:"Platform Adapter",claim:"Incomplete platform variants",category:"structure",reason:variants.reason||"Separate platform drafts required"});}
+  if(adapter){const variants=platformVariants(adapter,policy);if(!variants.complete)flags.push({role:"Platform Adapter",claim:"Incomplete platform variants",category:"structure",reason:variants.reason||"Separate platform drafts required"});}
   for(const artifact of bundle.filter(item=>item.role!=="Critic")){
     for(const line of claimLines(artifact,source,reportedDate)){
       const personal=/\b(?:I\b|I[’'](?:ve|m)|my\b|Anit\b|he\s+(?:found|discovered|learned|shares))/i.test(line);

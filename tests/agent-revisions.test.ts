@@ -1,3 +1,4 @@
+import {enqueueLegacy} from "./legacy-task-fixture";
 import {variantFixture} from "./variant-fixture";
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -22,7 +23,7 @@ async function fixture(work:(store:Store,parent:Task,token:string)=>Promise<void
   // A new, ephemeral in-memory SQL engine per test. No environment DB or provider is used.
   const db=await embedded();
   try{
-    const store=new Store(db),source=await store.source(CAPSULE,"user-reported-notes","2026-10-09",true),parent=await store.enqueue(source.id);
+    const store=new Store(db),source=await store.source(CAPSULE,"user-reported-notes","2026-10-09",true),parent=await enqueueLegacy(store,source.id);
     for(const role of ROLES){const text=role==="Critic"?critique:role==="Platform Adapter"?variantFixture():"Proposed approach: inspect one source.";await db.query("INSERT INTO outputs(id,task_id,role,text,hash) VALUES($1,$2,$3,$4,$5)",[randomUUID(),parent.id,role,text,hash(text)]);}
     await db.query("UPDATE tasks SET status='review',checkpoint=6 WHERE id=$1",[parent.id]);
     const initial=await store.snapshot();
@@ -154,7 +155,7 @@ test("revision preserves the parent's immutable calendar content brief",()=>fixt
 }));
 
 test("owner-cleared new source can queue and complete without legacy capsule consent",()=>fixture(async(store)=>{
-  const intake=new SourceIntake(store.db),staged=await intake.stage({text:"I built a test agent on 10 October 2026.",category:"build-log",reported_date:"2026-10-10"}),source=await intake.clear(staged.id,staged.hash,true),parent=await store.enqueue(source.id);
+  const intake=new SourceIntake(store.db),staged=await intake.stage({text:"I built a test agent on 10 October 2026.",category:"build-log",reported_date:"2026-10-10"}),source=await intake.clear(staged.id,staged.hash,true),parent=await enqueueLegacy(store,source.id);
   for(const role of ROLES){const text=role==="Critic"?critique:role==="Platform Adapter"?variantFixture():source.text;await store.db.query("INSERT INTO outputs(id,task_id,role,text,hash) VALUES($1,$2,$3,$4,$5)",[randomUUID(),parent.id,role,text,hash(text)]);}
   await store.db.query("UPDATE tasks SET status='review',checkpoint=6 WHERE id=$1",[parent.id]);
   const initial=(await store.snapshot()).reviews.find((review:any)=>review.task_id===parent.id),newConfig={...config,source_approved:false,approved_source_hash:undefined,transmission_authorized:false};

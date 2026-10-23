@@ -1,3 +1,4 @@
+import {enqueueLegacy} from "./legacy-task-fixture";
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {randomUUID} from 'node:crypto';
@@ -13,7 +14,7 @@ const origin='https://isolated.public.blob.vercel-storage.com',caption='Proposed
 const config:MediaStorageConfig={enabled:true,upload_authorized:true,credential_use_authorized:true,public_origin:origin,auth_mode:'token',credential_env:'STUDIO_MEDIA_OWNER_TOKEN',sentinel_path:'studio-store.txt',hobby_plan_verified:true,monthly_upload_limit:100,monthly_byte_limit:10000000};
 const env={STUDIO_MEDIA_OWNER_TOKEN:'isolated-fixture'};
 async function seed(db:Database){
- const intake=new SourceIntake(db),store=new Store(db),source=await intake.stage({text:'I built a small workflow and reviewed the source.',category:'build-log',reported_date:new Date().toISOString().slice(0,10)});await intake.clear(source.id,source.hash,true);const task=await store.enqueue(source.id);
+ const intake=new SourceIntake(db),store=new Store(db),source=await intake.stage({text:'I built a small workflow and reviewed the source.',category:'build-log',reported_date:new Date().toISOString().slice(0,10)});await intake.clear(source.id,source.hash,true);const task=await enqueueLegacy(store,source.id);
  for(const role of ROLES){const text=role==='Platform Adapter'?variantFixture(caption):role==='Critic'?'Unsupported claims: none\nEvidence needed: none\nProposed advice: review the source':caption;await db.query('INSERT INTO outputs(id,task_id,role,text,hash) VALUES($1,$2,$3,$4,$5)',[randomUUID(),task.id,role,text,hash(text)]);}
  await db.query("UPDATE tasks SET checkpoint=6,status='review' WHERE id=$1",[task.id]);const outputs=await db.query<Output>('SELECT * FROM outputs WHERE task_id=$1 ORDER BY created,id',[task.id]),version=hash(outputs.map(r=>r.hash).join('|'));await store.approve(task.id,version);const token='original:'+version;
  const media=await renderApprovedInstagram(db,task.id,token),payload={text:caption,media:[{url:mediaPublicUrl(config,media.sha256)!,sha256:media.sha256,mime_type:'image/jpeg' as const}]};

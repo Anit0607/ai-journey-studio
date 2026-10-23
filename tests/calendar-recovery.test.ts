@@ -1,3 +1,4 @@
+import {seedLegacyCalendarDispatch} from "./legacy-task-fixture";
 import test from "node:test";
 import assert from "node:assert/strict";
 import {randomUUID} from "node:crypto";
@@ -19,8 +20,7 @@ async function setup(){
  await db.query("UPDATE calendar_settings SET generation_enabled=true,generation_lead_hours=72 WHERE id=1");
  const id=randomUUID(),post=new Date(expiredAt.getTime()+48*HOUR);
  await db.query("INSERT INTO calendar_entries(id,planned_date,kind,intended_post,draft_due,review_due,generation_due,source_id) VALUES($1,$2,'shortform',$3,$4,$4,$5,$6)",[id,post.toISOString().slice(0,10),post,expiredAt,dispatchAt,source.id]);
- const dispatched=await calendar.dispatchDue(config,true,dispatchAt);assert.equal(dispatched.queued,1);
- const taskId=dispatched.entries[0].task_id!;
+ const taskId=await seedLegacyCalendarDispatch(db,id,source,dispatchAt);
  const state=async()=>{const entry=(await db.query<any>("SELECT * FROM calendar_entries WHERE id=$1",[id]))[0],job=(await db.query<any>("SELECT * FROM calendar_jobs WHERE entry_id=$1",[id]))[0],task=(await db.query<any>("SELECT * FROM tasks WHERE id=$1",[taskId]))[0],currentSource=(await db.query<any>("SELECT * FROM sources WHERE id=$1",[source.id]))[0],usage=await db.query<any>("SELECT * FROM ledger WHERE task_id=$1",[taskId]);return {entry,job,task,source:currentSource,usage,recovery:calendarRecoverySnapshot(entry,job,task,currentSource,usage,now)!};};
  const input=async()=>({entry:id,expected:(await state()).recovery.expected,planned_date:new Date(now.getTime()+240*HOUR).toISOString().slice(0,10),post_time:"10:00",generation_lead_hours:120,reason:"Move this missed draft to a future review window",acknowledged:true});
  return {db,calendar,store,intake,source,id,taskId,state,input};

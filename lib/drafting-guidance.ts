@@ -1,3 +1,4 @@
+import type {PlatformPolicy} from "./platform-policy";
 /** Compact editorial adaptation; pinned MIT sources are recorded in THIRD_PARTY_NOTICES.md.
  * Formatting suggestions never supply factual evidence or add execution capabilities.
  */
@@ -8,6 +9,8 @@ const guidance:Readonly<Record<number,string>>={
  4:'Keep the required three-section schema. LinkedIn: one clear opening, immediate payoff, evidence, useful takeaway; short paragraphs, no manufactured success arc. X: rebuild the same supported point as one self-contained concise post; remove cross-platform instructions and hashtag walls, never make a thread. Instagram: front-load a useful caption opening, add context and at most one optional ask; fit the existing single-card format. Keep YouTube and carousel planning in the brief only, not extra platform sections or claims of generated media.',
  5:'Critique hooks as claims too: check title/promised payoff against the cleared note. Remove invented numbers, achievements, emotions, assets or implied working automation. Style is not proof: no human score, virality guarantee or automated factual endorsement. Retain the required critique sections and exact-version human review.'
 };
-export function draftingGuidance(checkpoint:number):string{
+export function draftingGuidance(checkpoint:number,policy?:PlatformPolicy):string{
+ if(policy&&checkpoint===2)return "\nEDITORIAL GUIDANCE (format only, never evidence): Brief for LinkedIn only: choose one source-supported point, audience need, evidence gap and reader takeaway. Do not plan other social platforms or invent assets.";
+ if(policy&&checkpoint===4)return "\nEDITORIAL GUIDANCE (format only, never evidence): Keep the single LinkedIn section. One clear opening, immediate payoff, evidence, useful takeaway; short paragraphs, no manufactured success arc. No other platform variants.";
  return guidance[checkpoint]?'\nEDITORIAL GUIDANCE (format only, never evidence): '+guidance[checkpoint]:'';
 }

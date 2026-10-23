@@ -1,4 +1,4 @@
-import {variantFixture} from "./variant-fixture";
+import {NEW_PLATFORM_POLICY} from "../lib/platform-policy";
 import test from "node:test";
 import assert from "node:assert/strict";
 import {randomUUID} from "node:crypto";
@@ -22,14 +22,14 @@ test("isolated complete local loop survives restart and requires fresh revision 
  const config:RuntimeConfig={owner_cleared_sources_authorized:true,credential_use_authorized:true,security_tests_passed:true,pricing_verified_date:now.toISOString().slice(0,10),fallback_authorized:false,openai:{model:"isolated-loop",pricing_version:"fixture",pricing_tier:"standard",official_pricing_url:"https://example.test",input_microdollars_per_token:"0.4",output_microdollars_per_token:"1.6"}};
  const mock=async(provider:string,prompt:string):Promise<Completion>=>{
   calls++;assert.equal(provider,"openai");assert(prompt.includes(sourceText));
-  return {text:prompt.startsWith("You are Critic.")?"Unsupported claims: none\nEvidence needed: none for quoted statements\nProposed advice: review the source":prompt.startsWith("You are Platform Adapter.")?variantFixture(sourceText):sourceText,input:10,output:10,outcome:"complete",report:{model:"isolated-loop",serviceTier:"default",requestId:"isolated-"+calls,finishReason:"stop"}};
+  return {text:prompt.startsWith("You are Critic.")?"Unsupported claims: none\nEvidence needed: none for quoted statements\nProposed advice: review the source":prompt.startsWith("You are Platform Adapter.")?"### LinkedIn\n"+sourceText:sourceText,input:10,output:10,outcome:"complete",report:{model:"isolated-loop",serviceTier:"default",requestId:"isolated-"+calls,finishReason:"stop"}};
  };
  try{
   let store=new Store(db);const intake=new SourceIntake(db);const staged=await intake.stage({text:sourceText,category:"build-log",reported_date:now.toISOString().slice(0,10)});
   assert.equal(calls,0);await intake.clear(staged.id,staged.hash,true);
   const calendar=new Calendar(db);await calendar.configure({start_date:new Date(now.getTime()+72*hour).toISOString().slice(0,10),post_time:"10:00",short_days:[1,3,5],long_day:0,generation_lead_hours:72,generation_enabled:true});
   const entry=randomUUID(),posting=new Date(now.getTime()+72*hour),review=new Date(now.getTime()+24*hour);
-  await db.query("INSERT INTO calendar_entries(id,planned_date,kind,intended_post,draft_due,review_due,generation_due,source_id) VALUES($1,$2,'longform',$3,$4,$4,$5,$6)",[entry,posting.toISOString().slice(0,10),posting,review,now,staged.id]);
+  await db.query("INSERT INTO calendar_entries(id,planned_date,kind,intended_post,draft_due,review_due,generation_due,source_id,platform_schedule) VALUES($1,$2,'longform',$3,$4,$4,$5,$6,$7)",[entry,posting.toISOString().slice(0,10),posting,review,now,staged.id,JSON.stringify({platform_policy:NEW_PLATFORM_POLICY,LinkedIn:{intended_post:posting.toISOString(),draft_due:review.toISOString(),review_due:review.toISOString()}})]);
   assert.equal((await calendar.dispatchDue(config,true,now)).queued,1);
   assert.equal((await calendar.dispatchDue(config,true,now)).queued,0);
   for(let index=0;index<6;index++)assert.equal((await step(store,config,mock,true)).status,"step_saved");
