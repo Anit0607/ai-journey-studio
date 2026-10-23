@@ -9,6 +9,7 @@ import {assertNoPendingAgentRevision,finalizeAgentRevision} from "./agent-revisi
 import {assertSourcePrivacy,sourceEligible} from "./sources";
 import type {Completion,Report} from "./providers";
 import {assertBundle,bundleVersion,type Artifact} from "./grounding";
+import {assertOwnerDraftScope,OWNER_DRAFT_STARTED,OWNER_DRAFT_MAX_RESERVED,OWNER_DRAFT_MAX_CALLS,type OwnerDraftScope} from "./owner-draft-policy";
 export class Store{
   constructor(readonly db:Database){}
   async event(tx:Connection,task:string|null,kind:string,detail:string){
@@ -58,33 +59,51 @@ export class Store{
       pricing_blocked:data.ledger.some((r:any)=>r.pricing_anomaly&&r.status!=="settled"),
       updated:new Date().toISOString()};
   }
-  async claim(){
+  async claim(scope?:OwnerDraftScope){
     return this.db.transaction(async tx=>{
+      if(scope){
+        const task=(await tx.query<Task>("SELECT * FROM tasks WHERE id=$1 FOR UPDATE",[scope.task_id]))[0];
+        if(!task||task.status!=="queued")return null;
+        await assertOwnerDraftScope(tx,task,scope);
+        const claimed=(await tx.query<Task>("UPDATE tasks SET status='running',lease_token=$2,lease_until=now()+interval '240 seconds',updated=now() WHERE id=$1 RETURNING *",[task.id,randomUUID()]))[0];
+        await this.event(tx,task.id,"step_claimed","Owner-selected checkpoint "+task.checkpoint+" claimed");
+        return claimed;
+      }
       // Expiry never frees a provider reservation. Unknown completion requires reconciliation.
-      const expired=await tx.query<Task>("SELECT * FROM tasks WHERE status='running' AND lease_until<now() FOR UPDATE SKIP LOCKED");
+      const expired=await tx.query<Task>("SELECT * FROM tasks WHERE status='running' AND lease_until<now() AND NOT EXISTS (SELECT 1 FROM events WHERE events.task_id=tasks.id AND kind='owner_draft_started') FOR UPDATE SKIP LOCKED");
       for(const t of expired){
+        if((await tx.query("SELECT id FROM events WHERE task_id=$1 AND kind=$2",[t.id,OWNER_DRAFT_STARTED])).length)continue;
         const uncertain=await tx.query("SELECT id FROM ledger WHERE task_id=$1 AND status IN ('reserved','unknown')",[t.id]);
         await tx.query("UPDATE tasks SET status=$2,lease_token=NULL,lease_until=NULL,updated=now() WHERE id=$1",[t.id,uncertain.length?"blocked":"queued"]);
         await this.event(tx,t.id,"lease_expired",uncertain.length?"Reservation retained; replay blocked":"Resumable checkpoint queued");
       }
-      const task=(await tx.query<Task>("SELECT * FROM tasks WHERE status='queued' ORDER BY updated FOR UPDATE SKIP LOCKED LIMIT 1"))[0];
+      const task=(await tx.query<Task>("SELECT * FROM tasks WHERE status='queued' AND NOT EXISTS (SELECT 1 FROM events WHERE events.task_id=tasks.id AND kind='owner_draft_started') ORDER BY updated FOR UPDATE SKIP LOCKED LIMIT 1"))[0];
       if(!task)return null;
+      // Fresh statement after the row lock handles a marker committed after the selection snapshot.
+      if((await tx.query("SELECT id FROM events WHERE task_id=$1 AND kind=$2",[task.id,OWNER_DRAFT_STARTED])).length)return null;
       const lease=randomUUID();
       const claimed=(await tx.query<Task>("UPDATE tasks SET status='running',lease_token=$2,lease_until=now()+interval '240 seconds',updated=now() WHERE id=$1 RETURNING *",[task.id,lease]))[0];
       await this.event(tx,task.id,"step_claimed","Checkpoint "+task.checkpoint+" claimed");
       return claimed;
     });
   }
-  async reserve(task:Task,provider:string,p:Pricing,upper:number,month=istMonth()){
+  async reserve(task:Task,provider:string,p:Pricing,upper:number,month=istMonth(),scope?:OwnerDraftScope){
     if(!Number.isSafeInteger(upper)||upper<=0)throw Error("Invalid reservation");
     return this.db.transaction(async tx=>{
       const current=(await tx.query<Task>("SELECT * FROM tasks WHERE id=$1 FOR UPDATE",[task.id]))[0];
       if(!current||current.status!=="running"||current.lease_token!==task.lease_token||current.checkpoint!==task.checkpoint||!ROLES[current.checkpoint])throw Error("Cancelled or stale lease");
+      if(scope)await assertOwnerDraftScope(tx,current,scope);
+      else if((await tx.query("SELECT id FROM events WHERE task_id=$1 AND kind=$2",[task.id,OWNER_DRAFT_STARTED])).length)throw Error("Owner draft execution stopped");
       const source=(await tx.query<Source>("SELECT * FROM sources WHERE id=$1 FOR UPDATE",[current.source_id]))[0];
       if(!source?.cleared||source.hash!==current.source_hash||!sourceEligible(source))throw Error("Source invalidated");
       // Include unresolved prior-month calls: completion/billing date can cross the IST boundary.
       await tx.query("INSERT INTO budget_months(month) VALUES('__combined_guard__') ON CONFLICT DO NOTHING");
       await tx.query("SELECT month FROM budget_months WHERE month='__combined_guard__' FOR UPDATE");
+      if(scope){
+        const spent=(await tx.query<{reserved:string;calls:string}>("SELECT COALESCE(SUM(reserved),0) AS reserved,COUNT(*) AS calls FROM ledger WHERE task_id=$1",[task.id]))[0];
+        if(provider!=="openai"||!Number.isSafeInteger(Number(spent.reserved))||Number(spent.reserved)+upper>OWNER_DRAFT_MAX_RESERVED||Number(spent.calls)>=OWNER_DRAFT_MAX_CALLS||(await tx.query("SELECT id FROM ledger WHERE task_id=$1 AND checkpoint=$2",[task.id,task.checkpoint])).length)throw Error("Owner draft reservation limit reached");
+        if((await tx.query("SELECT id FROM ledger WHERE status!='settled' LIMIT 1")).length)throw Error("Owner draft accounting unresolved");
+      }
       if((await tx.query("SELECT id FROM ledger WHERE pricing_anomaly=true AND status!='settled' LIMIT 1")).length)throw Error("Unverified billing tier; all provider execution paused");
       await tx.query("INSERT INTO budget_months(month) VALUES($1) ON CONFLICT DO NOTHING",[month]);
       await tx.query("SELECT month FROM budget_months WHERE month=$1 FOR UPDATE",[month]);
@@ -148,6 +167,7 @@ export class Store{
     await this.db.transaction(async tx=>{
       const t=(await tx.query<Task>("SELECT * FROM tasks WHERE id=$1 FOR UPDATE",[id]))[0];
       if(!t||t.status!=="blocked")throw Error("Task cannot be retried");
+      if((await tx.query("SELECT id FROM events WHERE task_id=$1 AND kind=$2",[id,OWNER_DRAFT_STARTED])).length)throw Error("Owner draft attempt cannot be replayed");
       if(t.checkpoint>=6||["revision_stale","revision_source","revision_invalid","revision_accounting"].includes((t as Task&{block_reason:string|null}).block_reason||""))throw Error("Completed revision cannot be retried; review its parent content");
       if((t as Task&{block_reason:string|null}).block_reason==="safety")throw Error("Safety termination cannot be retried");
       const unknown=await tx.query("SELECT id FROM ledger WHERE task_id=$1 AND status IN ('reserved','unknown')",[id]);
@@ -160,6 +180,10 @@ export class Store{
     await this.db.transaction(async tx=>{
       const t=(await tx.query<Task>("SELECT * FROM tasks WHERE id=$1 FOR UPDATE",[id]))[0];
       if(!t||t.status!=="review"||t.revision_parent_task_id)throw Error("Task is not ready for approval");
+      if((await tx.query("SELECT id FROM events WHERE task_id=$1 AND kind=$2",[id,OWNER_DRAFT_STARTED])).length){
+        const finished=(await tx.query<{detail:string}>("SELECT detail FROM events WHERE task_id=$1 AND kind='owner_draft_finished'",[id]))[0];
+        if(!finished||JSON.parse(finished.detail).status!=="review")throw Error("Task is not ready for approval");
+      }
       await assertNoPendingAgentRevision(tx,id);
       if((await tx.query("SELECT id FROM content_revisions WHERE task_id=$1 LIMIT 1",[id])).length)throw Error("Fresh revision approval required");
       const outputs=await tx.query<Output>("SELECT * FROM outputs WHERE task_id=$1 ORDER BY created,id",[id]);
