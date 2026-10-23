@@ -1,6 +1,6 @@
 # LinkedIn single-test release checkpoint — 23 October 2026
 
-Status: bounded test window prepared. No publication result is established by this document.
+Status: the single approved attempt returned a durable success receipt. The temporary publishing gates have been restored in saved production configuration; deployment completion and live disabled-state verification remain separate close-out checks.
 
 ## Authorized scope
 
@@ -20,3 +20,10 @@ Status: bounded test window prepared. No publication result is established by th
 Restore the temporary publishing gates to their prior disabled values immediately after the single test, or if the test is abandoned. Apply that configuration through another normal Git-integrated release and verify the live disabled state. Keep scheduling off throughout.
 
 The follow-up checkpoint must distinguish configuration readback, deployment completion, live gate verification and the publication outcome. Do not treat a saved configuration alone as proof that the running deployment is disabled.
+
+## Single-test close-out checkpoint
+
+- At 18:29:32.024 UTC on 23 October 2026, the responsible workflow recorded HTTP 201 and durable receipt `urn:li:share:7519465042535198722` for the one approved LinkedIn attempt. It reported exactly one received attempt and no in-flight attempt.
+- Both temporary production gates, `publishing.enabled` and `publishing.credential_use_authorized`, were restored to `false`; exact configuration readback was verified at 18:30:12 UTC. Scheduling remained disabled and all other configuration was preserved.
+- This documentation-only checkpoint triggers the normal Git-integrated production release needed to apply those disabled settings. Confirm successful production deployment and live disabled-state readback before declaring closure complete.
+- The one-post approval is exhausted. No second attempt, edited post, further publishing or scheduling is authorized by this test.
