@@ -114,7 +114,7 @@ test("standing consent, explicit owner source clearance, runtime, pricing and Op
 
 test("legacy clearance and an unlinked available source cannot silently authorize a scheduled source",()=>fixture(async(db,calendar,store,intake)=>{
   const legacy=await store.source(CAPSULE,"user-reported-notes","2026-10-09",true);await cleared(intake);await calendar.configure({...chosen,generation_enabled:true});await entry(db,legacy);await entry(db,null,{offset:1});
-  const result=await calendar.dispatchDue({...config,source_approved:true,approved_source_hash:hash(CAPSULE),transmission_authorized:true},true,now);assert.equal(result.queued,0);assert.equal(result.blocked,2);assert(result.entries.some(item=>item.reason?.includes("owner clearance")));assert(result.entries.some(item=>item.reason?.includes("no evidence is auto-selected")));assert.equal((await store.snapshot()).tasks.length,0);
+  const result=await calendar.dispatchDue({...config,source_approved:true,approved_source_hash:hash(CAPSULE),transmission_authorized:true},true,now);assert.equal(result.queued,0);assert.equal(result.blocked,2);assert(result.entries.some(item=>item.reason?.includes("owner clearance")));assert(result.entries.some(item=>item.reason?.includes("No source is available for this entry")));assert.equal((await store.snapshot()).tasks.length,0);
 }));
 
 test("source text or provenance tampering blocks dispatch from persisted evidence",()=>fixture(async(db,calendar,store,intake)=>{

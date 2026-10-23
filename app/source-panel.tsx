@@ -1,9 +1,11 @@
 "use client";
 
+import GithubSourcePolicyPanel from "./github-source-policy-panel";
 import {useRef,useState,type CSSProperties} from "react";
 import {parseSourceFile,MAX_SOURCE_FILE_BYTES,type ParsedSourceFile} from "../lib/source-file";
 
 type Source = {
+  scoped_authorization?:{policy_id:string;grant_id:string};
   id:string;
   text:string;
   category:string;
@@ -60,12 +62,15 @@ function SourceCard({source,legacyApproved,intakeAuthorized,liveEnabled,drafting
     finally{inFlight.current=false;setPending("");setAcknowledged(false);}
   }
   return <article aria-label={"Source note "+source.id.slice(0,8)}>
-    <div style={row}><h3>Source note</h3><span className={"pill"+(cleared?"":" blocked")}>{cleared?"Cleared for OpenAI":source.revoked_at?"Clearance revoked":"Staged · not cleared"}</span></div>
+    <div style={row}><h3>Source note</h3><span className={"pill"+(cleared?"":" blocked")}>{source.scoped_authorization?"Policy-authorized · not individually reviewed":cleared?"Cleared for OpenAI":source.revoked_at?"Clearance revoked":"Staged · not cleared"}</span></div>
     <p className="fine">{source.category} · Reported {source.reported_date} · {source.id.slice(0,8)}</p>
     <pre aria-label="Exact source note">{source.text}</pre>
     <p className="fine">SHA-256 <span aria-label="Source SHA-256">{source.hash}</span></p>
     <p className="fine">This saved text and its metadata are immutable. Add a new note for a correction and review its clearance separately.</p>
-    {cleared?<>
+    {source.scoped_authorization?<>
+      <p>Eligible through a separate bounded GitHub source policy, not an exact-text owner review. Its one linked LinkedIn task retains mandatory final-post approval.</p>
+      <button disabled={disabled} onClick={()=>void perform("source-revoke",{source:source.id,expected_hash:source.hash})}>Stop future use of this source</button>
+    </>:cleared?<>
       <p>{legacyApproved?"Consent recorded for this exact capsule.":"Clearance recorded for this exact note and hash: OpenAI, content drafts and revisions only."}</p>
       <div style={row}>
         <button className="primary" disabled={disabled||!liveEnabled||(!legacyApproved&&!intakeAuthorized)} onClick={()=>void perform("run",{source:source.id})}>{pending==="run"?"Queueing…":draftingPaused?"Queue only · drafting paused":"Queue content workflow"}</button>
@@ -124,6 +129,7 @@ export default function SourcePanel({sources,proposedSource,sourceApproved,intak
     }finally{inFlight.current=false;setPending(false);}
   }
   return <>
+    <GithubSourcePolicyPanel/>
     <section aria-labelledby="source-intake-title">
       <span className="eyebrow">REAL EVIDENCE · OWNER REVIEW</span>
       <h2 id="source-intake-title">Stage a project note</h2>

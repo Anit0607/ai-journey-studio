@@ -54,3 +54,7 @@ Blueprint materialization remains blocked: the supported Library helper requires
 ## Actual activity and owner-entered results
 
 [Studio reporting](STUDIO_REPORTING.md) documents immutable per-agent accounting, exact platform variants, cumulative post observations, and separate USD/INR attributable financial records. Reports start empty, require explicit provenance/coverage, never enable model calls, and make no automatic revenue attribution or currency conversion.
+
+## Optional bounded GitHub draft selection
+
+A separately consented, default-off [GitHub source policy](docs/scoped-github-drafting.md) can select unused attributed commit summaries or explicitly allowlisted progress notes for due LinkedIn-only slots. Exact manual source review remains available and unchanged. New GitHub access, source-to-OpenAI consent, generation activation, scheduler setup and every-post publication approval stay separate.

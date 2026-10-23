@@ -1,20 +1,22 @@
 import {GitHubAppAuthError} from "./github-app-auth";
-import {randomUUID} from "node:crypto";
+import {createHash,randomUUID} from "node:crypto";
 import type {Connection,Database} from "./db";
 import {hash,type Source} from "./domain";
 import {assertSourcePrivacy,SourceIntake,validateSourceInput,type SourceInput} from "./sources";
+import {SCOPED_GITHUB_REPOSITORY,GITHUB_NOTE_MAX_BYTES,GITHUB_NOTE_MAX_FETCHES,GITHUB_NOTE_MAX_TREE_READS,GITHUB_NOTES_SYNC_MAX_READS,GithubSourceBoundaryError,assertGithubEvidenceText,isGithubImmutableSha,normalizeGithubNotePaths,validateGithubBuildNote} from "./github-source-boundary";
 
 /** Non-secret, server-held configuration. Enabling alone never authorizes syncing. */
 export type SourceIngestionConfig={
-  github?:{enabled?:boolean;sync_authorized?:boolean;private_read_authorized?:boolean;app?:import('./github-app-auth').GitHubAppConfig;repositories:string[];since?:string};
+  github?:{enabled?:boolean;sync_authorized?:boolean;private_read_authorized?:boolean;app?:import('./github-app-auth').GitHubAppConfig;repositories:string[];since?:string;notes?:{enabled?:boolean;paths:string[]}};
   youtube?:{enabled?:boolean;sync_authorized?:boolean;channel_ids?:string[];handles?:string[]};
   chat?:{enabled?:boolean};
 };
 export type SourceProvider="github"|"youtube";
 export type ChatProvider="chatgpt"|"claude"|"gemini"|"codex"|"spark";
 export type SourceIngestionDependencies={fetch?:typeof fetch;env?:Record<string,string|undefined>;now?:()=>Date;signal?:AbortSignal;githubCredential?:(repository:string,signal?:AbortSignal)=>Promise<string>};
-export type IngestionCounts={staged:number;duplicates:number;rejected:number};
-export type ProviderSyncResult=IngestionCounts&{provider:SourceProvider;status:"synced"|"partial"|"blocked"|"busy"|"failed";has_more:boolean;error?:string};
+export type IngestionCounts={staged:number;duplicates:number;rejected:number;rejected_reasons?:Record<string,number>};
+type GithubReadCounts={repository:number;commit_pages:number;commit_resolution:number;tree_metadata:number;note_contents:number;total:number};
+export type ProviderSyncResult=IngestionCounts&{provider:SourceProvider;status:"synced"|"partial"|"blocked"|"busy"|"failed";has_more:boolean;error?:string;github_read_counts?:GithubReadCounts};
 export type SourceSyncResult={status:"synced"|"partial"|"blocked"|"failed";providers:ProviderSyncResult[]};
 export type ImportedCandidate={provider:SourceProvider|ChatProvider;scope:string;external_id:string;source_url:string|null;input:SourceInput;metadata?:Record<string,unknown>};
 export const CHAT_IMPORT_MAX_BYTES=2_000_000;
@@ -27,7 +29,6 @@ const HANDLE=/^@[\p{L}\p{N}_.-]{3,30}$/u;
 const VIDEO=/^[A-Za-z0-9_-]{11}$/;
 const EXTERNAL_ID=/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/;
 const PAGE_TOKEN=/^[A-Za-z0-9_=.~-]{1,512}$/;
-const SHA=/^[a-fA-F0-9]{40,64}$/;
 type Obj=Record<string,unknown>;
 type SyncRow={provider:SourceProvider;scope:string;cursor:Obj;lease_token:string|null;last_synced_at:string|Date|null;last_error:string|null};
 class IngestionError extends Error {constructor(readonly code:string){super(code);}}
@@ -35,7 +36,7 @@ const invalid=()=>new IngestionError("invalid_provider_response");
 const object=(value:unknown):Obj=>{if(!value||typeof value!=="object"||Array.isArray(value))throw invalid();return value as Obj;};
 const string=(value:unknown,max=12_000):string=>{if(typeof value!=="string"||value.length>max)throw invalid();return value;};
 function iso(value:unknown):string {if(typeof value!=="string"||!/^\d{4}-\d{2}-\d{2}T(?:[01]\d|2[0-3]):[0-5]\d:[0-5]\d(?:\.\d{1,9})?(?:Z|[+-](?:[01]\d|2[0-3]):[0-5]\d)$/.test(value))throw invalid();const d=new Date(value),day=new Date(value.slice(0,10)+"T00:00:00Z");if(!Number.isFinite(d.getTime())||!Number.isFinite(day.getTime())||day.toISOString().slice(0,10)!==value.slice(0,10))throw invalid();return d.toISOString();}
-function errorCode(error:unknown):string{return error instanceof IngestionError||error instanceof GitHubAppAuthError?error.code:"sync_unavailable";}
+function errorCode(error:unknown):string{return error instanceof IngestionError||error instanceof GitHubAppAuthError||error instanceof GithubSourceBoundaryError?error.code:"sync_unavailable";}
 function targetList(config:SourceIngestionConfig,provider:SourceProvider):string[]{
   const raw=provider==="github"?config.github?.repositories:[...(config.youtube?.channel_ids||[]),...(config.youtube?.handles||[])];
   if(!Array.isArray(raw)||raw.length===0||raw.length>MAX_SCOPES)throw new IngestionError("invalid_source_allowlist");
@@ -48,18 +49,27 @@ export function sourceIngestionStatus(config:SourceIngestionConfig,env:Record<st
     const c=config?.[provider];let targets:string[]=[];let reason:string|undefined;
     if(c?.enabled!==true)reason="disabled";
     else if(c.sync_authorized!==true)reason="owner_sync_authorization_required";
-    else {try{targets=targetList(config,provider);if(provider==="github"&&config.github?.since)iso(config.github.since);}catch{reason="invalid_source_allowlist";}}
+    else {try{
+      targets=targetList(config,provider);if(provider==="github"&&config.github?.since)iso(config.github.since);
+      if(provider==="github"&&config.github?.notes?.enabled===true){
+        if(config.github.private_read_authorized!==true)throw new IngestionError("github_notes_private_read_authorization_required");
+        if(targets.length!==1||targets[0]!==SCOPED_GITHUB_REPOSITORY)throw new IngestionError("github_notes_repository_not_allowed");
+        normalizeGithubNotePaths(config.github.notes.paths);
+      }
+    }catch(error){reason=error instanceof GithubSourceBoundaryError||error instanceof IngestionError&&error.code.startsWith("github_notes_")?error.code:"invalid_source_allowlist";}}
     if(!reason&&provider==="youtube"&&!env.STUDIO_SOURCE_YOUTUBE_API_KEY)reason="youtube_api_key_missing";
     return {provider,enabled:c?.enabled===true,authorized:c?.sync_authorized===true,ready:!reason,reason:reason||null,targets};
   });
 }
 function boundDatabase(db:Database,tx:Connection):Database{return {kind:db.kind,query:tx.query.bind(tx),transaction:work=>work(tx),close:async()=>{}};}
 function counts():IngestionCounts{return {staged:0,duplicates:0,rejected:0};}
-function sum(into:IngestionCounts,other:IngestionCounts){into.staged+=other.staged;into.duplicates+=other.duplicates;into.rejected+=other.rejected;}
+function sum(into:IngestionCounts,other:IngestionCounts){into.staged+=other.staged;into.duplicates+=other.duplicates;into.rejected+=other.rejected;if(other.rejected_reasons){into.rejected_reasons||={};for(const [reason,count] of Object.entries(other.rejected_reasons))into.rejected_reasons[reason]=(into.rejected_reasons[reason]||0)+count;}}
 
 /** Official read-only metadata adapters with explicit private-repository consent. No model calls, task enqueue, clearance, or publishing. */
 export class SourceIngestion {
   private readonly fetcher:typeof fetch;private readonly env:Record<string,string|undefined>;private readonly now:()=>Date;
+  private githubNoteFetches=0;
+  private githubReadCounts:GithubReadCounts={repository:0,commit_pages:0,commit_resolution:0,tree_metadata:0,note_contents:0,total:0};
   constructor(readonly db:Database,readonly config:SourceIngestionConfig={},readonly deps:SourceIngestionDependencies={}){this.fetcher=deps.fetch||fetch;this.env=deps.env||process.env;this.now=deps.now||(()=>new Date());}
   async snapshot(){
     return {connections:sourceIngestionStatus(this.config,this.env),chat_import_enabled:this.config.chat?.enabled===true,
@@ -106,13 +116,14 @@ export class SourceIngestion {
       }
     }
     result.status=failures?(successes||result.staged||result.duplicates||result.rejected?"partial":"failed"):busy?(successes?"partial":"busy"):"synced";
+    if(provider==="github"&&this.config.github?.notes?.enabled===true)result.github_read_counts={...this.githubReadCounts};
     return result;
   }
   private async acquire(provider:SourceProvider,scope:string,lease:string):Promise<SyncRow|undefined>{
     await this.db.query("INSERT INTO source_sync_state(provider,scope) VALUES($1,$2) ON CONFLICT DO NOTHING",[provider,scope]);
     return (await this.db.query<SyncRow>("UPDATE source_sync_state SET lease_token=$3,last_attempted_at=now(),lease_until=now()+interval '120 seconds' WHERE provider=$1 AND scope=$2 AND (lease_until IS NULL OR lease_until<now()) RETURNING *",[provider,scope,lease]))[0];
   }
-  private async request(url:URL,provider:SourceProvider):Promise<unknown>{
+  private async request(url:URL,provider:SourceProvider,maxBytes=MAX_RESPONSE_BYTES,noteRequest=false):Promise<unknown>{
     const valid=provider==="github"?url.origin==="https://api.github.com"&&url.pathname.startsWith("/repos/"):url.origin==="https://www.googleapis.com"&&url.pathname.startsWith("/youtube/v3/");
     if(!valid||url.username||url.password)throw new IngestionError("invalid_provider_endpoint");
     const headers:Record<string,string>={Accept:"application/json"};
@@ -128,19 +139,24 @@ export class SourceIngestion {
     }else headers["X-Goog-Api-Key"]=this.env.STUDIO_SOURCE_YOUTUBE_API_KEY!;
     let response:Response;
     const timeout=AbortSignal.timeout(15_000),signal=this.deps.signal?AbortSignal.any([timeout,this.deps.signal]):timeout;
+    if(provider==="github"){
+      if(this.config.github?.notes?.enabled===true&&this.githubReadCounts.total>=GITHUB_NOTES_SYNC_MAX_READS)throw new IngestionError("github_read_budget_exceeded");
+      const kind=url.pathname.includes("/contents/")?"note_contents":url.pathname.includes("/git/trees/")?"tree_metadata":url.pathname.includes("/git/commits/")?"commit_resolution":url.pathname.endsWith("/commits")?"commit_pages":"repository";
+      this.githubReadCounts[kind]++;this.githubReadCounts.total++;
+    }
     try{response=await this.fetcher(url,{method:"GET",headers,redirect:"error",cache:"no-store",signal});}catch{throw new IngestionError(this.deps.signal?.aborted?"sync_cancelled":"provider_network_error");}
-    if(!response.ok){await response.body?.cancel();throw new IngestionError(response.status===429?"provider_rate_limited":response.status===401||response.status===403?"provider_access_denied":"provider_http_error");}
+    if(!response.ok){await response.body?.cancel();throw new IngestionError(response.status===429?"provider_rate_limited":response.status===401||response.status===403?"provider_access_denied":noteRequest&&response.status===404?"github_note_not_found":"provider_http_error");}
     const contentLength=Number(response.headers.get("content-length")||0);
-    if(contentLength>MAX_RESPONSE_BYTES){await response.body?.cancel();throw new IngestionError("provider_response_too_large");}
+    if(contentLength>maxBytes){await response.body?.cancel();throw new IngestionError("provider_response_too_large");}
     const reader=response.body?.getReader();if(!reader)throw invalid();let total=0;const chunks:Uint8Array[]=[];
-    try{while(true){const {value,done}=await reader.read();if(done)break;total+=value.byteLength;if(total>MAX_RESPONSE_BYTES){await reader.cancel();throw new IngestionError("provider_response_too_large");}chunks.push(value);}}catch(error){if(error instanceof IngestionError)throw error;throw new IngestionError("provider_network_error");}finally{reader.releaseLock();}
+    try{while(true){const {value,done}=await reader.read();if(done)break;total+=value.byteLength;if(total>maxBytes){await reader.cancel();throw new IngestionError("provider_response_too_large");}chunks.push(value);}}catch(error){if(error instanceof IngestionError)throw error;throw new IngestionError("provider_network_error");}finally{reader.releaseLock();}
     try{return JSON.parse(new TextDecoder("utf-8",{fatal:true}).decode(Buffer.concat(chunks)));}catch{throw invalid();}
   }
-  private async persist(provider:SourceProvider,scope:string,lease:string,candidates:ImportedCandidate[],cursor:Obj,rejected:number):Promise<IngestionCounts>{
+  private async persist(provider:SourceProvider,scope:string,lease:string,candidates:ImportedCandidate[],cursor:Obj,rejected:number,rejectedReasons?:Record<string,number>):Promise<IngestionCounts>{
     return this.db.transaction(async tx=>{
       const state=(await tx.query<SyncRow>("SELECT * FROM source_sync_state WHERE provider=$1 AND scope=$2 FOR UPDATE",[provider,scope]))[0];
       if(!state||state.lease_token!==lease)throw new IngestionError("sync_lease_expired");
-      const result=await this.stage(tx,candidates);result.rejected+=rejected;
+      const result=await this.stage(tx,candidates);result.rejected+=rejected;if(rejectedReasons&&Object.keys(rejectedReasons).length)result.rejected_reasons=rejectedReasons;
       await tx.query("UPDATE source_sync_state SET cursor=$4 WHERE provider=$1 AND scope=$2 AND lease_token=$3",[provider,scope,lease,JSON.stringify(cursor)]);
       await tx.query("INSERT INTO events(id,task_id,kind,detail) VALUES($1,NULL,'source_sync_staged',$2)",[randomUUID(),JSON.stringify({provider,scope,...result,cleared:false})]);
       return result;
@@ -172,36 +188,122 @@ export class SourceIngestion {
       if(this.config.github?.private_read_authorized!==true||(!this.env.STUDIO_SOURCE_GITHUB_TOKEN&&!this.deps.githubCredential))throw new IngestionError("private_repository_authorization_required");
       if(repo.permissions&&object(repo.permissions).pull!==true)throw new IngestionError("repository_read_permission_required");
     }else if(repo.private!==false||repo.visibility!=="public")throw new IngestionError("repository_visibility_unknown");
+    const notePaths=this.config.github?.notes?.enabled===true?normalizeGithubNotePaths(this.config.github.notes.paths):[];
     const configured=this.config.github?.since?iso(this.config.github.since):null;
+    const configuration=notePaths.length?hash(JSON.stringify({since:configured,note_paths:notePaths})):configured;
     let cursor=state.cursor||{};
-    if(cursor.configuration!==configured)cursor={configuration:configured};
+    if(cursor.configuration!==configuration)cursor={configuration};
     const now=this.now().toISOString();
     const since=cursor.since?iso(cursor.since):configured||new Date(this.now().getTime()-30*86_400_000).toISOString();
     const until=cursor.until?iso(cursor.until):now;
     if(since>until)throw new IngestionError("invalid_source_window");
     let page=cursor.page===undefined?1:Number(cursor.page);if(!Number.isSafeInteger(page)||page<1||page>100_000)throw invalid();
     const total={...counts(),has_more:false};
+    let fetchedNotes=false;
     for(let batch=0;batch<PAGE_BUDGET;batch++){
       const url=new URL(base+"/commits");url.search=new URLSearchParams({per_page:"100",page:String(page),since,until}).toString();
       const data=await this.request(url,"github");if(!Array.isArray(data)||data.length>100)throw invalid();
-      const candidates:ImportedCandidate[]=[];let rejected=0;
+      const candidates:ImportedCandidate[]=[];let rejected=0;let noteSnapshot:{sha:string;timestamp:string;treeSha?:string}|undefined;
       for(const entry of data){try{
-        const row=object(entry),sha=string(row.sha,64);if(!SHA.test(sha))throw invalid();
-        const commit=object(row.commit),committer=object(commit.committer),date=iso(committer.date).slice(0,10);
+        const row=object(entry),sha=string(row.sha,64).toLowerCase();if(!isGithubImmutableSha(sha))throw invalid();
+        const commit=object(row.commit),committer=object(commit.committer),timestamp=iso(committer.date),date=timestamp.slice(0,10);
         const login=(value:unknown)=>{if(value===null||value===undefined)return null;const candidate=string(object(value).login,100);if(!/^[A-Za-z0-9_\[\]-]{1,100}$/.test(candidate))throw invalid();assertSourcePrivacy(candidate);return candidate;};
         const authorLogin=login(row.author),committerLogin=login(row.committer);
-        const text=`Attributed GitHub evidence; this record does not establish the owner’s experience.\nRepository: ${scope}\nAuthor account: ${authorLogin||"unattributed"}\nCommitter account: ${committerLogin||"unattributed"}\nCommit: ${sha}\n${string(commit.message)}`;
+        const summary=string(commit.message).split(/[\r\n\u2028\u2029]/,1)[0].trim();assertGithubEvidenceText(summary);
+        const text=`Attributed GitHub evidence; this record does not establish the owner’s experience.\nRepository: ${scope}\nAuthor account: ${authorLogin||"unattributed"}\nCommitter account: ${committerLogin||"unattributed"}\nCommit: ${sha}\n${summary}`;
         const input={text,category:"build-log",reported_date:date};validateSourceInput(input,this.now());
-        candidates.push({provider:"github",scope,external_id:sha.toLowerCase(),source_url:`https://github.com/${scope}/commit/${sha}`,input,metadata:{author_login:authorLogin,committer_login:committerLogin,repository_visibility:repo.visibility}});
+        if(notePaths.length&&!noteSnapshot){
+          const treeSha=commit.tree===undefined?undefined:object(commit.tree).sha;
+          if(commit.tree!==undefined&&!isGithubImmutableSha(treeSha))throw invalid();
+          noteSnapshot={sha,timestamp,treeSha:typeof treeSha==="string"?treeSha.toLowerCase():undefined};
+        }
+        candidates.push({provider:"github",scope,external_id:sha,source_url:`https://github.com/${scope}/commit/${sha}`,input,metadata:{author_login:authorLogin,committer_login:committerLogin,repository_visibility:repo.visibility,content_kind:"commit_summary",repository:scope,commit_sha:sha,blob_sha:null,content_digest:hash(input.text),evidence_digest:hash(summary),source_timestamp:timestamp}});
       }catch{rejected++;}}
+      let rejectedReasons:Record<string,number>|undefined;
+      if(noteSnapshot&&!fetchedNotes&&notePaths.length){
+        fetchedNotes=true;
+        const notes=await this.githubBuildNotes(scope,noteSnapshot.sha,noteSnapshot.timestamp,notePaths,repo.visibility,noteSnapshot.treeSha);
+        candidates.push(...notes.candidates);rejected+=notes.rejected;rejectedReasons=notes.rejected_reasons;
+      }
       const more=data.length===100;page++;
       // Revisit the fixed lower bound after each completed sweep: a newly pushed
       // commit can carry an older commit timestamp. Hash dedup keeps this safe.
-      const next=more?{configuration:configured,since,until,page}:{configuration:configured,since,page:1};
-      const saved=await this.persist("github",scope,lease,candidates,next,rejected);sum(total,saved);sum(progress,saved);total.has_more=more;
+      const next=more?{configuration,since,until,page}:{configuration,since,page:1};
+      const saved=await this.persist("github",scope,lease,candidates,next,rejected,rejectedReasons);sum(total,saved);sum(progress,saved);total.has_more=more;
       if(!more)break;
     }
     return total;
+  }
+  private async githubNoteTree(scope:string,sha:string,paths:string[],treeSha?:string){
+    if(!treeSha){
+      // Git commit metadata, not the REST commit-details endpoint that includes patches.
+      const commit=object(await this.request(new URL(`https://api.github.com/repos/${scope}/git/commits/${sha}`),"github",65_536));
+      if(typeof commit.sha!=="string"||commit.sha.toLowerCase()!==sha||!isGithubImmutableSha(object(commit.tree).sha))throw new GithubSourceBoundaryError("github_note_commit_tree_invalid");
+      treeSha=String(object(commit.tree).sha).toLowerCase();
+    }
+    const rootTreeSha=treeSha;
+    const tree=async(sha:string):Promise<Obj[]>=>{
+      if(this.githubReadCounts.tree_metadata>=GITHUB_NOTE_MAX_TREE_READS)throw new GithubSourceBoundaryError("github_note_tree_budget_exceeded");
+      const payload=object(await this.request(new URL(`https://api.github.com/repos/${scope}/git/trees/${sha}`),"github",262_144));
+      if(typeof payload.sha!=="string"||payload.sha.toLowerCase()!==sha||payload.truncated!==false||!Array.isArray(payload.tree)||payload.tree.length>10_000)throw new GithubSourceBoundaryError("github_note_tree_invalid");
+      return payload.tree.map(object);
+    };
+    const child=(entries:Obj[],path:string,mode:string,type:string):string=>{
+      const found=entries.filter(entry=>entry.path===path);
+      if(found.length!==1||found[0].mode!==mode||found[0].type!==type||!isGithubImmutableSha(found[0].sha))throw new GithubSourceBoundaryError("github_note_tree_path_invalid");
+      return found[0].sha.toLowerCase();
+    };
+    const docsSha=child(await tree(rootTreeSha),"docs","040000","tree");
+    const notesSha=child(await tree(docsSha),"build-notes","040000","tree");
+    const entries=await tree(notesSha),blobs=new Map<string,string>();
+    // Only direct, regular Markdown files qualify. Other entries are metadata
+    // only and are never recursively visited or fetched as file content.
+    for(const path of paths){try{blobs.set(path,child(entries,path.slice("docs/build-notes/".length),"100644","blob"));}catch{/* A fixed per-file reason is recorded by the caller. */}}
+    return {rootTreeSha,blobs};
+  }
+  private async githubBuildNotes(scope:string,sha:string,timestamp:string,paths:string[],visibility:unknown,treeSha?:string){
+    // Defense in depth: never rely on a caller or mutable configuration to widen
+    // the exact repository/path/ref boundary used by the Contents API.
+    if(scope!==SCOPED_GITHUB_REPOSITORY||this.config.github?.enabled!==true||this.config.github.notes?.enabled!==true||this.config.github.sync_authorized!==true||this.config.github.private_read_authorized!==true||!isGithubImmutableSha(sha)||targetList(this.config,"github").some(repository=>repository!==scope))throw new IngestionError("github_note_provenance_invalid");
+    const candidates:ImportedCandidate[]=[],rejected_reasons:Record<string,number>={};let rejected=0;
+    const skip=(reason:string,count=1)=>{rejected+=count;rejected_reasons[reason]=(rejected_reasons[reason]||0)+count;};
+    const fatal=(error:unknown)=>error instanceof IngestionError&&["provider_rate_limited","provider_access_denied","provider_network_error","sync_cancelled","github_read_budget_exceeded"].includes(error.code)||error instanceof GitHubAppAuthError;
+    let boundary:Awaited<ReturnType<SourceIngestion["githubNoteTree"]>>;
+    try{boundary=await this.githubNoteTree(scope,sha,paths,treeSha);}catch(error){
+      if(fatal(error))throw error;
+      skip(error instanceof GithubSourceBoundaryError||error instanceof IngestionError?error.code:"github_note_tree_invalid",paths.length);
+      return {candidates,rejected,rejected_reasons};
+    }
+    for(const path of normalizeGithubNotePaths(paths)){
+      const expectedBlob=boundary.blobs.get(path);
+      if(!expectedBlob){skip("github_note_tree_path_invalid");continue;}
+      if(this.githubNoteFetches>=GITHUB_NOTE_MAX_FETCHES)break;
+      this.githubNoteFetches++;
+      try{
+        const url=new URL(`https://api.github.com/repos/${scope}/contents/${path}`);url.searchParams.set("ref",sha);
+        // Base64 plus a small JSON envelope. The decoded file has its own 8 KiB cap.
+        const row=object(await this.request(url,"github",16_384,true));
+        if(row.type!=="file"||row.path!==path||row.encoding!=="base64"||"target" in row||"submodule_git_url" in row||!isGithubImmutableSha(row.sha)||!Number.isSafeInteger(row.size)||Number(row.size)<1||Number(row.size)>GITHUB_NOTE_MAX_BYTES)throw new GithubSourceBoundaryError("github_note_file_invalid");
+        const encoded=string(row.content,12_000).replace(/[\r\n]/g,"");
+        if(!/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(encoded))throw new GithubSourceBoundaryError("github_note_encoding_invalid");
+        const bytes=Buffer.from(encoded,"base64");
+        if(bytes.length!==row.size||bytes.length>GITHUB_NOTE_MAX_BYTES||bytes.toString("base64")!==encoded)throw new GithubSourceBoundaryError("github_note_size_invalid");
+        const blobSha=row.sha.toLowerCase();
+        if(blobSha!==expectedBlob)throw new GithubSourceBoundaryError("github_note_tree_blob_mismatch");
+        if(createHash(blobSha.length===40?"sha1":"sha256").update(`blob ${bytes.length}\0`).update(bytes).digest("hex")!==blobSha)throw new GithubSourceBoundaryError("github_note_blob_mismatch");
+        let raw:string;try{raw=new TextDecoder("utf-8",{fatal:true}).decode(bytes);}catch{throw new GithubSourceBoundaryError("github_note_encoding_invalid");}
+        const selected=validateGithubBuildNote(raw,scope,sha);
+        const input={text:`Attributed GitHub evidence; this record does not establish the owner’s experience.\nRepository: ${scope}\nCommit: ${sha}\nNote: ${path}\n\n${selected}`,category:"project-note",reported_date:timestamp.slice(0,10)};
+        // Ensure the same bounded parser also accepts the persisted representation.
+        validateGithubBuildNote(input.text,scope,sha);validateSourceInput(input,this.now());
+        candidates.push({provider:"github",scope,external_id:`${sha}:${path}`,source_url:`https://github.com/${scope}/blob/${sha}/${path}`,input,metadata:{content_kind:"build_note",repository:scope,repository_visibility:visibility,commit_sha:sha,note_path:path,blob_sha:blobSha,root_tree_sha:boundary.rootTreeSha,note_mode:"100644",content_digest:hash(input.text),evidence_digest:hash(selected),source_timestamp:timestamp}});
+      }catch(error){
+        if(fatal(error))throw error;
+        const reason=error instanceof GithubSourceBoundaryError||error instanceof IngestionError?error.code:"github_note_invalid";
+        skip(reason);
+      }
+    }
+    return {candidates,rejected,rejected_reasons};
   }
   private async youtube(scope:string,state:SyncRow,lease:string,progress:IngestionCounts):Promise<IngestionCounts&{has_more:boolean}>{
     const channelUrl=new URL("https://www.googleapis.com/youtube/v3/channels");channelUrl.search=new URLSearchParams({part:"contentDetails",[scope.startsWith("@")?"forHandle":"id"]:scope,maxResults:"1"}).toString();

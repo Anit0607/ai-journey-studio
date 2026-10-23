@@ -7,10 +7,21 @@ const linkedInTimes=(times:PlatformTimes):PlatformTimes=>({LinkedIn:{...times.Li
 const weekdays=["Sunday","Monday","Tuesday","Wednesday","Thursday","Friday","Saturday"];
 const field:CSSProperties={display:"block",margin:"8px 0 16px",padding:"10px",background:"#0d141c",color:"#dce8ed",border:"1px solid #30404b"};
 const displayDate=(value:string|null)=>value?new Date(value).toLocaleString("en-IN",{timeZone:"Asia/Kolkata",dateStyle:"medium",timeStyle:"short"})+" IST":"Not chosen";
+function SourceSelectionStatus({selection}:{selection:any}){
+  return <aside aria-label="Calendar source selection">
+    <h3>Source selection</h3>
+    <p>Link an exact cleared source manually, or use an optional active bounded GitHub policy for unlinked, due LinkedIn plans. Automatic selection never replaces existing links and does not apply to legacy plans.</p>
+    <p role="status">{!selection?"Automatic source selection status unavailable; do not assume it is enabled.":selection.enabled===true?"Automatic source selection: an active policy matches the current runtime scope.":"Automatic source selection OFF: no matching active policy."}</p>
+    {selection?.enabled===true&&<p>Eligible unused GitHub evidence in this snapshot: {selection.eligible_candidates}.</p>}
+    {selection?.notice&&<p role="status">{selection.notice}</p>}
+    <p className="fine">This snapshot does not reserve evidence or start drafting. Dispatch rechecks source authorization, evidence, timing, budget and runtime. Source policy, GitHub access, paid-generation activation and scheduler setup are separate; this status does not configure them.</p>
+  </aside>;
+}
 function Entry({entry,sources,tasks,busy,action,minimumLeadHours}:{minimumLeadHours:number;entry:any;sources:any[];tasks:any[];busy:boolean;action:(path:string,body:unknown)=>Promise<void>}){
   const [source,setSource]=useState(entry.source_id||""),[task,setTask]=useState(entry.task_id||"");
   return <article><h3>{entry.planned_date} · {entry.kind} <span className="pill">{entry.status.replaceAll("_"," ")}</span></h3>
     <p>Scope: {entry.active_platforms.join(", ")} {entry.platform_policy?"(version 1)":"(legacy, unchanged)"}</p>
+    {!entry.platform_policy&&<p>Automatic source selection does not apply to this legacy entry. Its original scope and existing links remain unchanged.</p>}
     <p>Intended posting: {displayDate(entry.intended_post)}<br/>Draft ready / review deadline: {displayDate(entry.review_due)}<br/>Generation due: {displayDate(entry.generation_due)}</p>
     {entry.timing_notice&&<p role="status">{entry.timing_notice}</p>}
     <CalendarRecoveryForm entryId={entry.id} recovery={entry.recovery} minimumLeadHours={minimumLeadHours} busy={busy} action={action}/>
@@ -33,7 +44,8 @@ export default function CalendarPanel({calendar,sources,tasks,busy,action}:{cale
   return <section><span className="eyebrow">APPROVED CADENCE · ASIA/KOLKATA</span><h2>Calendar and content queue</h2>
     <p>New plans target LinkedIn only. Existing three-platform plans and approvals keep their original scope. Monday, Wednesday, Friday posts; Sunday longer piece. Drafts ready for review 48 hours before intended posting. Edit the cadence below; posting date/hour are not assumed.</p>
     <p><strong>{calendar.configuration_needed?"Configuration needed: choose a start date and required posting hours":"Calendar timing saved"}</strong></p>
-    <p>Agents are intended to draft; you review. Manual revision is an optional correction path. Scheduled drafting needs your saved opt-in, an explicitly cleared linked source, current OpenAI setup and an active approved scheduler. Publishing stays disabled. {calendar.scheduler}</p>
+    <p>Agents are intended to draft; you review. Manual revision is an optional correction path. Scheduled drafting needs your saved opt-in, valid source authorization through an explicit link or an active bounded GitHub policy, current OpenAI setup and an active approved scheduler. These calendar controls never publish. Every final post still needs your approval before scheduling and publication. {calendar.scheduler}</p>
+    <SourceSelectionStatus selection={calendar.automatic_source_selection}/>
     <label>Start date<input style={field} aria-label="Calendar start date" type="date" value={date} onChange={event=>setDate(event.target.value)}/></label>
     <label>Timing mode<select style={field} aria-label="Timing mode" value={mode} onChange={event=>setMode(event.target.value as "shared"|"per_platform")}><option value="per_platform">LinkedIn weekday hours</option><option value="shared">Same LinkedIn hour each day</option></select></label>
     {mode==="shared"&&<label>Intended posting time (IST)<input style={field} aria-label="Posting time IST" type="time" value={time} onChange={event=>setTime(event.target.value)}/></label>}
@@ -44,11 +56,12 @@ export default function CalendarPanel({calendar,sources,tasks,busy,action}:{cale
     <p className="fine">Timing basis: {basis===BENCHMARK_PRESET.id?BENCHMARK_PRESET.label:"Custom / unset"}</p>
     <label>Optional generation lead (hours before intended posting; {calendar.minimum_generation_lead_hours||49}–336)<input style={field} aria-label="Generation lead hours" type="number" min={calendar.minimum_generation_lead_hours||49} max={336} placeholder="Unset" value={lead} onChange={event=>setLead(event.target.value)}/></label>
     <p className="fine">48 hours is the draft/review deadline. Generation needs a minimum lead of {calendar.minimum_generation_lead_hours||49} hours. Hosted daily batches require five days of lead to allow for scheduling variation and resumable work; completion is not guaranteed. A generation lead is a separate choice; leaving it empty creates no generation due time. Saving timing alone does not enable generation. The separate opt-in below controls due drafting.</p>
-    <label><input type="checkbox" aria-label="Enable scheduled OpenAI drafting" checked={generationEnabled} onChange={event=>setGenerationEnabled(event.target.checked)}/> Enable the approved scheduler to draft due entries from sources I explicitly cleared for OpenAI, within the $10 warning / $15 monthly cap. Never publish.</label>
+    <label><input type="checkbox" aria-label="Enable scheduled OpenAI drafting" checked={generationEnabled} onChange={event=>setGenerationEnabled(event.target.checked)}/> Enable the approved scheduler to draft due entries from manually cleared sources or evidence permitted by my active bounded GitHub policy, within the $10 warning / $15 monthly cap. Never publish.</label>
+    <p className="fine">This drafting opt-in does not create or expand a source policy. Review optional bounded source consent separately in GitHub → LinkedIn draft selection.</p>
     <p className="fine">{calendar.minimum_generation_lead_hours===120?"Hosted work runs only through an approved daily batch. Turning this off also stops future batch checkpoints.":"Local work runs only while the app and worker are awake."} No hosting, provider credential or source clearance is created here. Turning it off prevents new scheduled tasks; cancel an already queued task separately.</p>
     <button disabled={busy} onClick={()=>void action("calendar-configure",{start_date:date||null,post_time:time||null,short_days:short,long_day:long,generation_lead_hours:lead?Number(lead):null,timing_mode:mode,platform_times:times,timing_basis:basis,generation_enabled:generationEnabled})}>Save calendar settings</button>
     <label>Weeks to plan<select style={field} aria-label="Weeks to plan" value={weeks} onChange={event=>setWeeks(Number(event.target.value))}>{[1,2,3,4].map(value=><option key={value} value={value}>{value}</option>)}</select></label>
     <button disabled={busy||calendar.configuration_needed} onClick={()=>void action("calendar-plan",{weeks})}>Create LinkedIn dates; keep existing plans</button> <button disabled={busy} onClick={()=>void action("calendar-prepare",{})}>Check due queue — no model calls</button> <button disabled={busy||!settings.generation_enabled} onClick={()=>void action("calendar-dispatch",{})}>Queue eligible due drafts — no model calls</button>
-    {calendar.entries.length===0?<div className="empty"><h3>No calendar entries yet</h3><p>Save timing and explicitly create planned dates. No source or task is selected automatically.</p></div>:calendar.entries.map((entry:any)=><Entry key={entry.id+entry.updated} minimumLeadHours={calendar.minimum_generation_lead_hours||49} entry={entry} sources={sources} tasks={tasks} busy={busy} action={action}/>)}
+    {calendar.entries.length===0?<div className="empty"><h3>No calendar entries yet</h3><p>Save timing and explicitly create planned dates. Planning selects no source and creates no task. Link a cleared source manually, or let eligible due dispatch select unused evidence under an active bounded GitHub policy.</p></div>:calendar.entries.map((entry:any)=><Entry key={entry.id+entry.updated} minimumLeadHours={calendar.minimum_generation_lead_hours||49} entry={entry} sources={sources} tasks={tasks} busy={busy} action={action}/>)}
   </section>;
 }

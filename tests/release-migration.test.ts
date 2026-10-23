@@ -102,7 +102,7 @@ async function seedLegacy(instance:PGlite){
 }
 async function fixture(work:(instance:PGlite)=>Promise<void>){
   const instance=new PGlite();
-  try{assert(SCHEMA.endsWith(MANUAL_PUBLICATION_SCHEMA));await instance.exec(SCHEMA.slice(0,-MANUAL_PUBLICATION_SCHEMA.length));await work(instance);}
+  try{assert(SCHEMA.includes(MANUAL_PUBLICATION_SCHEMA));await instance.exec(SCHEMA.slice(0,SCHEMA.indexOf(MANUAL_PUBLICATION_SCHEMA)));await work(instance);}
   finally{await instance.close();}
 }
 function transport(instance:PGlite,intercept?:(sql:string)=>void|Promise<void>){

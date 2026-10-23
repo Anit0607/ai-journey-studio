@@ -1,3 +1,5 @@
+import {resolveScopedSource} from "./github-source-policy";
+import {scopedTaskMatches} from "./scoped-source-proof";
 import {taskPlatformPolicy,activePlatforms} from "./platform-policy";
 import {reviewReadiness,evidenceApprovalCurrent} from "./evidence-review";
 import {randomUUID} from "node:crypto";
@@ -108,8 +110,8 @@ async function finalArtifact(tx:Connection,id:string,expected:string,platform:Pl
   const platformPolicy=taskPlatformPolicy(task);
   if(!activePlatforms(platformPolicy).includes(platform))throw new PublicationValidationError("Platform is not active for this task");
   await assertNoPendingAgentRevision(tx,id);
-  const source=(await tx.query<Source>("SELECT * FROM sources WHERE id=$1 FOR UPDATE",[task.source_id]))[0];
-  if(!sourceEligible(source,task.source_hash))throw new PublicationValidationError("Source clearance was revoked or invalidated");
+  const source=(await resolveScopedSource(tx,(await tx.query<Source>("SELECT * FROM sources WHERE id=$1 FOR UPDATE",[task.source_id]))[0]))!;
+  if(!sourceEligible(source,task.source_hash)||!scopedTaskMatches(source,task))throw new PublicationValidationError("Source clearance was revoked or invalidated");
   const latest=(await tx.query<{id:string;version:string;bundle:Artifact[]}>("SELECT * FROM content_revisions WHERE task_id=$1 ORDER BY sequence DESC LIMIT 1",[id]))[0];
   const bundle=latest?.bundle||await tx.query<Output>("SELECT * FROM outputs WHERE task_id=$1 ORDER BY created,id",[id]);assertBundle(bundle);
   const version=latest?bundleVersion(bundle,source.hash):hash(bundle.map(item=>item.hash).join("|"));
