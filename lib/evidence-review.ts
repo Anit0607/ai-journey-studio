@@ -1,3 +1,4 @@
+import {taskPlatformPolicy,type PlatformPolicy} from "./platform-policy";
 import {randomUUID} from "node:crypto";
 import {hasInternalReviewMetadata} from "./platform-variants";
 import {assertBundle,bundleQuality,bundleVersion,verifiedSourceEnvelope,SUPPORTED_SENTENCES,type Artifact} from "./grounding";
@@ -74,10 +75,10 @@ function hardReason(claim:string,source:string):string|null{
  }
  return null;
 }
-export function evidenceBinding(bundle:Artifact[],source:EvidenceSource){return hash(JSON.stringify({policy:EVIDENCE_POLICY,source_hash:source.hash,reported_date:source.reported_date||null,clearance:source.clearance_id||"legacy",cleared_at:source.cleared_at?new Date(String(source.cleared_at)).toISOString():null,bundle:bundleVersion(bundle,source.hash)}));}
+export function evidenceBinding(bundle:Artifact[],source:EvidenceSource,policy?:PlatformPolicy){return hash(JSON.stringify({policy:EVIDENCE_POLICY,source_hash:source.hash,reported_date:source.reported_date||null,clearance:source.clearance_id||"legacy",cleared_at:source.cleared_at?new Date(String(source.cleared_at)).toISOString():null,bundle:bundleVersion(bundle,source.hash),...(policy?{platform_policy:policy}:{})}));}
 function finding(role:string,claim:string,reason:string,kind:Finding['kind'],artifact_hash:string,span:Span,category?:Finding['category']):Finding{return {id:hash(JSON.stringify({policy:EVIDENCE_POLICY,role,artifact_hash,span,claim,reason,kind,...(category?{category}:{} )})),role,claim,reason,kind,artifact_hash,span,...(category?{category}:{} )};}
-export function evidenceFindings(bundle:Artifact[],source:string,reportedDate?:string):Finding[]{
- const legacy=bundleQuality(bundle,source,reportedDate),out:Finding[]=[];
+export function evidenceFindings(bundle:Artifact[],source:string,reportedDate?:string,policy?:PlatformPolicy):Finding[]{
+ const legacy=bundleQuality(bundle,source,reportedDate,policy),out:Finding[]=[];
  for(const flag of legacy.flags){if(flag.category==='structure'){out.push(finding(flag.role,flag.claim,flag.reason,'hard',bundle.find(x=>x.role===flag.role)?.hash||'',{start:-1,end:-1},'structure'));continue;}if(flag.role==='Critic'&&flag.claim==='Unconditional endorsement')continue;const artifact=bundle.find(x=>x.role===flag.role),start=artifact?.text.indexOf(flag.claim)??-1;
   const atom=artifact&&start>=0?artifactSpans(artifact.text,artifact.role,source,reportedDate).find(x=>x.start<=start&&x.end>=start+flag.claim.length):undefined;
   if(atom&&verifiedSourceEnvelope(atom.text,artifact!.role,source,reportedDate))continue;
@@ -111,9 +112,9 @@ export function validateEvidence(finding:Finding,source:string,sourceSpan:Span,q
  const words=finding.claim.toLowerCase().match(/[a-z]{4,}/g)||[];
  if(!words.some(x=>quote.toLowerCase().includes(x)))throw Error("Select relevant source evidence");
 }
-export function evidenceQuality(bundle:Artifact[],source:EvidenceSource,decisions:Decision[]=[]){
+export function evidenceQuality(bundle:Artifact[],source:EvidenceSource,decisions:Decision[]=[],policy?:PlatformPolicy){
  let integrity=true;try{assertBundle(bundle);assertSourcePrivacy(source.text);if(hash(source.text)!==source.hash||source.cleared===false||source.revoked_at)throw Error();for(const x of bundle)assertSourcePrivacy(x.text);}catch{integrity=false;}
- const binding=evidenceBinding(bundle,source),findings=evidenceFindings(bundle,source.text,source.reported_date),latest=new Map<string,Decision>();
+ const binding=evidenceBinding(bundle,source,policy),findings=evidenceFindings(bundle,source.text,source.reported_date,policy),latest=new Map<string,Decision>();
  for(const row of decisions)if(row.binding===binding&&row.policy_version===EVIDENCE_POLICY&&row.actor==='owner')latest.set(row.finding_id,row);
  const accepted:Decision[]=[];
  const resolved=findings.map(item=>{const row=latest.get(item.id);let resolution:Decision|null=null;
@@ -124,7 +125,7 @@ export function evidenceQuality(bundle:Artifact[],source:EvidenceSource,decision
  if(!integrity)flags.push({...finding('Source','Integrity or privacy check failed','Current cleared source and intact six-artifact bundle required','hard','',{start:-1,end:-1}),resolution:null});
  return {status:flags.length?'needs_revision':'needs_human_review',flags,findings:resolved,binding,policy_version:EVIDENCE_POLICY,critic,source_text:source.text,source_hash:source.hash,bundle_hash:bundleVersion(bundle,source.hash),evidence_version:accepted.length?hash(accepted.map(x=>x.id).sort().join('|')):null,notice:'Evidence links and owner review are not independent factual verification. Review every claim; publication needs separate approval.'};
 }
-export async function reviewReadiness(tx:Connection,task:string,bundle:Artifact[],source:EvidenceSource){const rows=await tx.query<Decision>('SELECT * FROM evidence_decisions WHERE task_id=$1 ORDER BY sequence',[task]);return evidenceQuality(bundle,source,rows);}
+export async function reviewReadiness(tx:Connection,task:string,bundle:Artifact[],source:EvidenceSource){const rows=await tx.query<Decision>('SELECT * FROM evidence_decisions WHERE task_id=$1 ORDER BY sequence',[task]);const persisted=(await tx.query<{content_brief:Record<string,unknown>}>('SELECT content_brief FROM tasks WHERE id=$1',[task]))[0];if(!persisted)throw Error('Unknown task');return evidenceQuality(bundle,source,rows,taskPlatformPolicy(persisted));}
 export async function saveEvidenceDecision(tx:Connection,task:string,bundle:Artifact[],source:EvidenceSource,input:{binding:string;finding_id:string;decision:string;reason:string;source_span:Span;source_quote:string;acknowledged:boolean}){
  const quality=await reviewReadiness(tx,task,bundle,source);
  if(!input||input.binding!==quality.binding)throw Error('Stale evidence review; refresh before saving');

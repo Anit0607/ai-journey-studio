@@ -1,3 +1,4 @@
+import {enqueueLegacy} from "./legacy-task-fixture";
 import {variantFixture} from "./variant-fixture";
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -9,7 +10,7 @@ import {bundleQuality,GROUNDING_RULES} from "../lib/grounding";
 const critique="Unsupported claims: none\nEvidence needed: a concrete cleared project note\nProposed advice: review each draft before use";
 async function fixture(work:(store:Store,task:string)=>Promise<void>,approveOriginal=true){
   const db=await embedded();try{
-    const store=new Store(db),source=await store.source(CAPSULE,"user-reported-notes","2026-10-09",true),task=await store.enqueue(source.id);
+    const store=new Store(db),source=await store.source(CAPSULE,"user-reported-notes","2026-10-09",true),task=await enqueueLegacy(store,source.id);
     for(const role of ROLES){const text=role==="Critic"?critique:role==="Platform Adapter"?variantFixture():"Proposed approach: review a small agent task.";await db.query("INSERT INTO outputs(id,task_id,role,text,hash) VALUES($1,$2,$3,$4,$5)",[randomUUID(),task.id,role,text,hash(text)]);}
     await db.query("UPDATE tasks SET status='review',checkpoint=6 WHERE id=$1",[task.id]);
     const original=(await store.snapshot()).outputs;if(approveOriginal)await store.approve(task.id,hash(original.map((item:any)=>item.hash).join("|")));

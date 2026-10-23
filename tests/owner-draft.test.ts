@@ -1,3 +1,4 @@
+import {taskPlatformPolicyHash} from "../lib/platform-policy-binding";
 import test,{before,after,beforeEach} from "node:test";
 import assert from "node:assert/strict";
 import {randomUUID} from "node:crypto";
@@ -25,7 +26,7 @@ async function fixture(label="selected"){
   const source=await intake.clear(staged.id,staged.hash,true),task=await store.enqueue(source.id);
   return {source,task};
 }
-function request(task:Task,source:Source,c:RuntimeConfig):OwnerDraftRequest{return {task_id:task.id,expected_source_id:source.id,expected_source_hash:source.hash,expected_clearance_id:source.clearance_id!,expected_updated:new Date(task.updated).toISOString(),expected_checkpoint:0,expected_config_hash:ownerDraftConfigHash(c),acknowledged:true};}
+function request(task:Task,source:Source,c:RuntimeConfig):OwnerDraftRequest{return {task_id:task.id,expected_source_id:source.id,expected_source_hash:source.hash,expected_clearance_id:source.clearance_id!,expected_updated:new Date(task.updated).toISOString(),expected_checkpoint:0,expected_config_hash:ownerDraftConfigHash(c),expected_platform_policy_hash:taskPlatformPolicyHash(task),acknowledged:true};}
 function completion(text="I tested an agent workflow and reviewed its result."):Completion{return {text,input:1,output:1,outcome:"complete",report:{serviceTier:"default",model:"mock-only-model",requestId:"mock-request",finishReason:"stop"}};}
 function runner(c:RuntimeConfig,provider:typeof providerCall,extra:Partial<Parameters<typeof runOwnerDraft>[2]>={}){return {readConfig:()=>c,isReady:()=>true,provider,...extra};}
 async function rows(table:string,task:string){return db.query(`SELECT * FROM ${table} WHERE task_id=$1`,[task]);}
@@ -68,16 +69,16 @@ async function ledger(task:Task,{reserved=1,estimated=1,status="settled",month=i
 });
 
  test("strict request schema rejects missing, extra, mistyped and malformed bindings",()=>{
-  const input:OwnerDraftRequest={task_id:randomUUID(),expected_source_id:randomUUID(),expected_source_hash:hash("source"),expected_clearance_id:randomUUID(),expected_updated:new Date().toISOString(),expected_checkpoint:0,expected_config_hash:hash("config"),acknowledged:true};
+  const input:OwnerDraftRequest={task_id:randomUUID(),expected_source_id:randomUUID(),expected_source_hash:hash("source"),expected_clearance_id:randomUUID(),expected_updated:new Date().toISOString(),expected_checkpoint:0,expected_config_hash:hash("config"),expected_platform_policy_hash:taskPlatformPolicyHash({}),acknowledged:true};
   assert.equal(validOwnerDraftRequest(input),true);
   for(const value of [null,[],{}, {...input,acknowledged:false},{...input,acknowledged:"true"},{...input,expected_checkpoint:1},{...input,expected_checkpoint:"0"},{...input,expected_updated:"invalid"},{...input,expected_config_hash:"bad"},{...input,expected_source_hash:"bad"},{...input,task_id:"bad"},{...input,expected_source_id:"bad"},{...input,expected_clearance_id:"bad"},{...input,extra:true}])assert.equal(validOwnerDraftRequest(value),false);
-  for(const key of ["task_id","expected_source_id","expected_clearance_id","expected_source_hash","expected_config_hash"]){assert.equal(validOwnerDraftRequest({...input,[key]:[(input as unknown as Record<string,unknown>)[key]]}),false);}
+  for(const key of ["task_id","expected_source_id","expected_clearance_id","expected_source_hash","expected_config_hash","expected_platform_policy_hash"]){assert.equal(validOwnerDraftRequest({...input,[key]:[(input as unknown as Record<string,unknown>)[key]]}),false);}
   for(const key of Object.keys(input)){const missing={...input} as Record<string,unknown>;delete missing[key];assert.equal(validOwnerDraftRequest(missing),false);}
 });
 
  test("stale source, hash, clearance and task timestamp fail before any provider or durable attempt",async()=>{
   const {task,source}=await fixture(),c=config(),input=request(task,source,c);let calls=0;
-  for(const patch of [{expected_source_id:randomUUID()},{expected_source_hash:hash("different")},{expected_clearance_id:randomUUID()},{expected_updated:new Date(Date.parse(input.expected_updated)-1000).toISOString()},{expected_config_hash:hash("different config")}]){
+  for(const patch of [{expected_source_id:randomUUID()},{expected_source_hash:hash("different")},{expected_clearance_id:randomUUID()},{expected_updated:new Date(Date.parse(input.expected_updated)-1000).toISOString()},{expected_config_hash:hash("different config")},{expected_platform_policy_hash:hash("different scope")}]){
     const result=await runOwnerDraft(db,{...input,...patch},runner(c,async()=>{calls++;return completion();}));assert.equal(result.status,"blocked");
   }
   assert.equal(calls,0);assert.equal((await rows("ledger",task.id)).length,0);assert.equal((await rows("events",task.id)).filter(row=>row.kind===OWNER_DRAFT_STARTED).length,0);
@@ -232,7 +233,7 @@ async function ledger(task:Task,{reserved=1,estimated=1,status="settled",month=i
 });
 
  test("terminal success revalidates source, generation and task state in its locked transaction",async()=>{
-  for(const change of ["source","generation","task"]){
+  for(const change of ["source","generation","task","platform policy"]){
     const {task,source}=await fixture(`terminal-lock ${change}`),c=config();let calls=0,injected=false;
     const transactions:string[][]=[];
     const guarded:Database={...db,transaction:work=>db.transaction(async tx=>{
@@ -246,6 +247,7 @@ async function ledger(task:Task,{reserved=1,estimated=1,status="settled",month=i
             injected=true;
             if(change==="source")await tx.query("UPDATE sources SET cleared=false,revoked_at=now() WHERE id=$1",[source.id]);
             if(change==="generation")await tx.query("UPDATE calendar_settings SET generation_enabled=false WHERE id=1");
+            if(change==="platform policy")await tx.query("UPDATE tasks SET content_brief='{}' WHERE id=$1",[task.id]);
             if(change==="task")await tx.query("UPDATE tasks SET status='cancelled' WHERE id=$1",[task.id]);
           }
         }
@@ -358,4 +360,14 @@ async function ledger(task:Task,{reserved=1,estimated=1,status="settled",month=i
     assert.equal(injected,true,change);assert.equal(calls,0,change);assert.equal(result.status,"uncertain",change);assert.equal((await rows("ledger",task.id))[0].status,"unknown");assert.equal((await rows("outputs",task.id)).length,0);
     await db.query("DELETE FROM ledger WHERE task_id IN ($1,$2)",[task.id,other.task.id]);
   }
+});
+
+
+test("persisted platform scope cannot change between one-shot checkpoints",async()=>{
+ const {task,source}=await fixture("scope change"),c=config();let calls=0;
+ const result=await runOwnerDraft(db,request(task,source,c),runner(c,async()=>{
+  calls++;await db.query("UPDATE tasks SET content_brief='{}' WHERE id=$1",[task.id]);return completion();
+ }));
+ assert.equal(calls,1);assert.equal(result.status,"blocked");assert.equal((await rows("ledger",task.id)).length,1);
+ assert.equal((await rows("approvals",task.id)).length,0);assert.equal((await db.query("SELECT * FROM publishing_outbox")).length,0);
 });

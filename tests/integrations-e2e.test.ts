@@ -9,7 +9,6 @@ import {step} from "../lib/workflow";
 import {Publishing,type PublishingRuntime,type PublishInput} from "../lib/publishing";
 import {hash,type Source,type RuntimeConfig,type Output} from "../lib/domain";
 import type {Completion} from "../lib/providers";
-import {variantFixture} from "./variant-fixture";
 
 /** Isolated semantic chain: every model and publishing request is injected. */
 test("owner export -> source clearance -> six mocked checkpoints -> exact content and publication approvals -> one mock receipt; revocation stops outbound",async()=>{
@@ -29,7 +28,7 @@ test("owner export -> source clearance -> six mocked checkpoints -> exact conten
     await assert.rejects(intake.clear(source.id,source.hash,false),/Explicit owner/);await intake.clear(source.id,source.hash,true);const task=await store.enqueue(source.id);
     const mockProvider=async(_provider:unknown,prompt:string):Promise<Completion>=>{
       assert.ok(prompt.includes(text));assert.equal(prompt.includes("99999"),false);assert.ok(prompt.includes("untrusted evidence"));
-      const checkpoint=modelCalls++;const output=checkpoint===4?variantFixture(text):checkpoint===5?"Unsupported claims: none\nEvidence needed: none for the exact quoted event\nProposed advice: inspect source notes":text;
+      const checkpoint=modelCalls++;const output=checkpoint===4?"### LinkedIn\n"+text:checkpoint===5?"Unsupported claims: none\nEvidence needed: none for the exact quoted event\nProposed advice: inspect source notes":text;
       return {text:output,input:30,output:30,outcome:"complete",report:{serviceTier:"default",model:pricing.model,requestId:"isolated-e2e-"+checkpoint,finishReason:"stop"}};
     };
     for(let checkpoint=0;checkpoint<6;checkpoint++)assert.equal((await step(store,config,mockProvider,true,{ownerClearedOnly:true})).status,"step_saved");

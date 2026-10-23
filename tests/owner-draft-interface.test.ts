@@ -34,7 +34,7 @@ function text(node:any):string{
 const runLabel="Run this exact draft once · max $0.13";
 function button(tree:Node){const found=nodes(tree).find(n=>n.type==="button"&&text(n)===runLabel);assert.ok(found,"Missing exact-draft action");return found;}
 function checkbox(tree:Node){const found=nodes(tree).find(n=>n.type==="input"&&n.props.type==="checkbox");assert.ok(found,"Missing deliberate acknowledgement");return found;}
-const task={id:"00000000-0000-4000-8000-000000000001",source_id:"00000000-0000-4000-8000-000000000002",source_hash:"a".repeat(64),status:"queued",checkpoint:0,origin_key:"manual",revision_parent_task_id:null,updated:"2026-10-23T12:00:00.000Z"};
+const task={platform_policy_hash:"a".repeat(64),id:"00000000-0000-4000-8000-000000000001",source_id:"00000000-0000-4000-8000-000000000002",source_hash:"a".repeat(64),status:"queued",checkpoint:0,origin_key:"manual",revision_parent_task_id:null,updated:"2026-10-23T12:00:00.000Z"};
 const source={id:task.source_id,hash:task.source_hash,text:"I tested one cleared workflow and reviewed the result.",cleared:true,clearance_id:"00000000-0000-4000-8000-000000000003",revoked_at:null};
 const execution={runtime_ready:true,config_hash:"b".repeat(64),model:"isolated-model",runs:[]};
 const props={task,source,execution,generationEnabled:true,busy:false};
@@ -59,7 +59,7 @@ test("owner draft requires unchecked deliberate consent and sends one exact task
  button(tree).props.onClick();assert.equal(calls.length,0);
  checkbox(tree).props.onChange({target:{checked:true}});tree=harness.render();assert.equal(button(tree).props.disabled,false);
  const click=button(tree).props.onClick;click();click();
- assert.deepEqual(calls,[{path:"owner-draft-run",body:{task_id:task.id,expected_source_id:source.id,expected_source_hash:source.hash,expected_clearance_id:source.clearance_id,expected_updated:task.updated,expected_checkpoint:0,expected_config_hash:execution.config_hash,acknowledged:true}}]);
+ assert.deepEqual(calls,[{path:"owner-draft-run",body:{task_id:task.id,expected_source_id:source.id,expected_source_hash:source.hash,expected_clearance_id:source.clearance_id,expected_updated:task.updated,expected_checkpoint:0,expected_config_hash:execution.config_hash,expected_platform_policy_hash:task.platform_policy_hash,acknowledged:true}}]);
  assert.equal(checkbox(harness.render()).props.checked,false);assert.equal(button(harness.render()).props.disabled,true);
  // Page reports a failed network response as false. That cannot unlock a retry.
  finish(false);await settle();tree=harness.render();assert.equal(button(tree).props.disabled,true);assert.equal(checkbox(tree).props.disabled,true);
@@ -76,6 +76,7 @@ test("rerendering a changed clearance, source, task or runtime clears prior cons
   {source:{...source,revoked_at:"2026-10-23T12:01:00.000Z"}},
   {task:{...task,id:"00000000-0000-4000-8000-000000000006"}},
   {task:{...task,updated:"2026-10-23T12:02:00.000Z"}},
+  {task:{...task,platform_policy_hash:"f".repeat(64)}},
   {execution:{...execution,config_hash:"d".repeat(64)}}
  ];
  for(const patch of patches){
@@ -89,7 +90,7 @@ test("wrong source, disabled runtime/drafting, busy and previously attempted tas
  for(const patch of [
   {source:undefined},{source:{...source,hash:"e".repeat(64)}},{source:{...source,cleared:false}},
   {source:{...source,clearance_id:null}},{source:{...source,revoked_at:"2026-10-23T12:01:00.000Z"}},
-  {execution:{...execution,runtime_ready:false}},{generationEnabled:false},{busy:true}
+  {task:{...task,platform_policy_hash:undefined}},{execution:{...execution,runtime_ready:false}},{generationEnabled:false},{busy:true}
  ]){
   const harness=draftUi(async()=>assert.fail("Ineligible selection must not execute"),patch);const first=harness.render();
   assert.equal(checkbox(first).props.disabled,true);checkbox(first).props.onChange({target:{checked:true}});const tree=harness.render();assert.equal(button(tree).props.disabled,true);button(tree).props.onClick();

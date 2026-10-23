@@ -1,3 +1,4 @@
+import {enqueueLegacy,legacyCalendarFixture} from "./legacy-task-fixture";
 import test from "node:test";
 import assert from "node:assert/strict";
 import {randomUUID} from "node:crypto";
@@ -19,7 +20,7 @@ const financial=(overrides:Record<string,unknown>={})=>({request_id:randomUUID()
 const ledger=(overrides:Partial<LedgerRow>={}):LedgerRow=>({id:randomUUID(),month,role:"Harvester",checkpoint:0,status:"settled",reserved:1000000,estimated:500000,input_tokens:10,output_tokens:10,...overrides});
 async function fixture(work:(store:Store,reports:OwnerReports)=>Promise<void>){const db=await embedded();try{await work(new Store(db),new OwnerReports(db));}finally{await db.close();}}
 async function completeTask(store:Store,adapter=variantFixture()){
- const source=await store.source(CAPSULE,"user-reported-notes","2026-10-09",true),task=await store.enqueue(source.id);
+ const source=await store.source(CAPSULE,"user-reported-notes","2026-10-09",true),task=await enqueueLegacy(store,source.id);
  for(const role of ROLES){const text=role==="Critic"?critique:role==="Platform Adapter"?adapter:"Proposed approach: inspect a cleared note.";await store.db.query("INSERT INTO outputs(id,task_id,role,text,hash) VALUES($1,$2,$3,$4,$5)",[randomUUID(),task.id,role,text,hash(text)]);}
  await store.db.query("UPDATE tasks SET status='review',checkpoint=6 WHERE id=$1",[task.id]);return task;
 }
@@ -37,7 +38,7 @@ test("usage totals reconcile role, legacy, unknown, prior-month reservations and
  const summary=usageSummary(rows,month);assert.equal(summary.monthly_total.calls,2);assert.equal(summary.lifetime_total.calls,3);assert.equal(summary.lifetime_total.unknown_usage_calls,2);assert.equal(summary.carried_reservations.reserved_microdollars,1000000);assert.equal(summary.lifetime.at(-1)!.calls,1);assert.equal(summary.lifetime.reduce((sum,row)=>sum+row.calls,0),3);assert.equal(summary.lifetime.reduce((sum,row)=>sum+row.estimated_microdollars,0),summary.lifetime_total.estimated_microdollars);
 });
 test("reservation attribution comes from locked checkpoint, remains immutable after cancellation",()=>fixture(async(store)=>{
- const source=await store.source(CAPSULE,"user-reported-notes","2026-10-09",true);await store.enqueue(source.id);const task=(await store.claim())!;
+ const source=await store.source(CAPSULE,"user-reported-notes","2026-10-09",true);await enqueueLegacy(store,source.id);const task=(await store.claim())!;
  await assert.rejects(store.reserve({...task,checkpoint:4},"openai",p,100),/stale lease/);
  const reservation=await store.reserve(task,"openai",p,100);await store.cancel(task.id);await store.settle(task,reservation,"Isolated output",1,1,2);
  const row=(await store.db.query<any>("SELECT * FROM ledger"))[0];assert.equal(row.role,"Harvester");assert.equal(row.checkpoint,0);assert.equal(row.status,"settled");
@@ -45,7 +46,7 @@ test("reservation attribution comes from locked checkpoint, remains immutable af
  await assert.rejects(store.db.query("UPDATE ledger SET role=NULL,checkpoint=NULL WHERE id=$1",[reservation]),/immutable/);
 }));
 test("legacy ledger rows stay unattributed and cannot be backfilled by guessed order",()=>fixture(async(store)=>{
- const source=await store.source(CAPSULE,"user-reported-notes","2026-10-09",true),task=await store.enqueue(source.id);await store.db.query("INSERT INTO budget_months(month) VALUES($1)",[month]);
+ const source=await store.source(CAPSULE,"user-reported-notes","2026-10-09",true),task=await enqueueLegacy(store,source.id);await store.db.query("INSERT INTO budget_months(month) VALUES($1)",[month]);
  await store.db.query("INSERT INTO ledger(id,task_id,month,provider,model,pricing,reserved,status) VALUES($1,$2,$3,'openai','isolated','{}',100,'unknown')",[randomUUID(),task.id,month]);
  const state=await store.snapshot();assert.equal(state.usage.lifetime.at(-1).calls,1);assert.equal(state.ledger[0].role,null);await assert.rejects(store.db.query("UPDATE ledger SET role='Harvester',checkpoint=0"),/immutable/);
 }));
@@ -60,7 +61,7 @@ test("both original and revision approval require valid platform variants, while
  const approved=state.reviews[0].token;await store.revise(task.id,approved,"Remove an incomplete platform draft",{role:"Platform Adapter",text:"### LinkedIn\nProposed approach: review."});state=await store.snapshot();assert(state.reviews[0].history[0].approval);await assert.rejects(store.approveRevision(task.id,state.reviews[0].token,true),/source-grounding/);await assert.rejects(store.approveRevision(task.id,approved,true),/Stale revision/);assert.equal(state.outputs.find((row:any)=>row.role==="Platform Adapter").text,"EXAMPLE LinkedIn and Instagram");
 }));
 test("calendar never marks incidental X as a complete platform or silently upgrades historical approval",()=>fixture(async(store)=>{
- const task=await completeTask(store,"EXAMPLE LinkedIn and Instagram"),calendar=new Calendar(store.db);await calendar.configure({start_date:"2026-10-14",post_time:"10:00",short_days:[1,3,5],long_day:0,generation_lead_hours:null});await calendar.plan(1);const entry=(await store.db.query<any>("SELECT * FROM calendar_entries"))[0];await calendar.link(entry.id,task.source_id,task.id);
+ const task=await completeTask(store,"EXAMPLE LinkedIn and Instagram"),calendar=new Calendar(store.db);await calendar.configure({start_date:"2026-10-14",post_time:"10:00",short_days:[1,3,5],long_day:0,generation_lead_hours:null});await calendar.plan(1);await legacyCalendarFixture(store);const entry=(await store.db.query<any>("SELECT * FROM calendar_entries"))[0];await calendar.link(entry.id,task.source_id,task.id);
  await store.db.query("INSERT INTO approvals(task_id,version) VALUES($1,'historical')",[task.id]);await store.db.query("UPDATE tasks SET status='approved' WHERE id=$1",[task.id]);const view=await calendar.snapshot(await store.snapshot(),{},false);const row=view.entries.find((item:any)=>item.id===entry.id)!;assert.equal(row.status,"historical_approval_completeness_unverified");assert(row.variants.every((item:any)=>item.artifact_hash===null));assert.equal((await store.db.query("SELECT * FROM approvals")).length,1);
 }));
 test("metrics are immutable cumulative post snapshots, missing stays unknown and zeros stay zero",()=>fixture(async(store,reports)=>{
@@ -89,14 +90,14 @@ test("money validates integer amounts, attribution, currencies and idempotency; 
 }));
 test("USD and INR stay separate, invoice and estimated bases cannot overlap, unknown usage blocks estimated return",()=>fixture(async(store,reports)=>{
  await reports.money(financial({amount_minor:20000}));await reports.money(financial({currency:"INR",amount_minor:10000}));await assert.rejects(confirm(reports,"estimated_ai"),/No recorded AI usage/);await assert.rejects(confirm(reports,"estimated_ai","INR"),/USD/);
- const source=await store.source(CAPSULE,"user-reported-notes","2026-10-09",true);await store.enqueue(source.id);const task=(await store.claim())!,reservation=await store.reserve(task,"openai",p,1000000);await assert.rejects(confirm(reports,"estimated_ai"),/Unknown AI usage/);await store.settle(task,reservation,"Isolated output",10,10,500000);
+ const source=await store.source(CAPSULE,"user-reported-notes","2026-10-09",true);await enqueueLegacy(store,source.id);const task=(await store.claim())!,reservation=await store.reserve(task,"openai",p,1000000);await assert.rejects(confirm(reports,"estimated_ai"),/Unknown AI usage/);await store.settle(task,reservation,"Isolated output",10,10,500000);
  await confirm(reports);await confirm(reports,"estimated_ai");await confirm(reports);assert.equal((await store.snapshot()).analyst.finances.find((row:any)=>row.period===month&&row.currency==="USD").basis,"actual_expenses");await confirm(reports,"estimated_ai");let report=(await store.snapshot()).analyst.finances.find((row:any)=>row.period===month&&row.currency==="USD");assert.equal(report.roi_percent,39900);assert.equal(report.net_minor,19950);
  await reports.money(financial({kind:"expense",category:"ai_invoice",amount_minor:100,source_reference:"Isolated paid AI invoice"}));await assert.rejects(confirm(reports,"estimated_ai"),/no actual AI invoices/);await confirm(reports);report=(await store.snapshot()).analyst.finances.find((row:any)=>row.period===month&&row.currency==="USD");assert.equal(report.roi_percent,19900);assert.equal(report.net_minor,19900);assert.equal(report.ai_estimated_microdollars,500000);
  const inr=(await store.snapshot()).analyst.finances.find((row:any)=>row.period===month&&row.currency==="INR");assert.equal(inr.revenue_minor,10000);assert.equal(inr.roi_percent,null);assert.match(inr.ai_cost_notice,/No exchange rate/);
 }));
 
 test("calendar follows latest unapproved revision instead of original approved task status",()=>fixture(async(store)=>{
- const task=await completeTask(store),calendar=new Calendar(store.db);let state=await store.snapshot();await store.approve(task.id,state.reviews[0].token.slice(9));await calendar.configure({start_date:"2026-10-14",post_time:"10:00",short_days:[1,3,5],long_day:0,generation_lead_hours:null});await calendar.plan(1);const entry=(await store.db.query<any>("SELECT * FROM calendar_entries"))[0];await calendar.link(entry.id,task.source_id,task.id);
+ const task=await completeTask(store),calendar=new Calendar(store.db);let state=await store.snapshot();await store.approve(task.id,state.reviews[0].token.slice(9));await calendar.configure({start_date:"2026-10-14",post_time:"10:00",short_days:[1,3,5],long_day:0,generation_lead_hours:null});await calendar.plan(1);await legacyCalendarFixture(store);const entry=(await store.db.query<any>("SELECT * FROM calendar_entries"))[0];await calendar.link(entry.id,task.source_id,task.id);
  state=await store.snapshot();await store.revise(task.id,state.reviews[0].token,"Adjust proposed structure",{role:"Platform Adapter",text:variantFixture("Proposed approach: inspect a single artifact.")});state=await store.snapshot();const row=(await calendar.snapshot(state,{},false)).entries.find((item:any)=>item.id===entry.id)!;assert.equal(row.status,"review_needed");assert.equal(state.tasks[0].status,"approved");assert.equal(state.approvals.length,1);assert.equal(state.reviews[0].approval,null);assert(row.variants.every((item:any)=>item.status==="review_needed"));
 }));
 

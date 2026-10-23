@@ -1,3 +1,4 @@
+import {enqueueLegacy} from "./legacy-task-fixture";
 import test from "node:test";
 import assert from "node:assert/strict";
 import {randomUUID} from "node:crypto";
@@ -14,7 +15,7 @@ import {variantFixture} from "./variant-fixture";
 const TEXT="Proposed approach: inspect one cleared source.";
 const ACCOUNT:PublishingAccount={id:"route-manual-owner",platform:"LinkedIn",remote_id:"urn:li:person:12345",label:"Isolated route account",enabled:true,verified:true,authorization_version:"route-consent-v1",scopes:["w_member_social"],linkedin_version:"202609",credential_env:"STUDIO_PUBLISH_MANUAL_TEST"};
 async function approvedManual(db:Database,publisher:Publishing){
-  const store=new Store(db),source=await store.source(CAPSULE,"user-reported-notes","2026-10-09",true),task=await store.enqueue(source.id);
+  const store=new Store(db),source=await store.source(CAPSULE,"user-reported-notes","2026-10-09",true),task=await enqueueLegacy(store,source.id);
   for(const role of ROLES){
     const text=role==="Critic"?"Unsupported claims: none\nEvidence needed: a concrete cleared project note\nProposed advice: inspect a draft":role==="Platform Adapter"?variantFixture(TEXT):TEXT;
     await db.query("INSERT INTO outputs(id,task_id,role,text,hash) VALUES($1,$2,$3,$4,$5)",[randomUUID(),task.id,role,text,hash(text)]);

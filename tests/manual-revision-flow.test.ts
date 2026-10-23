@@ -1,3 +1,4 @@
+import {enqueueLegacy} from "./legacy-task-fixture";
 import test from "node:test";
 import assert from "node:assert/strict";
 import {randomUUID} from "node:crypto";
@@ -23,7 +24,7 @@ const plainBundle=(bundle:Artifact[])=>bundle.map(({role,text,hash})=>({role,tex
 async function seed(db:Database,needsFiveEdits=false){
   const store=new Store(db),intake=new SourceIntake(db);
   const staged=await intake.stage({text:sourceText,category:"project-note",reported_date:"2026-10-20"});
-  const source=await intake.clear(staged.id,staged.hash,true),task=await store.enqueue(source.id);
+  const source=await intake.clear(staged.id,staged.hash,true),task=await enqueueLegacy(store,source.id);
   for(const role of ROLES){
     const text=role==="Harvester"?"SOURCE: "+sourceText
       :needsFiveEdits?(role==="Critic"?"No unsupported claims.":role==="Platform Adapter"?variantFixture("The project has 500 users."):"The project has 500 users.")

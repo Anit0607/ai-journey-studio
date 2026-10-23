@@ -1,3 +1,5 @@
+import {taskPlatformPolicyHash} from "./platform-policy-binding";
+import {newTaskPlatformBrief,taskPlatformPolicy} from "./platform-policy";
 import {evidenceQuality,reviewReadiness,saveEvidenceDecision,saveEvidenceApproval,type Decision} from "./evidence-review";
 import {usageSummary} from "./usage";
 import {OwnerReports} from "./owner-reports";
@@ -28,7 +30,7 @@ export class Store{
       const s=(await tx.query<Source>("SELECT * FROM sources WHERE id=$1 AND cleared=true FOR UPDATE",[source]))[0];
       if(!s||!sourceEligible(s))throw Error("Source not cleared");
       const id=randomUUID();
-      const inserted=await tx.query<Task>("INSERT INTO tasks(id,source_id,source_hash,status) VALUES($1,$2,$3,'queued') ON CONFLICT(source_id,source_hash,origin_key) DO NOTHING RETURNING *",[id,source,s.hash]);
+      const inserted=await tx.query<Task>("INSERT INTO tasks(id,source_id,source_hash,status,content_brief) VALUES($1,$2,$3,'queued',$4) ON CONFLICT(source_id,source_hash,origin_key) DO NOTHING RETURNING *",[id,source,s.hash,JSON.stringify(newTaskPlatformBrief())]);
       if(inserted.length){await this.event(tx,id,"queued","Cleared source queued");return inserted[0];}
       return (await tx.query<Task>("SELECT * FROM tasks WHERE source_id=$1 AND source_hash=$2 AND origin_key='manual'",[source,s.hash]))[0];
     });
@@ -48,13 +50,13 @@ export class Store{
       const history=revisions.filter((revision:any)=>revision.task_id===task.id),latest:any=history.at(-1);
       const bundle=latest?.bundle||data.outputs.filter((output:Output)=>output.task_id===task.id);
       const source=data.sources.find((item:Source)=>item.id===task.source_id);
-      const quality=evidenceQuality(bundle,source||{text:"",hash:"",cleared:false},evidenceRows.filter(row=>row.task_id===task.id));
+      const quality=evidenceQuality(bundle,source||{text:"",hash:"",cleared:false},evidenceRows.filter(row=>row.task_id===task.id),taskPlatformPolicy(task));
       const token=latest?"revision:"+latest.id+":"+latest.version:"original:"+hash(bundle.map((item:Artifact)=>item.hash).join("|"));
       const receipts=evidenceReceipts.filter((row:any)=>row.task_id===task.id);
       const approvalCurrent=!quality.flags.length&&(receipts.some((row:any)=>row.binding===quality.binding&&row.review_token===token&&row.evidence_version===(quality.evidence_version||""))||(!receipts.length&&!quality.evidence_version));
-      return {variants:platformVariants(bundle.find((item:Artifact)=>item.role==="Platform Adapter")),task_id:task.id,is_agent_revision:false,pending_agent_revision:data.tasks.find((child:Task)=>child.revision_parent_task_id===task.id&&["queued","running","blocked"].includes(child.status))||null,agent_revision_jobs:data.tasks.filter((child:Task)=>child.revision_parent_task_id===task.id),token:latest?"revision:"+latest.id+":"+latest.version:"original:"+hash(bundle.map((item:Artifact)=>item.hash).join("|")),latest_revision:latest?.id||null,original_bundle:data.outputs.filter((output:Output)=>output.task_id===task.id),original_approval:data.approvals.find((item:any)=>item.task_id===task.id)||null,bundle,quality,approval:(latest?revisionApprovals.find((item:any)=>item.revision_id===latest.id):data.approvals.find((item:any)=>item.task_id===task.id))&&approvalCurrent?(latest?revisionApprovals.find((item:any)=>item.revision_id===latest.id):data.approvals.find((item:any)=>item.task_id===task.id))||null:null,history:history.map((item:any)=>({...item,approval:revisionApprovals.find((approval:any)=>approval.revision_id===item.id)||null}))};
+      return {variants:platformVariants(bundle.find((item:Artifact)=>item.role==="Platform Adapter"),taskPlatformPolicy(task)),platform_policy:taskPlatformPolicy(task)||null,task_id:task.id,is_agent_revision:false,pending_agent_revision:data.tasks.find((child:Task)=>child.revision_parent_task_id===task.id&&["queued","running","blocked"].includes(child.status))||null,agent_revision_jobs:data.tasks.filter((child:Task)=>child.revision_parent_task_id===task.id),token:latest?"revision:"+latest.id+":"+latest.version:"original:"+hash(bundle.map((item:Artifact)=>item.hash).join("|")),latest_revision:latest?.id||null,original_bundle:data.outputs.filter((output:Output)=>output.task_id===task.id),original_approval:data.approvals.find((item:any)=>item.task_id===task.id)||null,bundle,quality,approval:(latest?revisionApprovals.find((item:any)=>item.revision_id===latest.id):data.approvals.find((item:any)=>item.task_id===task.id))&&approvalCurrent?(latest?revisionApprovals.find((item:any)=>item.revision_id===latest.id):data.approvals.find((item:any)=>item.task_id===task.id))||null:null,history:history.map((item:any)=>({...item,approval:revisionApprovals.find((approval:any)=>approval.revision_id===item.id)||null}))};
     });
-    return {...data,reviews,workers,database:this.db.kind,usage:usageSummary(data.ledger,month),analyst:await new OwnerReports(this.db).snapshot(data.ledger),
+    return {...data,tasks:data.tasks.map((task:Task)=>({...task,platform_policy_hash:taskPlatformPolicyHash(task)})),reviews,workers,database:this.db.kind,usage:usageSummary(data.ledger,month),analyst:await new OwnerReports(this.db).snapshot(data.ledger),
       budget:{month_IST:month,committed_microdollars:used,warning:used>=WARNING,cap_microdollars:CAP,buffer_microdollars:BUFFER,unresolved_reservations:unresolved,basis:"Reported token estimates and unresolved reservations; not invoices"},
       pricing_blocked:data.ledger.some((r:any)=>r.pricing_anomaly&&r.status!=="settled"),
       updated:new Date().toISOString()};

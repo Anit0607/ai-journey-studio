@@ -1,3 +1,4 @@
+import {NEW_PLATFORM_POLICY,NEW_PLATFORMS,activePlatforms,calendarPlatformPolicy,taskPlatformPolicy} from "./platform-policy";
 import {calendarRecoverySnapshot} from "./calendar-recovery";
 import {platformVariants} from "./platform-variants";
 import {randomUUID} from "node:crypto";
@@ -5,6 +6,7 @@ import type {Database} from "./db";
 import {CAPSULE,CAP,BUFFER,configReady,istMonth,tokenCost,type RuntimeConfig,type Source,type Task} from "./domain";
 import {sourceEligible,ownerSourceEligible,sourceAuthorized} from "./sources";
 const DAY=86400000;
+export const LEGACY_CALENDAR_BLOCKER="This unbound legacy calendar slot cannot create new three-platform work. Create a fresh LinkedIn-only plan on an unused date and explicitly link a cleared source; this historical slot is unchanged.";
 import {PLATFORMS,BENCHMARK_PRESET} from "./schedule-presets";
 export type PlatformTimes=Partial<Record<typeof PLATFORMS[number],Record<string,string|null>>>;
 const validTime=(value:unknown)=>typeof value==="string"&&/^([01]\d|2[0-3]):[0-5]\d$/.test(value);
@@ -14,7 +16,7 @@ function validateTimes(value:unknown):value is PlatformTimes{
 }
 function timingMissing(settings:any){
   if(settings.timing_mode!=="per_platform")return !settings.post_time;
-  return [...settings.short_days,settings.long_day].some(day=>PLATFORMS.some(platform=>!validTime(settings.platform_times[platform]?.[day])));
+  return [...settings.short_days,settings.long_day].some(day=>NEW_PLATFORMS.some(platform=>!validTime(settings.platform_times[platform]?.[day])));
 }
 function validDate(value:unknown):value is string{return typeof value==="string"&&/^\d{4}-\d{2}-\d{2}$/.test(value)&&Number.isFinite(Date.parse(value))&&new Date(value).toISOString().slice(0,10)===value;}
 type BudgetState={used:number;unresolved:number;pricingBlocked:boolean};
@@ -24,6 +26,7 @@ type DispatchEntry={entry_id:string;task_id:string|null;status:string;reason?:st
 const CHECKPOINT_MAX_INPUT_BYTES=48_000;
 function dispatchBlockers(settings:any,entry:any,source:Source|undefined,c:RuntimeConfig,runtimeEnabled:boolean,budget:BudgetState,now:Date,minimumLeadHours=49){
   const reasons:string[]=[];
+  if(!entry.task_id&&!calendarPlatformPolicy(entry))reasons.push(LEGACY_CALENDAR_BLOCKER);
   if(settings.generation_enabled!==true)reasons.push("Recurring paid calendar generation is not activated");
   if(c.owner_cleared_sources_authorized!==true)reasons.push("Standing consent for owner-cleared OpenAI sources is missing");
   if(!source)reasons.push("Link a cleared source; no evidence is auto-selected");
@@ -45,6 +48,7 @@ function dispatchBlockers(settings:any,entry:any,source:Source|undefined,c:Runti
 function linkedBlocker(task:Task|undefined,entry:any,job:any,source:Source|undefined){
   if(!task||task.id!==entry.task_id||(job.task_id&&job.task_id!==task.id))return "Scheduled task linkage changed; manual review required";
   if(task.source_id!==entry.source_id||task.source_hash!==source?.hash||(job.source_id&&job.source_id!==task.source_id)||(job.source_hash&&job.source_hash!==task.source_hash))return "Linked task does not match the exact scheduled source version";
+  if(JSON.stringify(taskPlatformPolicy(task))!==JSON.stringify(calendarPlatformPolicy(entry)))return "Task and calendar platform policies must match";
   if(task.status==="cancelled")return "Linked task was cancelled; automatic replacement and replay are disabled";
   if(task.status==="blocked")return "Linked task is blocked; explicit reconciliation or retry is required";
   return null;
@@ -59,7 +63,7 @@ export class Calendar{
     if(input.timing_mode!==undefined&&!["shared","per_platform"].includes(input.timing_mode))throw Error("Invalid platform timing");
     if(input.platform_times!==undefined&&!validateTimes(input.platform_times))throw Error("Invalid platform timing");
     if(input.timing_basis!==undefined&&input.timing_basis!==null&&!["custom",BENCHMARK_PRESET.id].includes(input.timing_basis))throw Error("Invalid platform timing");
-    if(input.timing_basis===BENCHMARK_PRESET.id&&(!input.platform_times||PLATFORMS.some(platform=>Object.keys(input.platform_times![platform]||{}).length!==4||Object.entries(BENCHMARK_PRESET.times[platform]).some(([day,hour])=>input.platform_times![platform]?.[day]!==hour))))throw Error("Preset provenance does not match selected hours");
+    if(input.timing_basis===BENCHMARK_PRESET.id&&(!input.platform_times||NEW_PLATFORMS.some(platform=>Object.keys(input.platform_times![platform]||{}).length!==4||Object.entries(BENCHMARK_PRESET.times[platform]).some(([day,hour])=>input.platform_times![platform]?.[day]!==hour))))throw Error("Preset provenance does not match selected hours");
     if(input.generation_enabled!==undefined&&typeof input.generation_enabled!=="boolean")throw Error("Invalid generation activation");
     await this.db.transaction(async tx=>{
       await tx.query("UPDATE calendar_settings SET short_days=$1,long_day=$2,start_date=$3,post_time=$4,generation_lead_hours=$5,updated=now() WHERE id=1",[JSON.stringify(input.short_days),input.long_day,input.start_date,input.post_time,input.generation_lead_hours]);
@@ -79,27 +83,32 @@ export class Calendar{
       for(let offset=0;offset<weeks*7;offset++){
         const date=new Date(Date.parse(s.start_date)+offset*DAY),weekday=date.getUTCDay(),kind=weekday===s.long_day?"longform":s.short_days.includes(weekday)?"shortform":null;
         if(!kind)continue;
-        const planned=date.toISOString().slice(0,10),schedule=Object.fromEntries(PLATFORMS.map(platform=>{
+        const planned=date.toISOString().slice(0,10),schedule=Object.fromEntries(NEW_PLATFORMS.map(platform=>{
           const hour=s.timing_mode==="per_platform"?s.platform_times[platform][weekday]:s.post_time;
           const post=new Date(planned+"T"+hour+":00+05:30"),review=new Date(post.getTime()-48*3600000);
           return [platform,{intended_post:post.toISOString(),draft_due:review.toISOString(),review_due:review.toISOString()}];
         }));
         // The content family must be review-ready for its earliest platform.
         const post=new Date(Math.min(...Object.values(schedule).map(item=>Date.parse(item.intended_post)))),review=new Date(post.getTime()-48*3600000),generation=s.generation_lead_hours===null?null:new Date(post.getTime()-s.generation_lead_hours*3600000);
-        await tx.query("INSERT INTO calendar_entries(id,planned_date,kind,intended_post,draft_due,review_due,generation_due,platform_schedule) VALUES($1,$2,$3,$4,$5,$5,$6,$7) ON CONFLICT(planned_date,kind) DO UPDATE SET intended_post=EXCLUDED.intended_post,draft_due=EXCLUDED.draft_due,review_due=EXCLUDED.review_due,generation_due=EXCLUDED.generation_due,platform_schedule=EXCLUDED.platform_schedule,updated=now()",[randomUUID(),planned,kind,post,review,generation,JSON.stringify(schedule)]);
+        await tx.query("INSERT INTO calendar_entries(id,planned_date,kind,intended_post,draft_due,review_due,generation_due,platform_schedule) VALUES($1,$2,$3,$4,$5,$5,$6,$7) ON CONFLICT(planned_date,kind) DO NOTHING",[randomUUID(),planned,kind,post,review,generation,JSON.stringify({...schedule,platform_policy:NEW_PLATFORM_POLICY})]);
       }
-      await tx.query("INSERT INTO events(id,kind,detail) VALUES($1,'calendar_planned','User created/updated planned dates; sources require explicit links; no paid generation')",[randomUUID()]);
+      await tx.query("INSERT INTO events(id,kind,detail) VALUES($1,'calendar_planned','User created LinkedIn-only planned dates; existing entries unchanged; sources require explicit links; no paid generation')",[randomUUID()]);
     });
   }
   async link(entry:string,source:string|null,task:string|null){
     await this.db.transaction(async tx=>{
       // Keep explicit links serialized with recovery and dispatch.
       await tx.query("SELECT id FROM calendar_settings WHERE id=1 FOR UPDATE");
-      if(!(await tx.query("SELECT id FROM calendar_entries WHERE id=$1 FOR UPDATE",[entry])).length)throw Error("Unknown calendar entry");
+      const planned=(await tx.query<any>("SELECT * FROM calendar_entries WHERE id=$1 FOR UPDATE",[entry]))[0];
+      if(!planned)throw Error("Unknown calendar entry");
       const intent=(await tx.query<any>("SELECT * FROM calendar_jobs WHERE entry_id=$1 FOR UPDATE",[entry]))[0];
       if(intent?.task_id&&(intent.task_id!==task||intent.source_id!==source))throw Error("Dispatched calendar task cannot be relinked");
       if(source&&!sourceEligible((await tx.query<Source>("SELECT * FROM sources WHERE id=$1",[source]))[0]))throw Error("Source not cleared");
-      if(task&&(!source||!(await tx.query("SELECT id FROM tasks WHERE id=$1 AND source_id=$2",[task,source])).length))throw Error("Task must match the linked source");
+      if(task){
+        const linked=(await tx.query<Task>("SELECT * FROM tasks WHERE id=$1 AND source_id=$2",[task,source]))[0];
+        if(!source||!linked)throw Error("Task must match the linked source");
+        if(JSON.stringify(taskPlatformPolicy(linked))!==JSON.stringify(calendarPlatformPolicy(planned)))throw Error("Task and calendar platform policies must match");
+      }
       await tx.query("UPDATE calendar_entries SET source_id=$2,task_id=$3,updated=now() WHERE id=$1",[entry,source,task]);
       await tx.query("INSERT INTO events(id,task_id,kind,detail) VALUES($1,$2,'calendar_linked','User linked calendar evidence/task; no model call')",[randomUUID(),task]);
     });
@@ -130,6 +139,11 @@ export class Calendar{
       const accounting=(await tx.query<any>("SELECT COALESCE(SUM(CASE WHEN status='settled' THEN estimated ELSE reserved END) FILTER (WHERE month=$1 OR status!='settled'),0) AS used,COUNT(*) FILTER (WHERE status!='settled') AS unresolved,COUNT(*) FILTER (WHERE pricing_anomaly=true AND status!='settled') AS pricing_anomalies FROM ledger",[istMonth(now)]))[0];
       const budget={used:Number(accounting.used),unresolved:Number(accounting.unresolved),pricingBlocked:Number(accounting.pricing_anomalies)>0};
       for(const entry of due){
+        // Preserve legacy entry/job records, but do not start new multi-platform work.
+        const priorJob=(await tx.query<any>("SELECT * FROM calendar_jobs WHERE entry_id=$1 FOR UPDATE",[entry.id]))[0];
+        if(!entry.task_id&&!priorJob?.task_id&&!calendarPlatformPolicy(entry)){
+          result.blocked++;result.entries.push({entry_id:entry.id,task_id:null,status:"blocked",reason:LEGACY_CALENDAR_BLOCKER});continue;
+        }
         await tx.query("INSERT INTO calendar_jobs(id,entry_id,status) VALUES($1,$2,'blocked') ON CONFLICT(entry_id) DO NOTHING",[randomUUID(),entry.id]);
         const job=(await tx.query<any>("SELECT * FROM calendar_jobs WHERE entry_id=$1 FOR UPDATE",[entry.id]))[0],source=sources.find(item=>item.id===entry.source_id);
         // Once any task is bound, neither retries, edits, cancellation nor time
@@ -150,7 +164,7 @@ export class Calendar{
           await tx.query("UPDATE calendar_jobs SET status='blocked',block_reason=$2,updated=$3 WHERE id=$1",[job.id,reason,now]);
           result.blocked++;result.entries.push({entry_id:entry.id,task_id:null,status:"blocked",reason});continue;
         }
-        const origin="calendar:"+entry.id,brief={kind:entry.kind,planned_date:entry.planned_date,platforms:PLATFORMS,intended_post:new Date(entry.intended_post).toISOString(),review_due:new Date(entry.review_due).toISOString(),generation_due:new Date(entry.generation_due).toISOString()};
+        const policy=calendarPlatformPolicy(entry),origin="calendar:"+entry.id,brief={kind:entry.kind,planned_date:entry.planned_date,platforms:activePlatforms(policy),...(policy?{platform_policy:policy}:{}),intended_post:new Date(entry.intended_post).toISOString(),review_due:new Date(entry.review_due).toISOString(),generation_due:new Date(entry.generation_due).toISOString()};
         const inserted=await tx.query<Task>("INSERT INTO tasks(id,source_id,source_hash,status,origin_key,content_brief) VALUES($1,$2,$3,'queued',$4,$5) ON CONFLICT(source_id,source_hash,origin_key) DO NOTHING RETURNING *",[randomUUID(),source!.id,source!.hash,origin,JSON.stringify(brief)]);
         const task=inserted[0]||(await tx.query<Task>("SELECT * FROM tasks WHERE source_id=$1 AND source_hash=$2 AND origin_key=$3",[source!.id,source!.hash,origin]))[0];
         if(!task)throw Error("Scheduled task linkage unavailable");
@@ -170,7 +184,7 @@ export class Calendar{
   async snapshot(state:any,c:RuntimeConfig,runtimeEnabled:boolean,now=new Date()){
     const settings=await this.settings(),jobs=await this.db.query<any>("SELECT * FROM calendar_jobs ORDER BY created,id"),entries=await this.db.query<any>("SELECT * FROM calendar_entries ORDER BY intended_post,id");
     const budget={used:Number(state.budget.committed_microdollars),unresolved:Number(state.budget.unresolved_reservations),pricingBlocked:!!state.pricing_blocked};
-    return {settings,minimum_generation_lead_hours:this.minimumGenerationLeadHours,paid_activation:settings.generation_enabled===true,scheduler:"Due dispatch requires an active worker or external scheduler invocation; saving does not start a scheduler",configuration_needed:!settings.start_date||timingMissing(settings),entries:entries.map(entry=>{
+    return {settings,new_platform_policy:NEW_PLATFORM_POLICY,new_active_platforms:NEW_PLATFORMS,minimum_generation_lead_hours:this.minimumGenerationLeadHours,paid_activation:settings.generation_enabled===true,scheduler:"Due dispatch requires an active worker or external scheduler invocation; saving does not start a scheduler",configuration_needed:!settings.start_date||timingMissing(settings),entries:entries.map(entry=>{
       const source=state.sources.find((item:any)=>item.id===entry.source_id),task=state.tasks.find((item:any)=>item.id===entry.task_id),review=state.reviews.find((item:any)=>item.task_id===entry.task_id),job=jobs.find(item=>item.entry_id===entry.id)||null;
       const blockers=dispatchBlockers(settings,entry,source,c,runtimeEnabled,budget,now,this.minimumGenerationLeadHours);
       if(source?.text===CAPSULE)blockers.push("Source lacks concrete events and emotional context; do not invent personal lessons or feelings");
@@ -180,11 +194,11 @@ export class Calendar{
       if(linkageReason)blockers.push(linkageReason);
       const due=!!entry.generation_due&&new Date(entry.generation_due)<=now;
       const content=review?.bundle.find((item:any)=>item.role==="Platform Adapter");
-      const parsed=platformVariants(content);
-      const variants=PLATFORMS.map(platform=>{const variant=parsed.variants.find(item=>item.platform===platform)!;return {platform,...(entry.platform_schedule[platform]||{intended_post:entry.intended_post,draft_due:entry.draft_due,review_due:entry.review_due}),status:content?(variant.hash?review?.approval&&parsed.complete?"user_approved_quality_separate":"review_needed":"not_separately_identified"):"not_generated",artifact_hash:variant.hash,source_artifact_hash:content?.hash||null};});
+      const policy=calendarPlatformPolicy(entry),parsed=platformVariants(content,policy);
+      const variants=activePlatforms(policy).map(platform=>{const variant=parsed.variants.find(item=>item.platform===platform)!;return {platform,...(entry.platform_schedule[platform]||{intended_post:entry.intended_post,draft_due:entry.draft_due,review_due:entry.review_due}),status:content?(variant.hash?review?.approval&&parsed.complete?"user_approved_quality_separate":"review_needed":"not_separately_identified"):"not_generated",artifact_hash:variant.hash,source_artifact_hash:content?.hash||null};});
       const generationLate=!!entry.generation_due&&(job?.dispatched_at?new Date(job.dispatched_at)>new Date(entry.generation_due):!task&&new Date(entry.generation_due)<now);
       const timingNotice=generationLate?(job?.dispatched_at?"Queued after the target generation time; the review deadline is unchanged":"Target generation time has passed. Catch-up is allowed only while the review deadline remains in the future"):null;
-      return {...entry,job,recovery:calendarRecoverySnapshot(entry,job,task,source,state.ledger||[],now),generation_late:generationLate,timing_notice:timingNotice,status:(review?.approval||(!review?.latest_revision&&review?.original_approval))&&!parsed.complete?"historical_approval_completeness_unverified":reviewReady&&review?.quality.flags.length?"changes_needed":review?.approval?"user_approved_quality_separate":review?.latest_revision?"review_needed":task?.status==="review"?"review_needed":task?task.status:due?blockers.length?"due_blocked":"due_ready":blockers.length?"planned_blocked":"planned_ready",blocked_reasons:blockers,variants,linked_task_status:task?.status||null,linked_content_version:review?.token||null};
+      return {...entry,platform_policy:policy||null,active_platforms:activePlatforms(policy),job,recovery:calendarRecoverySnapshot(entry,job,task,source,state.ledger||[],now),generation_late:generationLate,timing_notice:timingNotice,status:(review?.approval||(!review?.latest_revision&&review?.original_approval))&&!parsed.complete?"historical_approval_completeness_unverified":reviewReady&&review?.quality.flags.length?"changes_needed":review?.approval?"user_approved_quality_separate":review?.latest_revision?"review_needed":task?.status==="review"?"review_needed":task?task.status:due?blockers.length?"due_blocked":"due_ready":blockers.length?"planned_blocked":"planned_ready",blocked_reasons:blockers,variants,linked_task_status:task?.status||null,linked_content_version:review?.token||null};
     })};
   }
 }

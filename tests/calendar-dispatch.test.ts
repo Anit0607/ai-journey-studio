@@ -1,3 +1,5 @@
+import {NEW_PLATFORM_POLICY} from "../lib/platform-policy";
+import {enqueueLegacy} from "./legacy-task-fixture";
 import test from "node:test";
 import assert from "node:assert/strict";
 import {randomUUID} from "node:crypto";
@@ -21,9 +23,10 @@ async function cleared(intake:SourceIntake,text="I built an agent workflow today
   const source=await intake.stage({text,category:"build-log",reported_date:now.toISOString().slice(0,10)});
   return intake.clear(source.id,source.hash,true);
 }
-async function entry(db:Database,source:Source|null,options:{task?:string;offset?:number;postHours?:number;due?:Date|null}={}){
+async function entry(db:Database,source:Source|null,options:{task?:string;offset?:number;postHours?:number;due?:Date|null;legacy?:boolean}={}){
   const id=randomUUID(),post=new Date(now.getTime()+(options.postHours??72)*hour),review=new Date(post.getTime()-48*hour);
-  await db.query("INSERT INTO calendar_entries(id,planned_date,kind,intended_post,draft_due,review_due,generation_due,source_id,task_id) VALUES($1,$2,'shortform',$3,$4,$4,$5,$6,$7)",[id,new Date(now.getTime()+(72+(options.offset||0)*24)*hour).toISOString().slice(0,10),post,review,options.due===undefined?now:options.due,source?.id||null,options.task||null]);
+  const scope=options.legacy?{}:{platform_policy:NEW_PLATFORM_POLICY,LinkedIn:{intended_post:post.toISOString(),draft_due:review.toISOString(),review_due:review.toISOString()}};
+  await db.query("INSERT INTO calendar_entries(id,planned_date,kind,intended_post,draft_due,review_due,generation_due,source_id,task_id,platform_schedule) VALUES($1,$2,'shortform',$3,$4,$4,$5,$6,$7,$8)",[id,new Date(now.getTime()+(72+(options.offset||0)*24)*hour).toISOString().slice(0,10),post,review,options.due===undefined?now:options.due,source?.id||null,options.task||null,JSON.stringify(scope)]);
   return id;
 }
 async function accounting(db:Database,taskId:string,status="settled",amount=1,month=istMonth(now),anomaly=false){
@@ -63,7 +66,7 @@ test("concurrent due dispatch and legacy preparation produce exactly one durable
   const tasks=await db.query<any>("SELECT * FROM tasks"),jobs=await db.query<any>("SELECT * FROM calendar_jobs"),planned=(await db.query<any>("SELECT * FROM calendar_entries WHERE id=$1",[id]))[0];
   assert.equal(tasks.length,1);assert.equal(tasks[0].origin_key,"calendar:"+id);assert.equal(jobs.length,1);assert.equal(jobs[0].status,"dispatched");assert.equal(jobs[0].task_id,tasks[0].id);assert.equal(jobs[0].source_hash,source.hash);assert.equal(planned.task_id,tasks[0].id);assert.equal((await store.snapshot()).ledger.length,0);
   assert.equal((await db.query("SELECT id FROM events WHERE kind='calendar_dispatched'")).length,1);
-  const brief=tasks[0].content_brief;assert.equal(brief.kind,"shortform");assert.deepEqual(brief.platforms,["LinkedIn","X","Instagram"]);assert.equal(brief.planned_date,planned.planned_date);assert.equal(brief.intended_post,new Date(planned.intended_post).toISOString());
+  const brief=tasks[0].content_brief;assert.equal(brief.kind,"shortform");assert.deepEqual(brief.platforms,["LinkedIn"]);assert.deepEqual(brief.platform_policy,NEW_PLATFORM_POLICY);assert.equal(brief.planned_date,planned.planned_date);assert.equal(brief.intended_post,new Date(planned.intended_post).toISOString());
   await db.query("UPDATE calendar_entries SET kind='longform',intended_post=intended_post+interval '1 day' WHERE id=$1",[id]);
   await calendar.dispatchDue(config,true,now);assert.deepEqual((await db.query<any>("SELECT * FROM tasks WHERE id=$1",[tasks[0].id]))[0].content_brief,brief);
 }));
@@ -77,8 +80,8 @@ test("distinct scheduled slots never reuse a completed manual task or each other
 }));
 
 test("explicitly linked review task is preserved without automatic regeneration",()=>fixture(async(db,calendar,store,intake)=>{
-  const source=await cleared(intake),task=await store.enqueue(source.id);await db.query("UPDATE tasks SET status='review',checkpoint=6 WHERE id=$1",[task.id]);
-  await calendar.configure({...chosen,generation_enabled:true});const id=await entry(db,source,{task:task.id});
+  const source=await cleared(intake),task=await enqueueLegacy(store,source.id);await db.query("UPDATE tasks SET status='review',checkpoint=6 WHERE id=$1",[task.id]);
+  await calendar.configure({...chosen,generation_enabled:true});const id=await entry(db,source,{task:task.id,legacy:true});
   const result=await calendar.dispatchDue(config,true,now);assert.equal(result.queued,0);assert.equal(result.existing,1);assert.equal(result.entries[0].status,"review");assert.equal((await db.query("SELECT id FROM tasks")).length,1);
   const job=(await db.query<any>("SELECT * FROM calendar_jobs WHERE entry_id=$1",[id]))[0];assert.equal(job.status,"linked");assert.equal(job.task_id,task.id);await assert.rejects(calendar.link(id,source.id,null),/cannot be relinked/);
 }));

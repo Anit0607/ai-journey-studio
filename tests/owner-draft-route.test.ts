@@ -1,3 +1,4 @@
+import {taskPlatformPolicyHash} from "../lib/platform-policy-binding";
 import test from "node:test";
 import assert from "node:assert/strict";
 import {readFileSync} from "node:fs";
@@ -15,7 +16,7 @@ import {handleHostedCron} from "../lib/hosted-http";
 import type {RuntimeConfig} from "../lib/domain";
 
 const origin="https://studio.example.test";
-const body=()=>({task_id:randomUUID(),expected_source_id:randomUUID(),expected_source_hash:"a".repeat(64),expected_clearance_id:randomUUID(),expected_updated:new Date().toISOString(),expected_checkpoint:0,expected_config_hash:"b".repeat(64),acknowledged:true});
+const body=()=>({task_id:randomUUID(),expected_source_id:randomUUID(),expected_source_hash:"a".repeat(64),expected_clearance_id:randomUUID(),expected_updated:new Date().toISOString(),expected_checkpoint:0,expected_config_hash:"b".repeat(64),expected_platform_policy_hash:taskPlatformPolicyHash({}),acknowledged:true});
 function harness(){
   const calls={password:0,bearer:0,db:0,run:[] as Array<{input:unknown;options:any}>};
   const flags={authenticated:true,status:"review",steps:6};
@@ -93,7 +94,7 @@ test("real password-cookie route rejects worker bearer, wrong Origin, malformed 
  try{
   const intake=new SourceIntake(db),staged=await intake.stage({text:"I checked the exact source used for an isolated route test.",category:"build-log",reported_date:new Date().toISOString().slice(0,10)});
   const source=await intake.clear(staged.id,staged.hash,true),task=await new Store(db).enqueue(source.id),originalTasks=await db.query("SELECT * FROM tasks ORDER BY id");
-  const input={task_id:task.id,expected_source_id:source.id,expected_source_hash:source.hash,expected_clearance_id:source.clearance_id,expected_updated:new Date(task.updated).toISOString(),expected_checkpoint:0,expected_config_hash:ownerDraftConfigHash({}),acknowledged:true};
+  const input={task_id:task.id,expected_source_id:source.id,expected_source_hash:source.hash,expected_clearance_id:source.clearance_id,expected_updated:new Date(task.updated).toISOString(),expected_checkpoint:0,expected_config_hash:ownerDraftConfigHash({}),expected_platform_policy_hash:taskPlatformPolicyHash(task),acknowledged:true};
   await provisionOwner(db,password,true);
   const login=await handleOwnerAuth(new Request(localOrigin+"/api/auth/login",{method:"POST",headers:{Origin:localOrigin,"Content-Type":"application/json"},body:JSON.stringify({password})}),"login",env,async()=>db);assert.equal(login.status,200);
   const cookie=login.headers.getSetCookie().map(value=>value.split(";")[0]).join("; ");assert.ok(cookie);
