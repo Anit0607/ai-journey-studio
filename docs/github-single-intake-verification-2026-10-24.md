@@ -1,7 +1,7 @@
 # One-time GitHub intake verification — 24 October 2026
 
-## Recorded outcome
-The single manual invocation ended in failure at 2026-10-24T04:45:37.931Z with repository_read_permission_required and no successful-sync timestamp. It was not retried and is not a successful source-intake result.
+## Recorded outcome: original attempt
+The original manual invocation ended in failure at 2026-10-24T04:45:37.931Z with repository_read_permission_required and no successful-sync timestamp. It was not retried and is not a successful source-intake result.
 
 At 2026-10-24T04:46:34Z the nonsecret Production configuration was restored and read back as exactly equal to the pre-intake snapshot. GitHub enabled and sync_authorized are false; the temporary private_read_authorized and since fields are removed. The approved App mapping, key and all unrelated settings are preserved. This documentation update deploys that OFF configuration through the ordinary Git integration.
 
@@ -24,4 +24,13 @@ Scheduler authorization remains false. Scheduled integration ticks fail closed; 
 
 Read the durable sync outcome, running lease, totals and recent provenance after the one invocation. If the response times out or is uncertain, inspect saved state and do not repeat the action.
 
-The one-attempt authorization is exhausted. The restored OFF configuration preserves approved App wiring and all audit records. No second intake may be inferred from this historical checklist. This checkpoint changes documentation only; production OFF status must be verified after deployment.
+The original one-attempt authorization was exhausted. The restored OFF configuration preserved approved App wiring and all audit records. A subsequent controlled retry required the separate explicit approval recorded below; no standing intake authorization is inferred from this historical checklist.
+
+## Separately approved post-fix verification
+The reviewed repository-token proof fix was deployed by PR25. The owner separately approved one bounded post-fix retry with the same single repository, 23 October cutoff, no note/file reads, no OpenAI calls, no scheduling and no publication.
+
+That one manual invocation started at 2026-10-24T05:09:57.564Z and completed successfully at 2026-10-24T05:10:00.230Z. The saved error was null, no running lease remained, and imported provenance records were present. This confirms the bounded manual GitHub-to-Studio intake, not an unattended end-to-end content or publishing workflow.
+
+At 2026-10-24T05:10:59Z the nonsecret Production config was again restored and read back as exactly equal to the pre-intake OFF snapshot. GitHub enabled and sync_authorized are false; private_read_authorized and since are removed. App wiring and every unrelated setting are preserved. This documentation-only release deploys the OFF restoration; live disabled status must be checked after completion.
+
+The approved retry is consumed. Keep imported evidence uncleared and preserve provenance and the original failed-attempt history. No additional sync, source-policy activation, model use, schedule or social post is authorized by this completion record.
