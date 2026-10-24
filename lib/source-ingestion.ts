@@ -3,11 +3,11 @@ import {createHash,randomUUID} from "node:crypto";
 import type {Connection,Database} from "./db";
 import {hash,type Source} from "./domain";
 import {assertSourcePrivacy,SourceIntake,validateSourceInput,type SourceInput} from "./sources";
-import {SCOPED_GITHUB_REPOSITORY,GITHUB_NOTE_MAX_BYTES,GITHUB_NOTE_MAX_FETCHES,GITHUB_NOTE_MAX_TREE_READS,GITHUB_NOTES_SYNC_MAX_READS,GithubSourceBoundaryError,assertGithubEvidenceText,isGithubImmutableSha,normalizeGithubNotePaths,validateGithubBuildNote} from "./github-source-boundary";
+import {githubNoteSettings,validateGithubHashPinnedText,GITHUB_HASH_PINNED_TEXT_PROFILE,type GithubNotesConfig,type GithubIntakeMode,SCOPED_GITHUB_REPOSITORY,GITHUB_NOTE_MAX_BYTES,GITHUB_NOTE_MAX_FETCHES,GITHUB_NOTE_MAX_TREE_READS,GITHUB_NOTES_SYNC_MAX_READS,GithubSourceBoundaryError,assertGithubEvidenceText,isGithubImmutableSha,normalizeGithubNotePaths,validateGithubBuildNote} from "./github-source-boundary";
 
 /** Non-secret, server-held configuration. Enabling alone never authorizes syncing. */
 export type SourceIngestionConfig={
-  github?:{enabled?:boolean;sync_authorized?:boolean;private_read_authorized?:boolean;app?:import('./github-app-auth').GitHubAppConfig;repositories:string[];since?:string;notes?:{enabled?:boolean;paths:string[]}};
+  github?:{enabled?:boolean;sync_authorized?:boolean;private_read_authorized?:boolean;app?:import('./github-app-auth').GitHubAppConfig;repositories:string[];since?:string;intake_mode?:GithubIntakeMode;notes?:GithubNotesConfig};
   youtube?:{enabled?:boolean;sync_authorized?:boolean;channel_ids?:string[];handles?:string[]};
   chat?:{enabled?:boolean};
 };
@@ -50,7 +50,7 @@ export function sourceIngestionStatus(config:SourceIngestionConfig,env:Record<st
     if(c?.enabled!==true)reason="disabled";
     else if(c.sync_authorized!==true)reason="owner_sync_authorization_required";
     else {try{
-      targets=targetList(config,provider);if(provider==="github"&&config.github?.since)iso(config.github.since);
+      targets=targetList(config,provider);if(provider==="github"){githubNoteSettings(config.github?.intake_mode,config.github?.notes);if(config.github?.since)iso(config.github.since);}
       if(provider==="github"&&config.github?.notes?.enabled===true){
         if(config.github.private_read_authorized!==true)throw new IngestionError("github_notes_private_read_authorization_required");
         if(targets.length!==1||targets[0]!==SCOPED_GITHUB_REPOSITORY)throw new IngestionError("github_notes_repository_not_allowed");
@@ -202,7 +202,15 @@ export class SourceIngestion {
       // Only an exact response-bound, resolver-validated App grant replaces that check.
       if(!this.appAuthorizedRepositoryResponses.has(repo)&&repo.permissions&&object(repo.permissions).pull!==true)throw new IngestionError("repository_read_permission_required");
     }else if(repo.private!==false||repo.visibility!=="public")throw new IngestionError("repository_visibility_unknown");
-    const notePaths=this.config.github?.notes?.enabled===true?normalizeGithubNotePaths(this.config.github.notes.paths):[];
+    const selection=githubNoteSettings(this.config.github?.intake_mode,this.config.github?.notes);
+    const notePaths=selection.paths;
+    if(selection.mode==='notes_only'){
+      // A pinned file import never lists commits and never advances the legacy cursor.
+      const snapshot=await this.githubNoteCommit(scope,selection.commitSha!);
+      const notes=await this.githubBuildNotes(scope,snapshot.sha,snapshot.timestamp,notePaths,repo.visibility,snapshot.treeSha);
+      const saved=await this.persist("github",scope,lease,notes.candidates,state.cursor||{},notes.rejected,notes.rejected_reasons);
+      sum(progress,saved);return {...saved,has_more:false};
+    }
     const configured=this.config.github?.since?iso(this.config.github.since):null;
     const configuration=notePaths.length?hash(JSON.stringify({since:configured,note_paths:notePaths})):configured;
     let cursor=state.cursor||{};
@@ -248,9 +256,18 @@ export class SourceIngestion {
     }
     return total;
   }
+  private async githubNoteCommit(scope:string,sha:string){
+    if(!isGithubImmutableSha(sha))throw new GithubSourceBoundaryError("github_note_commit_tree_invalid");
+    // Git commit metadata only: never REST commit details, patches or commit lists.
+    const commit=object(await this.request(new URL(`https://api.github.com/repos/${scope}/git/commits/${sha}`),"github",65_536));
+    if(typeof commit.sha!=="string"||commit.sha.toLowerCase()!==sha||!isGithubImmutableSha(object(commit.tree).sha))throw new GithubSourceBoundaryError("github_note_commit_tree_invalid");
+    const timestamp=iso(object(commit.committer).date);
+    if(new Date(timestamp)>this.now())throw new GithubSourceBoundaryError("github_note_commit_date_invalid");
+    return {sha,timestamp,treeSha:String(object(commit.tree).sha).toLowerCase()};
+  }
   private async githubNoteTree(scope:string,sha:string,paths:string[],treeSha?:string){
     if(!treeSha){
-      // Git commit metadata, not the REST commit-details endpoint that includes patches.
+      // Preserve the legacy metadata fallback, which already has a list-bound date.
       const commit=object(await this.request(new URL(`https://api.github.com/repos/${scope}/git/commits/${sha}`),"github",65_536));
       if(typeof commit.sha!=="string"||commit.sha.toLowerCase()!==sha||!isGithubImmutableSha(object(commit.tree).sha))throw new GithubSourceBoundaryError("github_note_commit_tree_invalid");
       treeSha=String(object(commit.tree).sha).toLowerCase();
@@ -279,6 +296,9 @@ export class SourceIngestion {
     // Defense in depth: never rely on a caller or mutable configuration to widen
     // the exact repository/path/ref boundary used by the Contents API.
     if(scope!==SCOPED_GITHUB_REPOSITORY||this.config.github?.enabled!==true||this.config.github.notes?.enabled!==true||this.config.github.sync_authorized!==true||this.config.github.private_read_authorized!==true||!isGithubImmutableSha(sha)||targetList(this.config,"github").some(repository=>repository!==scope))throw new IngestionError("github_note_provenance_invalid");
+    const selection=githubNoteSettings(this.config.github.intake_mode,this.config.github.notes);
+    if(selection.mode==='notes_only'&&sha!==selection.commitSha)throw new IngestionError("github_note_provenance_invalid");
+    const profile=selection.profile;
     const candidates:ImportedCandidate[]=[],rejected_reasons:Record<string,number>={};let rejected=0;
     const skip=(reason:string,count=1)=>{rejected+=count;rejected_reasons[reason]=(rejected_reasons[reason]||0)+count;};
     const fatal=(error:unknown)=>error instanceof IngestionError&&["provider_rate_limited","provider_access_denied","provider_network_error","sync_cancelled","github_read_budget_exceeded"].includes(error.code)||error instanceof GitHubAppAuthError;
@@ -305,12 +325,16 @@ export class SourceIngestion {
         const blobSha=row.sha.toLowerCase();
         if(blobSha!==expectedBlob)throw new GithubSourceBoundaryError("github_note_tree_blob_mismatch");
         if(createHash(blobSha.length===40?"sha1":"sha256").update(`blob ${bytes.length}\0`).update(bytes).digest("hex")!==blobSha)throw new GithubSourceBoundaryError("github_note_blob_mismatch");
-        let raw:string;try{raw=new TextDecoder("utf-8",{fatal:true}).decode(bytes);}catch{throw new GithubSourceBoundaryError("github_note_encoding_invalid");}
-        const selected=validateGithubBuildNote(raw,scope,sha);
+        const rawSha256=createHash('sha256').update(bytes).digest('hex');
+        if(profile&&rawSha256!==profile.sha256)throw new GithubSourceBoundaryError("github_note_raw_hash_mismatch");
+        let raw:string;try{raw=new TextDecoder("utf-8",{fatal:true,...(profile?{ignoreBOM:true}:{})}).decode(bytes);}catch{throw new GithubSourceBoundaryError("github_note_encoding_invalid");}
+        const selected=profile?validateGithubHashPinnedText(raw,scope,sha,path,rawSha256):validateGithubBuildNote(raw,scope,sha);
         const input={text:`Attributed GitHub evidence; this record does not establish the owner’s experience.\nRepository: ${scope}\nCommit: ${sha}\nNote: ${path}\n\n${selected}`,category:"project-note",reported_date:timestamp.slice(0,10)};
         // Ensure the same bounded parser also accepts the persisted representation.
-        validateGithubBuildNote(input.text,scope,sha);validateSourceInput(input,this.now());
-        candidates.push({provider:"github",scope,external_id:`${sha}:${path}`,source_url:`https://github.com/${scope}/blob/${sha}/${path}`,input,metadata:{content_kind:"build_note",repository:scope,repository_visibility:visibility,commit_sha:sha,note_path:path,blob_sha:blobSha,root_tree_sha:boundary.rootTreeSha,note_mode:"100644",content_digest:hash(input.text),evidence_digest:hash(selected),source_timestamp:timestamp}});
+        if(profile){if(createHash('sha256').update(selected,'utf8').digest('hex')!==rawSha256)throw new GithubSourceBoundaryError("github_note_raw_hash_mismatch");}
+        else validateGithubBuildNote(input.text,scope,sha);
+        validateSourceInput(input,this.now());
+        candidates.push({provider:"github",scope,external_id:`${sha}:${path}`,source_url:`https://github.com/${scope}/blob/${sha}/${path}`,input,metadata:{content_kind:profile?"hash_pinned_text":"build_note",...(profile?{content_profile:GITHUB_HASH_PINNED_TEXT_PROFILE,profile_path:profile.path,expected_raw_sha256:profile.sha256,raw_sha256:rawSha256,raw_bytes:bytes.length}:{}),repository:scope,repository_visibility:visibility,commit_sha:sha,note_path:path,blob_sha:blobSha,root_tree_sha:boundary.rootTreeSha,note_mode:"100644",content_digest:hash(input.text),evidence_digest:hash(selected),source_timestamp:timestamp}});
       }catch(error){
         if(fatal(error))throw error;
         const reason=error instanceof GithubSourceBoundaryError||error instanceof IngestionError?error.code:"github_note_invalid";

@@ -18,6 +18,13 @@ function unformatClaim(value:string):string{
 /** An internal provenance envelope is metadata only with the exact stored date/body. */
 export function verifiedSourceEnvelope(value:string,role:string,source:string,reportedDate?:string):boolean{
  if(!['Harvester','Story Miner','Strategist'].includes(role))return false;
+ // Only an isolated internal provenance atom is structural. Never remove a
+ // matching number/hash from a sentence or treat metadata as evidence of an event.
+ const provenance=value.trim();
+ const sourceHash=/^(?:Source hash: ([a-f0-9]{64})|\(Source hash: ([a-f0-9]{64})\)|SOURCE HASH: ([a-f0-9]{64}))$/.exec(provenance);
+ if(sourceHash&&sourceHash.slice(1).find(Boolean)===hash(source))return true;
+ const sourceDate=/^(?:SOURCE DATE|Reported date): (\d{4}-\d{2}-\d{2})$/.exec(provenance);
+ if(sourceDate&&reportedDate===sourceDate[1])return true;
  const text=unformatClaim(value),dated=/^SOURCE DATE:\s*(\d{4}-\d{2}-\d{2})(?:[.,]\s*|\s+)SOURCE:\s*([\s\S]+)$/i.exec(text);
  const bare=/^SOURCE:\s*([\s\S]+)$/i.exec(text);
  const body=dated?(reportedDate===dated[1]?dated[2]:null):bare?.[1];
@@ -58,6 +65,12 @@ function commitInference(line:string):boolean{
     || /^(?:the|this)\s+(?:feature|workflow|system|implementation|addition|change|execution)\s+(?:is|was|has been)\s+(?:successfully\s+)?(?:tested|verified|deployed|implemented|operational)\b/i.test(line)
     || /^Scope:\s*(?:restricting|bounding|enforcing|preventing|protecting|ensuring|enhancing|improving)\b/i.test(line);
 }
+/** The observed title-to-general-lesson inference is not a wording-only change. */
+export function commitSummaryLessonReason(claim:string,source:string):string|null{
+  const title=attributedCommitSummary(source);
+  return title&&comparable(claim)!==comparable(title)&&/\bthis illustrates a configuration approach\b/i.test(claim)
+    ? 'Commit-title evidence does not establish the inferred configuration lesson' : null;
+}
 function nonVerbatimLines(text:string,source:string):string[]{
   const exactLines=new Set(source.split('\n').map(line=>line.trim())),bad:string[]=[];let active=false;
   for(const raw of text.split('\n')){
@@ -83,7 +96,8 @@ export function bundleQuality(bundle:Artifact[],source:string,reportedDate?:stri
       const personal=/\b(?:I\b|I[’'](?:ve|m)|my\b|Anit\b|he\s+(?:found|discovered|learned|shares))/i.test(line);
       const clean=comparable(line);
       const directQuote=clean.length>=10&&sentences(source).some(sentence=>comparable(sentence)===clean);
-      if(commitSummary&&!directQuote&&commitInference(line)&&!flags.some(flag=>flag.role===artifact.role&&flag.claim===line.slice(0,500)))flags.push({role:artifact.role,claim:line.slice(0,500),reason:"Commit-summary evidence establishes a recorded title, not inferred learning, intent, benefits or working capability"});
+      const commitLesson=commitSummaryLessonReason(line,source);
+      if(commitSummary&&!directQuote&&(commitInference(line)||commitLesson)&&!flags.some(flag=>flag.role===artifact.role&&flag.claim===line.slice(0,500)))flags.push({role:artifact.role,claim:line.slice(0,500),reason:commitLesson||"Commit-summary evidence establishes a recorded title, not inferred learning, intent, benefits or working capability"});
       // Conservative: the short capsule supports only six personal assertions.
       if(personal&&(externalEvidence(source)||(!directQuote&&!(source===CAPSULE&&SUPPORTED_SENTENCES.some(sentence=>clean===sentence.toLowerCase())))))
         flags.push({role:artifact.role,claim:line.slice(0,500),reason:"Personal claim needs specific cleared evidence; use a supported sentence or remove it"});

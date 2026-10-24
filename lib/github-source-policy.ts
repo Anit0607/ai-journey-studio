@@ -4,7 +4,7 @@ import {CAP,WARNING,configReady,hash,type RuntimeConfig,type Source} from './dom
 import {OWNER_ID} from './owner-password';
 import {ownerSourceEligible,validateSourceInput} from './sources';
 import {githubDraftRuntimeBinding,type ScopedSourceProof} from './scoped-source-proof';
-import {SCOPED_GITHUB_REPOSITORY,normalizeGithubNotePaths,validateGithubBuildNote} from './github-source-boundary';
+import {SCOPED_GITHUB_REPOSITORY,normalizeGithubNotePaths,validateGithubBuildNote,validateGithubHashPinnedText,GITHUB_HASH_PINNED_TEXT_PROFILE} from './github-source-boundary';
 
 export const GITHUB_POLICY_ACKNOWLEDGEMENT='I authorize automatic selection of the displayed GitHub source scope and sending its selected facts, repository and immutable commit/file identifiers, existing commit author/committer account attribution, and intermediate drafts to OpenAI for LinkedIn drafts and revisions under the shared $10 monthly warning and $15 monthly cap. This does not establish that I performed the reported work. Bank, client, confidential, credential and unrelated material is excluded. This does not authorize new account access, other repositories, Gemini, scheduling or publication. I must approve every final post before it is scheduled or published.';
 export type GithubSourceScope={version:1;repository:string;commit_summaries:boolean;note_paths:string[];categories:('build-log'|'project-note')[];start_date:string;provenance:['repository','immutable-commit-file-identifiers','existing-commit-account-attribution'];recipient:'openai';platforms:['LinkedIn'];purpose:'content-drafts-revisions';intermediate_drafts:true;warning_microdollars:number;cap_microdollars:number};
@@ -52,7 +52,17 @@ export function githubEvidenceEligibility(source:Source,p:Provenance,scope:Githu
    if(/(?:ignore|override|disregard).{0,40}(?:instructions?|rules?|policy)|(?:system|assistant|developer)\s*:|https?:\/\//i.test(summary))return {eligible:false,reason:'Commit summary contains ambiguous instructions or links'};
    return {eligible:true,evidence_key:hash(JSON.stringify([scope.repository,'commit_summary',m.commit_sha]))};
   }
+  if(m.content_kind==='hash_pinned_text'){
+   if(source.category!=='project-note'||typeof m.note_path!=='string'||!scope.note_paths.includes(m.note_path)||typeof m.blob_sha!=='string'||!COMMIT.test(m.blob_sha)||typeof m.root_tree_sha!=='string'||!COMMIT.test(m.root_tree_sha)||m.note_mode!=='100644'||p.external_id!==`${m.commit_sha}:${m.note_path}`||p.source_url!==`https://github.com/${scope.repository}/blob/${m.commit_sha}/${m.note_path}`||m.content_profile!==GITHUB_HASH_PINNED_TEXT_PROFILE||m.profile_path!==m.note_path||typeof m.raw_sha256!=='string'||m.expected_raw_sha256!==m.raw_sha256)return {eligible:false,reason:'Hash-pinned text provenance is invalid'};
+   const prefix=`Attributed GitHub evidence; this record does not establish the owner’s experience.\nRepository: ${scope.repository}\nCommit: ${m.commit_sha}\nNote: ${m.note_path}\n\n`;
+   if(!source.text.startsWith(prefix))return {eligible:false,reason:'Hash-pinned text attribution changed'};
+   const raw=validateGithubHashPinnedText(source.text.slice(prefix.length),scope.repository,m.commit_sha,m.note_path,m.raw_sha256);
+   if(m.raw_bytes!==Buffer.byteLength(raw,'utf8')||m.evidence_digest!==hash(raw))return {eligible:false,reason:'Hash-pinned text integrity failed'};
+   // Structured-note consent never grants this distinct, exact-byte profile.
+   return {eligible:false,reason:'Hash-pinned text requires separate exact owner source clearance'};
+  }
   if(m.content_kind==='build_note'){
+   if(m.content_profile!==undefined)return {eligible:false,reason:'Unsupported build note profile'};
    if(source.category!=='project-note'||typeof m.note_path!=='string'||!scope.note_paths.includes(m.note_path)||typeof m.blob_sha!=='string'||!COMMIT.test(m.blob_sha)||typeof m.root_tree_sha!=='string'||!COMMIT.test(m.root_tree_sha)||m.note_mode!=='100644'||p.source_url!==`https://github.com/${scope.repository}/blob/${m.commit_sha}/${m.note_path}`)return {eligible:false,reason:'Build note path or immutable identity is outside policy'};
    const start=source.text.indexOf('## Verified progress\n');if(start<0)return {eligible:false,reason:'Build note lacks verified progress structure'};
    const expectedPrefix=`Attributed GitHub evidence; this record does not establish the owner’s experience.\nRepository: ${scope.repository}\nCommit: ${m.commit_sha}\nNote: ${m.note_path}\n\n`;
