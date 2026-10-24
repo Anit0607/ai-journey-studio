@@ -1,7 +1,7 @@
 import {taskPlatformPolicy,type PlatformPolicy} from "./platform-policy";
 import {randomUUID} from "node:crypto";
 import {hasInternalReviewMetadata} from "./platform-variants";
-import {assertBundle,bundleQuality,bundleVersion,verifiedSourceEnvelope,SUPPORTED_SENTENCES,type Artifact} from "./grounding";
+import {assertBundle,bundleQuality,bundleVersion,verifiedSourceEnvelope,commitSummaryLessonReason,SUPPORTED_SENTENCES,type Artifact} from "./grounding";
 import {CAPSULE,hash} from "./domain";
 import {assertSourcePrivacy} from "./sources";
 import {assertArtifactPrivacy} from "./artifact-privacy";
@@ -82,15 +82,18 @@ const sourceSentences=(source:string)=>spans(source).map(x=>x.text);
 const exact=(claim:string,source:string)=>sourceSentences(source).some(x=>plain(x)===plain(claim));
 const factual=(claim:string)=>/\b(?:I|my|Anit|owner|project|dashboard|login|system|agents?|workflow|he|she|they|we|our|it)\b.*\b(?:am|is|are|was|were|has|have|had|use[sd]?|identifies|retain[sd]?|work(?:ing|s)?|focus(?:ed|es)?|learn(?:ed|s)?|found|discovered|achieved|build[sd]?|built|documents?|demonstrates?|highlights?|verified|operational)\b/i.test(claim);
 const dangerous=/\b(?:discovered|achieved|earned|increased|improved|successfully|always|guaranteed|reliably|reliable|proven|expert|engineer|years of experience|functioning as intended|fully operational|perfect|my favorite|my family|born in|degree in|worked at)\b|(?:experience|journey) (?:highlights|shows|taught|demonstrates)/i;
-function hardReason(claim:string,source:string):string|null{
+function hardReason(claim:string,source:string,role?:string):string|null{
  if(/\b(?:this|the) draft\b.*(?:exact sentences|no added assumptions|no invented|only.*facts)/i.test(claim))return 'Draft self-certification is not source evidence; remove it';
  const figures:string[]=claim.match(/(?:\$\s*)?\b\d+(?:[.,]\d+)?%?/g)||[];const sourceFigures:string[]=source.match(/(?:\$\s*)?\b\d+(?:[.,]\d+)?%?/g)||[];
  if(figures.some(x=>!sourceFigures.includes(x)))return "New figure requires new cleared evidence";
  const extra=claim.match(dangerous);if(extra&&!source.toLowerCase().includes(extra[0].toLowerCase()))return "Added outcome, biography or certainty requires correction or new evidence";
- const names=claim.match(/\b[A-Z][a-z]+(?:\s+[A-Z][a-z]+)+\b/g)||[];
- const singleNames=[...claim.matchAll(/\b(?:[A-Z][a-z]+|[A-Z][a-z]+[A-Z][A-Za-z]+)\b/g)];
- const firstWord=claim.search(/[A-Za-z]/);
- if(singleNames.some(match=>{const x=match[0];const connective=match.index===firstWord&&['Following','Subsequently','Upon','If','Is'].includes(x);return !connective&&!source.includes(x)&&!['The','This','That','It','As','However','Currently','Proposed','Evidence','Unsupported','Review','Owner','Content','Audience','Approach','Human','Keep','Use','Only','No','All','Source','LinkedIn','Instagram','Writer','Platform','Adapter','Check','My','We','Our','They','He','She'].includes(x);}))return 'New named entity or unsupported capitalized term requires correction';
+ // Structural labels are not names. Keep the body, original claim and span;
+ // every non-entity check above/below still sees the complete original claim.
+ const entityText=role==='Strategist'?claim.replace(/^(?:\*\*)?(?:Audience Need|Reader Takeaway):(?:\*\*)?[ \t]*/,''):claim;
+ const names=entityText.match(/\b[A-Z][a-z]+(?:\s+[A-Z][a-z]+)+\b/g)||[];
+ const singleNames=[...entityText.matchAll(/\b(?:[A-Z][a-z]+|[A-Z][a-z]+[A-Z][A-Za-z]+)\b/g)];
+ const firstWord=entityText.search(/[A-Za-z]/);
+ if(singleNames.some(match=>{const x=match[0];const connective=match.index===firstWord&&['Following','Subsequently','Upon','If','Is','For'].includes(x);return !connective&&!source.includes(x)&&!['The','This','That','It','As','However','Currently','Proposed','Evidence','Unsupported','Review','Owner','Content','Audience','Approach','Human','Keep','Use','Only','No','All','Source','LinkedIn','Instagram','Writer','Platform','Adapter','Check','My','We','Our','They','He','She'].includes(x);}))return 'New named entity or unsupported capitalized term requires correction';
  if(names.some(x=>!source.includes(x)&&!['Proposed approach','Evidence needed','Unsupported claims','Proposed advice'].includes(x)))return "New named entity requires new cleared evidence";
  // An observed removal does not establish that Studio performed it. This narrow
  // product-action guard is not general actor/semantic verification.
@@ -120,7 +123,7 @@ export function evidenceFindings(bundle:Artifact[],source:string,reportedDate?:s
   if(atom&&verifiedSourceEnvelope(atom.text,artifact!.role,source,reportedDate))continue;
   const claim=atom?(atom.raw||atom.text):flag.claim,span=atom?{start:atom.start,end:atom.end}:{start,end:start+flag.claim.length};
   const wording=/Personal claim needs/.test(flag.reason)&&source!==CAPSULE&&!/^Attributed (?:GitHub|YouTube) evidence;/.test(source);
-  const hard=hardReason(claim,source);
+  const hard=hardReason(claim,source,artifact?.role);
   out.push(finding(flag.role,claim,hard||flag.reason,wording&&!hard&&span.start>=0?"wording_review":"hard",artifact?.hash||"",span));
  }
  for(const artifact of bundle.filter(x=>x.role!=="Critic")){
@@ -131,7 +134,7 @@ export function evidenceFindings(bundle:Artifact[],source:string,reportedDate?:s
    if(internal&&((reportedDate&&(atom.text==='SOURCE DATE: '+reportedDate||atom.text===reportedDate))||atom.text===hash(source)||(atom.text.startsWith('SOURCE: ')&&exact(atom.text.slice(8),source))))continue;
    if(exact(atom.text,source)||(atom.raw&&spans(atom.text).length>0&&spans(atom.text).every(x=>exact(x.text,source)))||(source===CAPSULE&&SUPPORTED_SENTENCES.some(x=>plain(x)===plain(atom.text)))||/^#{1,3} (?:LinkedIn|X|Instagram)$/.test(atom.text)||(!factual(atom.text)&&!(/^(?:Writer|Platform Adapter)$/.test(artifact.role)&&/\b(?:is|are|was|were|has|have|documents?|uses?|publish(?:ed|es)?|delet(?:ed|es)?|remov(?:ed|es)?|supports?|tested)\b/i.test(atom.text))&&!dangerous.test(atom.text)&&! /\d/.test(atom.text)))continue;
    if(out.some(x=>x.role===artifact.role&&x.span.start===atom.start))continue;
-   const hard=hardReason(atom.text,source);
+   const hard=hardReason(atom.text,source,artifact.role);
    out.push(finding(artifact.role,atom.raw||atom.text,hard||"Compare this wording with exact cleared evidence",hard?"hard":"wording_review",artifact.hash,{start:atom.start,end:atom.end}));
   }
  }
@@ -143,7 +146,10 @@ export function validateEvidence(finding:Finding,source:string,sourceSpan:Span,q
  assertSourcePrivacy(quote);
  const complete=spans(source).filter(x=>x.start>=sourceSpan.start&&x.end<=sourceSpan.end);
  if(quote.trim().length<10||!complete.length||complete[0].start!==sourceSpan.start||complete.at(-1)!.end!==sourceSpan.end)throw Error('Select one or more complete source sentences');
- const hard=hardReason(finding.claim,quote);if(hard)throw Error(hard);
+ const disclaimer=/^Attributed (?:GitHub|YouTube) evidence; this record does not establish the owner[’']s experience\./.exec(source)?.[0];
+ if(disclaimer&&quote===disclaimer&&finding.claim!==quote)throw Error('An attribution disclaimer cannot substantiate another claim');
+ const commitLesson=commitSummaryLessonReason(finding.claim,source);if(commitLesson)throw Error(commitLesson);
+ const hard=hardReason(finding.claim,quote,finding.role);if(hard)throw Error(hard);
  // A cited passage must share meaningful words; owner decides meaning, never the checker.
  const words=finding.claim.toLowerCase().match(/[a-z]{4,}/g)||[];
  if(!words.some(x=>quote.toLowerCase().includes(x)))throw Error("Select relevant source evidence");

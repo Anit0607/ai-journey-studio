@@ -1,3 +1,4 @@
+import {createHash} from 'node:crypto';
 import {assertSourcePrivacy} from "./sources";
 
 export const SCOPED_GITHUB_REPOSITORY="anit0607/ai-journey-studio";
@@ -71,4 +72,35 @@ export function validateGithubBuildNote(text:string,repository:string,commitSha:
   });
   if(!links.length||links.length>20)fail("github_note_evidence_invalid");
   return `## Verified progress\n${facts.map(fact=>"- "+fact).join("\n")}\n\n## Evidence\n${[...new Set(links)].map(link=>"- "+link).join("\n")}`;
+}
+
+/** One explicitly selected raw-text exception, never a source-clearance receipt. */
+export const GITHUB_HASH_PINNED_TEXT_PATH='docs/build-notes/2026-10-24-linkedin-progress.md';
+export const GITHUB_HASH_PINNED_TEXT_SHA256='d6819a05d82864b052fca17b19ad0a02b2aed0d7ef6ed73aaccd1ebce7b15a63';
+export const GITHUB_HASH_PINNED_TEXT_PROFILE='hash-pinned-text-v1';
+export type GithubNoteProfile={kind:'hash_pinned_text';path:string;sha256:string};
+export type GithubNotesConfig={enabled?:boolean;paths:string[];commit_sha?:string;profile?:GithubNoteProfile};
+export type GithubIntakeMode='commits_and_notes'|'notes_only';
+export function githubNoteSettings(mode:unknown,notes:GithubNotesConfig|undefined){
+  if(mode!==undefined&&mode!=='commits_and_notes'&&mode!=='notes_only')fail('github_notes_intake_mode_invalid');
+  if(mode!=='notes_only'){
+    if(notes?.commit_sha!==undefined||notes?.profile!==undefined)fail('github_notes_pin_requires_notes_only');
+    return {mode:'commits_and_notes' as const,paths:notes?.enabled===true?normalizeGithubNotePaths(notes.paths):[],commitSha:undefined,profile:undefined};
+  }
+  if(notes?.enabled!==true)fail('github_notes_only_requires_enabled_notes');
+  const paths=normalizeGithubNotePaths(notes.paths);
+  if(!isGithubImmutableSha(notes.commit_sha))fail('github_notes_commit_pin_required');
+  const profile=notes.profile;
+  if(profile!==undefined){
+    if(!profile||typeof profile!=='object'||Array.isArray(profile)||Object.keys(profile).sort().join(',')!=='kind,path,sha256'||profile.kind!=='hash_pinned_text'||profile.path!==GITHUB_HASH_PINNED_TEXT_PATH||profile.sha256!==GITHUB_HASH_PINNED_TEXT_SHA256||paths.length!==1||paths[0]!==profile.path)fail('github_notes_profile_invalid');
+  }
+  return {mode:'notes_only' as const,paths,commitSha:notes.commit_sha.toLowerCase(),profile};
+}
+/** Check exact raw bytes upstream; this only validates the unchanged decoded text. */
+export function validateGithubHashPinnedText(text:string,repository:string,commitSha:string,path:string,rawSha256:string):string{
+  if(repository!==SCOPED_GITHUB_REPOSITORY||!isGithubImmutableSha(commitSha)||path!==GITHUB_HASH_PINNED_TEXT_PATH||rawSha256!==GITHUB_HASH_PINNED_TEXT_SHA256)fail('github_note_profile_provenance_invalid');
+  if(typeof text!=='string'||Buffer.byteLength(text,'utf8')>GITHUB_NOTE_MAX_BYTES)fail('github_note_too_large');
+  if(createHash('sha256').update(text,'utf8').digest('hex')!==rawSha256)fail('github_note_raw_hash_mismatch');
+  assertGithubEvidenceText(text);
+  return text;
 }

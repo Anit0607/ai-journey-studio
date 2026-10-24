@@ -1,0 +1,528 @@
+{
+  "source": {
+    "category": "build-log",
+    "clearance_acknowledgement": "I am the owner and have reviewed this exact source text and hash. I authorize sending it to OpenAI for content drafts and revisions under the $10 monthly warning and $15 monthly cap. It contains no bank, client, private, confidential, or credential material. This does not authorize Gemini or publishing.",
+    "clearance_hash": "818618f385fa1d481d81bd5dc985a768cd49742bc913a8d93ba9eee8f2c681f3",
+    "clearance_id": "ee93aece-58cf-4dec-b4d6-cb751ecf0eda",
+    "clearance_owner_acknowledged": true,
+    "clearance_provider": "openai",
+    "clearance_purpose": "content-drafts-revisions",
+    "cleared": true,
+    "cleared_at": "2026-10-24T06:16:52.177Z",
+    "created": "2026-10-24T05:09:59.935Z",
+    "hash": "818618f385fa1d481d81bd5dc985a768cd49742bc913a8d93ba9eee8f2c681f3",
+    "id": "4a64135a-ac39-4b15-9bef-450c32b16302",
+    "reported_date": "2026-10-23",
+    "revoked_at": null,
+    "text": "Attributed GitHub evidence; this record does not establish the owner’s experience.\nRepository: anit0607/ai-journey-studio\nAuthor account: Anit0607\nCommitter account: Anit0607\nCommit: 20cb70d8b86976449dc2d75e69f6def3e47c0aa3\nDefault new content workflows to versioned LinkedIn-only scope"
+  },
+  "task": {
+    "block_reason": null,
+    "checkpoint": 6,
+    "content_brief": {
+      "platform_policy": {
+        "platforms": [
+          "LinkedIn"
+        ],
+        "version": 1
+      },
+      "platforms": [
+        "LinkedIn"
+      ]
+    },
+    "id": "43fb1960-8e1a-4366-825d-708de34f454d",
+    "lease_token": null,
+    "lease_until": null,
+    "origin_key": "manual",
+    "platform_policy_hash": "791fecf1982dd95f6c23d7fbd69e621085212c254c4bd53a6ea52e5a9f66dde8",
+    "revision_base_token": null,
+    "revision_note": null,
+    "revision_parent_task_id": null,
+    "source_hash": "818618f385fa1d481d81bd5dc985a768cd49742bc913a8d93ba9eee8f2c681f3",
+    "source_id": "4a64135a-ac39-4b15-9bef-450c32b16302",
+    "status": "review",
+    "updated": "2026-10-24T06:18:30.718Z"
+  },
+  "run": {
+    "deadline": "2026-10-24T06:22:13.094Z",
+    "max_reserved_microdollars": 130000,
+    "run_id": "1fb4b7c5-5aac-408f-bdd9-f93a675d5c2c",
+    "status": "review",
+    "steps": 6,
+    "task_id": "43fb1960-8e1a-4366-825d-708de34f454d"
+  },
+  "outputs": [
+    {
+      "created": "2026-10-24T06:18:15.524Z",
+      "hash": "24b0e930c1fdf66c8baa46744c034879ab7a0df5b207843143096bbb1909c681",
+      "id": "bfbce87b-5e1a-4ab6-8362-ea76a7e9bff8",
+      "role": "Harvester",
+      "task_id": "43fb1960-8e1a-4366-825d-708de34f454d",
+      "text": "SOURCE: The GitHub commit titled \"Default new content workflows to versioned LinkedIn-only scope\" from repository anit0607/ai-journey-studio, authored and committed by Anit0607 on 2026-10-23, records a change setting new content workflows to a versioned LinkedIn-only scope. This evidence does not establish the author's experience or effectiveness of the change. (Source hash: 818618f385fa1d481d81bd5dc985a768cd49742bc913a8d93ba9eee8f2c681f3)"
+    },
+    {
+      "created": "2026-10-24T06:18:17.835Z",
+      "hash": "76f5e5c98f4828c2cfd1a4739db8b51ed71b924010dc35f763e3e762c855bb51",
+      "id": "cd14ddc2-5228-47bd-8fa8-9de15e88babd",
+      "role": "Story Miner",
+      "task_id": "43fb1960-8e1a-4366-825d-708de34f454d",
+      "text": "SOURCE UPDATE: The GitHub commit titled \"Default new content workflows to versioned LinkedIn-only scope,\" authored and committed by Anit0607 in the repository anit0607/ai-journey-studio on 2026-10-23, records a configuration change setting new content workflows to a versioned LinkedIn-only scope. This commit does not establish the author’s experience or the effectiveness of this configuration. (Source hash: 818618f385fa1d481d81bd5dc985a768cd49742bc913a8d93ba9eee8f2c681f3)\n\nUnsupported claims: None stated beyond the commit title.\n\nEvidence needed: Confirmation of impact, purpose, or success of the change.\n\nProposed advice: Seek additional evidence or documentation for context and outcomes of this workflow configuration."
+    },
+    {
+      "created": "2026-10-24T06:18:19.727Z",
+      "hash": "27a7f706c47aca78332b825cfef0f5ef95a84a8e04e905c70216d610b287ada7",
+      "id": "b0ad112b-8d09-44f0-8984-74238d3d5ee4",
+      "role": "Strategist",
+      "task_id": "43fb1960-8e1a-4366-825d-708de34f454d",
+      "text": "**Content Brief for LinkedIn**\n\n**Source:** GitHub commit titled “Default new content workflows to versioned LinkedIn-only scope,” repository anit0607/ai-journey-studio, authored and committed by Anit0607 on 2026-10-23.\n\n**Audience Need:** Practical understanding of content workflow configuration focused on LinkedIn as a primary distribution platform.\n\n**Source-supported Point:** The repository update records a configuration change that defaults new content workflows to a versioned LinkedIn-only scope.\n\n**Evidence Gap:** The commit message and record do not provide information on the intent behind this change, its impact, or effectiveness in practice.\n\n**Reader Takeaway:** When configuring content workflows, it is common to specialize or narrowly scope distribution channels — as seen here with a default LinkedIn-only workflow versioning — but assessing the outcome or rationale requires additional documentation beyond basic commit records."
+    },
+    {
+      "created": "2026-10-24T06:18:22.074Z",
+      "hash": "583b5a33a171cb857c8317d87445f5d2f1541c70d2406621f6bfdce01b9a59c8",
+      "id": "2ab132e7-85f0-4d6a-be56-fea181cd4eba",
+      "role": "Writer",
+      "task_id": "43fb1960-8e1a-4366-825d-708de34f454d",
+      "text": "The GitHub commit titled “Default new content workflows to versioned LinkedIn-only scope” in the repository anit0607/ai-journey-studio, authored and committed by Anit0607 on 2026-10-23, records a configuration change that sets new content workflows to operate within a versioned LinkedIn-only scope.  \n\nThis update specifically narrows the content workflow defaults to focus on LinkedIn, with versioning applied. However, the commit message and repository record do not provide additional details about the purpose, impact, or effectiveness of this configuration change.  \n\nNo further evidence is available to explain the rationale behind this update or its practical outcomes.  \n\nIf more insight is needed on how this configuration influences content management or distribution, additional documentation or user feedback from the author or repository would be required."
+    },
+    {
+      "created": "2026-10-24T06:18:23.923Z",
+      "hash": "91f17511e854a816a7226191d07afcd841ec5465aac6e8f46c6b4f38f9f6195b",
+      "id": "d30033f7-b097-4934-98ef-65d56f916bc3",
+      "role": "Platform Adapter",
+      "task_id": "43fb1960-8e1a-4366-825d-708de34f454d",
+      "text": "### LinkedIn\n\nOn October 23, 2026, a GitHub commit titled “Default new content workflows to versioned LinkedIn-only scope” was recorded in the repository anit0607/ai-journey-studio by the author Anit0607. This commit sets the default for new content workflows to operate within a versioned LinkedIn-only scope.\n\nThis update narrows the content workflow focus specifically to LinkedIn and includes versioning in the configuration. The commit message and associated records do not provide further explanation of the motivations, intended benefits, or impact of this change.\n\nFor those managing content workflows, this illustrates a configuration approach where distribution can be specialized and version-controlled by platform—here, LinkedIn. To understand how this influences workflow efficiency or content strategy, further documentation or practical results would be needed beyond the commit record.\n\nThis example highlights the importance of aligning workflow defaults to target platforms but also the need to accompany such technical changes with clear context and outcomes for broader organizational understanding."
+    },
+    {
+      "created": "2026-10-24T06:18:30.718Z",
+      "hash": "fc103328050293ac531473fc850ba4e6d43326bd5f1033097a0fc16a7d1086d7",
+      "id": "71757b9e-fb90-41ef-bf73-c4bb0e85cd07",
+      "role": "Critic",
+      "task_id": "43fb1960-8e1a-4366-825d-708de34f454d",
+      "text": "{\n  \"schema\": 2,\n  \"source_hash\": \"818618f385fa1d481d81bd5dc985a768cd49742bc913a8d93ba9eee8f2c681f3\",\n  \"index_hash\": \"8487626016d74a7d1de40fa482d1f22fd01aa1c267eefe9c38c6cea673ea9cf7\",\n  \"Unsupported claims:\": \"No claims beyond the commit title are substantiated by the source. There is no evidence of practical impact, intent, or effectiveness of the configuration change.\",\n  \"Evidence needed:\": \"Details on the rationale, purpose, expected benefits, and practical outcomes or effectiveness of defaulting new workflows to a versioned LinkedIn-only scope.\",\n  \"Proposed advice:\": \"Request or include supplementary documentation, author commentary, or usage data to clarify the motivation and results of this workflow configuration change.\",\n  \"evidence\": [\n    {\n      \"claim_id\": \"writer:0\",\n      \"source_ids\": [\n        \"source:1\"\n      ],\n      \"verdict\": \"wording_review\",\n      \"reason\": \"The claim that the commit \\\"records a configuration change that sets new content workflows to operate within a versioned LinkedIn-only scope\\\" is adequately supported by the commit title (source:1). However, owner comparison is recommended to ensure the paraphrase precisely matches the commit content and scope.\"\n    },\n    {\n      \"claim_id\": \"writer:1\",\n      \"source_ids\": [\n        \"source:1\"\n      ],\n      \"verdict\": \"wording_review\",\n      \"reason\": \"Statement that the update \\\"narrows the content workflow defaults to focus on LinkedIn, with versioning applied\\\" is a reasonable interpretation of the commit title but assumes intent and details not explicit in the source. Confirmation from the author or additional source comments are advised.\"\n    },\n    {\n      \"claim_id\": \"writer:2\",\n      \"source_ids\": [\n        \"source:0\"\n      ],\n      \"verdict\": \"wording_review\",\n      \"reason\": \"The assertion about missing details on purpose, impact, or effectiveness correctly reflects the limited available source information and cautions against overinterpretation.\"\n    },\n    {\n      \"claim_id\": \"writer:3\",\n      \"source_ids\": [\n        \"source:0\"\n      ],\n      \"verdict\": \"wording_review\",\n      \"reason\": \"Noting the absence of further evidence explaining rationale or practical outcomes is a cautious and factually balanced statement aligned with source limits.\"\n    },\n    {\n      \"claim_id\": \"writer:4\",\n      \"source_ids\": [\n        \"source:0\"\n      ],\n      \"verdict\": \"wording_review\",\n      \"reason\": \"Recommendations for seeking additional documentation or user feedback reflect reasonable editorial guidance given insufficient source detail.\"\n    },\n    {\n      \"claim_id\": \"platform:4\",\n      \"source_ids\": [\n        \"source:1\"\n      ],\n      \"verdict\": \"wording_review\",\n      \"reason\": \"The statement about the configuration illustrating specialization and version control by platform is an interpretive summary that fits the commit title but relies on inferred understanding. Owner validation advised.\"\n    },\n    {\n      \"claim_id\": \"platform:3\",\n      \"source_ids\": [\n        \"source:0\"\n      ],\n      \"verdict\": \"wording_review\",\n      \"reason\": \"The claim that the commit message does not provide motivations or impact is factually supported by the available source and effectively cautions readers.\"\n    },\n    {\n      \"claim_id\": \"platform:6\",\n      \"source_ids\": [\n        \"source:0\"\n      ],\n      \"verdict\": \"wording_review\",\n      \"reason\": \"Emphasizing the need for context and outcome information beyond the commit record is appropriate and consistent with the evidence.\"\n    }\n  ]\n}"
+    }
+  ],
+  "reviews": [
+    {
+      "task_id": "43fb1960-8e1a-4366-825d-708de34f454d",
+      "quality": {
+        "binding": "e76ccdf2788145278a87d2d51414b931e7fa371ee88b4e39a26ad564a73377d6",
+        "bundle_hash": "e7fca3910c478ac33615617f253b156badd090edc5c5b1f1197fd75ed946d6b7",
+        "critic": {
+          "legacy": false,
+          "suggestions": [],
+          "valid": false
+        },
+        "evidence_version": null,
+        "findings": [
+          {
+            "artifact_hash": "24b0e930c1fdf66c8baa46744c034879ab7a0df5b207843143096bbb1909c681",
+            "claim": "SOURCE: The GitHub commit titled \"Default new content workflows to versioned LinkedIn-only scope\" from repository anit0607/ai-journey-studio, authored and committed by Anit0607 on 2026-10-23, records a change setting new content workflows to a versioned LinkedIn-only scope.",
+            "id": "9efe964397c32333737149f0808eb204e02428bd6c268e8cc1fd80c6479e230a",
+            "kind": "hard",
+            "reason": "New figure requires new cleared evidence",
+            "resolution": null,
+            "role": "Harvester",
+            "span": {
+              "end": 274,
+              "start": 0
+            }
+          },
+          {
+            "artifact_hash": "24b0e930c1fdf66c8baa46744c034879ab7a0df5b207843143096bbb1909c681",
+            "claim": "(Source hash: 818618f385fa1d481d81bd5dc985a768cd49742bc913a8d93ba9eee8f2c681f3)",
+            "id": "eb179aa38ef18dc8b49db3baa33911abcc108575d1b363a158e44a0a5900ba0d",
+            "kind": "hard",
+            "reason": "New figure requires new cleared evidence",
+            "resolution": null,
+            "role": "Harvester",
+            "span": {
+              "end": 443,
+              "start": 364
+            }
+          },
+          {
+            "artifact_hash": "76f5e5c98f4828c2cfd1a4739db8b51ed71b924010dc35f763e3e762c855bb51",
+            "claim": "SOURCE UPDATE: The GitHub commit titled \"Default new content workflows to versioned LinkedIn-only scope,\" authored and committed by Anit0607 in the repository anit0607/ai-journey-studio on 2026-10-23, records a configuration change setting new content workflows to a versioned LinkedIn-only scope.",
+            "id": "d6d9cfc6c8d682149ae51ffb21ca2a3336237bd7d18985fe0aa95d061810e89b",
+            "kind": "hard",
+            "reason": "New figure requires new cleared evidence",
+            "resolution": null,
+            "role": "Story Miner",
+            "span": {
+              "end": 297,
+              "start": 0
+            }
+          },
+          {
+            "artifact_hash": "27a7f706c47aca78332b825cfef0f5ef95a84a8e04e905c70216d610b287ada7",
+            "claim": "**Source:** GitHub commit titled “Default new content workflows to versioned LinkedIn-only scope,” repository anit0607/ai-journey-studio, authored and committed by Anit0607 on 2026-10-23.",
+            "id": "8c3cbe2604d8ca9a709bbafd19ccb84994d92bc1cb9c05bbd80ca934e0a0c558",
+            "kind": "hard",
+            "reason": "New figure requires new cleared evidence",
+            "resolution": null,
+            "role": "Strategist",
+            "span": {
+              "end": 219,
+              "start": 32
+            }
+          },
+          {
+            "artifact_hash": "27a7f706c47aca78332b825cfef0f5ef95a84a8e04e905c70216d610b287ada7",
+            "claim": "**Audience Need:** Practical understanding of content workflow configuration focused on LinkedIn as a primary distribution platform.",
+            "id": "e3ab3e3b03a5d48fc2040a927bb0eddfe7bb2b0607b9d9c93f4d278940bb8561",
+            "kind": "hard",
+            "reason": "New named entity or unsupported capitalized term requires correction",
+            "resolution": null,
+            "role": "Strategist",
+            "span": {
+              "end": 353,
+              "start": 221
+            }
+          },
+          {
+            "artifact_hash": "27a7f706c47aca78332b825cfef0f5ef95a84a8e04e905c70216d610b287ada7",
+            "claim": "**Reader Takeaway:** When configuring content workflows, it is common to specialize or narrowly scope distribution channels — as seen here with a default LinkedIn-only workflow versioning — but assessing the outcome or rationale requires additional documentation beyond basic commit records.",
+            "id": "8ff1c5caccc2fcf9d390d3f76fac83f2ed2594f089f11a7d9933d5a2d19d1344",
+            "kind": "hard",
+            "reason": "New named entity or unsupported capitalized term requires correction",
+            "resolution": null,
+            "role": "Strategist",
+            "span": {
+              "end": 952,
+              "start": 661
+            }
+          },
+          {
+            "artifact_hash": "583b5a33a171cb857c8317d87445f5d2f1541c70d2406621f6bfdce01b9a59c8",
+            "claim": "The GitHub commit titled “Default new content workflows to versioned LinkedIn-only scope” in the repository anit0607/ai-journey-studio, authored and committed by Anit0607 on 2026-10-23, records a configuration change that sets new content workflows to operate within a versioned LinkedIn-only scope.",
+            "id": "7aacf74e4ebb711df56c3a55f087c819ab5d14fbe2bfdac252d8c3005013bf39",
+            "kind": "hard",
+            "reason": "New figure requires new cleared evidence",
+            "resolution": null,
+            "role": "Writer",
+            "span": {
+              "end": 299,
+              "start": 0
+            }
+          },
+          {
+            "artifact_hash": "583b5a33a171cb857c8317d87445f5d2f1541c70d2406621f6bfdce01b9a59c8",
+            "claim": "This update specifically narrows the content workflow defaults to focus on LinkedIn, with versioning applied.",
+            "id": "b13cd4c99234ca1887e5afc4a5b9b75bb71ed3e79cb4982b91a5f761c262c5a0",
+            "kind": "wording_review",
+            "reason": "Compare this wording with exact cleared evidence",
+            "resolution": null,
+            "role": "Writer",
+            "span": {
+              "end": 412,
+              "start": 303
+            }
+          },
+          {
+            "artifact_hash": "583b5a33a171cb857c8317d87445f5d2f1541c70d2406621f6bfdce01b9a59c8",
+            "claim": "No further evidence is available to explain the rationale behind this update or its practical outcomes.",
+            "id": "c5cf02536ceb4e691b7e030c73e94096ce0e747291964bcaf575c2d3fe31bfe2",
+            "kind": "wording_review",
+            "reason": "Compare this wording with exact cleared evidence",
+            "resolution": null,
+            "role": "Writer",
+            "span": {
+              "end": 677,
+              "start": 574
+            }
+          },
+          {
+            "artifact_hash": "583b5a33a171cb857c8317d87445f5d2f1541c70d2406621f6bfdce01b9a59c8",
+            "claim": "If more insight is needed on how this configuration influences content management or distribution, additional documentation or user feedback from the author or repository would be required.",
+            "id": "062ee8ccb70203e798a3088ab33747a36bf3e01b958970949b6b0f2c5430a4c2",
+            "kind": "wording_review",
+            "reason": "Compare this wording with exact cleared evidence",
+            "resolution": null,
+            "role": "Writer",
+            "span": {
+              "end": 870,
+              "start": 681
+            }
+          },
+          {
+            "artifact_hash": "91f17511e854a816a7226191d07afcd841ec5465aac6e8f46c6b4f38f9f6195b",
+            "claim": "On October 23, 2026, a GitHub commit titled “Default new content workflows to versioned LinkedIn-only scope” was recorded in the repository anit0607/ai-journey-studio by the author Anit0607.",
+            "id": "f60224c4d863e5601aad66950c5a9706bf1cfb148b5a9bdaf0149d555696c052",
+            "kind": "hard",
+            "reason": "New figure requires new cleared evidence",
+            "resolution": null,
+            "role": "Platform Adapter",
+            "span": {
+              "end": 204,
+              "start": 14
+            }
+          },
+          {
+            "artifact_hash": "91f17511e854a816a7226191d07afcd841ec5465aac6e8f46c6b4f38f9f6195b",
+            "claim": "This update narrows the content workflow focus specifically to LinkedIn and includes versioning in the configuration.",
+            "id": "19fbd3e609177a0734192c49e0b074770925f3d113b3960cba217dcbbfde9489",
+            "kind": "wording_review",
+            "reason": "Compare this wording with exact cleared evidence",
+            "resolution": null,
+            "role": "Platform Adapter",
+            "span": {
+              "end": 429,
+              "start": 312
+            }
+          }
+        ],
+        "flags": [
+          {
+            "artifact_hash": "24b0e930c1fdf66c8baa46744c034879ab7a0df5b207843143096bbb1909c681",
+            "claim": "SOURCE: The GitHub commit titled \"Default new content workflows to versioned LinkedIn-only scope\" from repository anit0607/ai-journey-studio, authored and committed by Anit0607 on 2026-10-23, records a change setting new content workflows to a versioned LinkedIn-only scope.",
+            "id": "9efe964397c32333737149f0808eb204e02428bd6c268e8cc1fd80c6479e230a",
+            "kind": "hard",
+            "reason": "New figure requires new cleared evidence",
+            "resolution": null,
+            "role": "Harvester",
+            "span": {
+              "end": 274,
+              "start": 0
+            }
+          },
+          {
+            "artifact_hash": "24b0e930c1fdf66c8baa46744c034879ab7a0df5b207843143096bbb1909c681",
+            "claim": "(Source hash: 818618f385fa1d481d81bd5dc985a768cd49742bc913a8d93ba9eee8f2c681f3)",
+            "id": "eb179aa38ef18dc8b49db3baa33911abcc108575d1b363a158e44a0a5900ba0d",
+            "kind": "hard",
+            "reason": "New figure requires new cleared evidence",
+            "resolution": null,
+            "role": "Harvester",
+            "span": {
+              "end": 443,
+              "start": 364
+            }
+          },
+          {
+            "artifact_hash": "76f5e5c98f4828c2cfd1a4739db8b51ed71b924010dc35f763e3e762c855bb51",
+            "claim": "SOURCE UPDATE: The GitHub commit titled \"Default new content workflows to versioned LinkedIn-only scope,\" authored and committed by Anit0607 in the repository anit0607/ai-journey-studio on 2026-10-23, records a configuration change setting new content workflows to a versioned LinkedIn-only scope.",
+            "id": "d6d9cfc6c8d682149ae51ffb21ca2a3336237bd7d18985fe0aa95d061810e89b",
+            "kind": "hard",
+            "reason": "New figure requires new cleared evidence",
+            "resolution": null,
+            "role": "Story Miner",
+            "span": {
+              "end": 297,
+              "start": 0
+            }
+          },
+          {
+            "artifact_hash": "27a7f706c47aca78332b825cfef0f5ef95a84a8e04e905c70216d610b287ada7",
+            "claim": "**Source:** GitHub commit titled “Default new content workflows to versioned LinkedIn-only scope,” repository anit0607/ai-journey-studio, authored and committed by Anit0607 on 2026-10-23.",
+            "id": "8c3cbe2604d8ca9a709bbafd19ccb84994d92bc1cb9c05bbd80ca934e0a0c558",
+            "kind": "hard",
+            "reason": "New figure requires new cleared evidence",
+            "resolution": null,
+            "role": "Strategist",
+            "span": {
+              "end": 219,
+              "start": 32
+            }
+          },
+          {
+            "artifact_hash": "27a7f706c47aca78332b825cfef0f5ef95a84a8e04e905c70216d610b287ada7",
+            "claim": "**Audience Need:** Practical understanding of content workflow configuration focused on LinkedIn as a primary distribution platform.",
+            "id": "e3ab3e3b03a5d48fc2040a927bb0eddfe7bb2b0607b9d9c93f4d278940bb8561",
+            "kind": "hard",
+            "reason": "New named entity or unsupported capitalized term requires correction",
+            "resolution": null,
+            "role": "Strategist",
+            "span": {
+              "end": 353,
+              "start": 221
+            }
+          },
+          {
+            "artifact_hash": "27a7f706c47aca78332b825cfef0f5ef95a84a8e04e905c70216d610b287ada7",
+            "claim": "**Reader Takeaway:** When configuring content workflows, it is common to specialize or narrowly scope distribution channels — as seen here with a default LinkedIn-only workflow versioning — but assessing the outcome or rationale requires additional documentation beyond basic commit records.",
+            "id": "8ff1c5caccc2fcf9d390d3f76fac83f2ed2594f089f11a7d9933d5a2d19d1344",
+            "kind": "hard",
+            "reason": "New named entity or unsupported capitalized term requires correction",
+            "resolution": null,
+            "role": "Strategist",
+            "span": {
+              "end": 952,
+              "start": 661
+            }
+          },
+          {
+            "artifact_hash": "583b5a33a171cb857c8317d87445f5d2f1541c70d2406621f6bfdce01b9a59c8",
+            "claim": "The GitHub commit titled “Default new content workflows to versioned LinkedIn-only scope” in the repository anit0607/ai-journey-studio, authored and committed by Anit0607 on 2026-10-23, records a configuration change that sets new content workflows to operate within a versioned LinkedIn-only scope.",
+            "id": "7aacf74e4ebb711df56c3a55f087c819ab5d14fbe2bfdac252d8c3005013bf39",
+            "kind": "hard",
+            "reason": "New figure requires new cleared evidence",
+            "resolution": null,
+            "role": "Writer",
+            "span": {
+              "end": 299,
+              "start": 0
+            }
+          },
+          {
+            "artifact_hash": "583b5a33a171cb857c8317d87445f5d2f1541c70d2406621f6bfdce01b9a59c8",
+            "claim": "This update specifically narrows the content workflow defaults to focus on LinkedIn, with versioning applied.",
+            "id": "b13cd4c99234ca1887e5afc4a5b9b75bb71ed3e79cb4982b91a5f761c262c5a0",
+            "kind": "wording_review",
+            "reason": "Compare this wording with exact cleared evidence",
+            "resolution": null,
+            "role": "Writer",
+            "span": {
+              "end": 412,
+              "start": 303
+            }
+          },
+          {
+            "artifact_hash": "583b5a33a171cb857c8317d87445f5d2f1541c70d2406621f6bfdce01b9a59c8",
+            "claim": "No further evidence is available to explain the rationale behind this update or its practical outcomes.",
+            "id": "c5cf02536ceb4e691b7e030c73e94096ce0e747291964bcaf575c2d3fe31bfe2",
+            "kind": "wording_review",
+            "reason": "Compare this wording with exact cleared evidence",
+            "resolution": null,
+            "role": "Writer",
+            "span": {
+              "end": 677,
+              "start": 574
+            }
+          },
+          {
+            "artifact_hash": "583b5a33a171cb857c8317d87445f5d2f1541c70d2406621f6bfdce01b9a59c8",
+            "claim": "If more insight is needed on how this configuration influences content management or distribution, additional documentation or user feedback from the author or repository would be required.",
+            "id": "062ee8ccb70203e798a3088ab33747a36bf3e01b958970949b6b0f2c5430a4c2",
+            "kind": "wording_review",
+            "reason": "Compare this wording with exact cleared evidence",
+            "resolution": null,
+            "role": "Writer",
+            "span": {
+              "end": 870,
+              "start": 681
+            }
+          },
+          {
+            "artifact_hash": "91f17511e854a816a7226191d07afcd841ec5465aac6e8f46c6b4f38f9f6195b",
+            "claim": "On October 23, 2026, a GitHub commit titled “Default new content workflows to versioned LinkedIn-only scope” was recorded in the repository anit0607/ai-journey-studio by the author Anit0607.",
+            "id": "f60224c4d863e5601aad66950c5a9706bf1cfb148b5a9bdaf0149d555696c052",
+            "kind": "hard",
+            "reason": "New figure requires new cleared evidence",
+            "resolution": null,
+            "role": "Platform Adapter",
+            "span": {
+              "end": 204,
+              "start": 14
+            }
+          },
+          {
+            "artifact_hash": "91f17511e854a816a7226191d07afcd841ec5465aac6e8f46c6b4f38f9f6195b",
+            "claim": "This update narrows the content workflow focus specifically to LinkedIn and includes versioning in the configuration.",
+            "id": "19fbd3e609177a0734192c49e0b074770925f3d113b3960cba217dcbbfde9489",
+            "kind": "wording_review",
+            "reason": "Compare this wording with exact cleared evidence",
+            "resolution": null,
+            "role": "Platform Adapter",
+            "span": {
+              "end": 429,
+              "start": 312
+            }
+          },
+          {
+            "artifact_hash": "fc103328050293ac531473fc850ba4e6d43326bd5f1033097a0fc16a7d1086d7",
+            "claim": "Invalid structured evidence review",
+            "id": "d2d80848bf879c5f38773cdcc2191defac0274ea6d4d7bce5383e0f909c30b11",
+            "kind": "hard",
+            "reason": "Structured Critic links or source binding are invalid; correct the Critic artifact",
+            "resolution": null,
+            "role": "Critic",
+            "span": {
+              "end": -1,
+              "start": -1
+            }
+          }
+        ],
+        "notice": "Evidence links and owner review are not independent factual verification. Review every claim; publication needs separate approval.",
+        "policy_version": "evidence-review-v2",
+        "source_hash": "818618f385fa1d481d81bd5dc985a768cd49742bc913a8d93ba9eee8f2c681f3",
+        "source_text": "Attributed GitHub evidence; this record does not establish the owner’s experience.\nRepository: anit0607/ai-journey-studio\nAuthor account: Anit0607\nCommitter account: Anit0607\nCommit: 20cb70d8b86976449dc2d75e69f6def3e47c0aa3\nDefault new content workflows to versioned LinkedIn-only scope",
+        "status": "needs_revision"
+      },
+      "variants": {
+        "complete": true,
+        "reason": null,
+        "variants": [
+          {
+            "hash": "44a692dbe3a26f04ce495f2e1e9d384769b2f1ab6a0fc95899203f72d3002c96",
+            "platform": "LinkedIn",
+            "text": "On October 23, 2026, a GitHub commit titled “Default new content workflows to versioned LinkedIn-only scope” was recorded in the repository anit0607/ai-journey-studio by the author Anit0607. This commit sets the default for new content workflows to operate within a versioned LinkedIn-only scope.\n\nThis update narrows the content workflow focus specifically to LinkedIn and includes versioning in the configuration. The commit message and associated records do not provide further explanation of the motivations, intended benefits, or impact of this change.\n\nFor those managing content workflows, this illustrates a configuration approach where distribution can be specialized and version-controlled by platform—here, LinkedIn. To understand how this influences workflow efficiency or content strategy, further documentation or practical results would be needed beyond the commit record.\n\nThis example highlights the importance of aligning workflow defaults to target platforms but also the need to accompany such technical changes with clear context and outcomes for broader organizational understanding."
+          }
+        ]
+      },
+      "platform_policy": {
+        "platforms": [
+          "LinkedIn"
+        ],
+        "version": 1
+      },
+      "token": "original:d1bf6c367c0eb164d842c4abeaabe9881ad7a7aa7cb1888cd61ef5072f6cccf2"
+    }
+  ],
+  "approvals": [],
+  "ledger_summary": [
+    {
+      "checkpoint": 0,
+      "status": "settled",
+      "input_tokens": "808",
+      "output_tokens": "122",
+      "estimated": "519",
+      "completion_status": "complete",
+      "finish_reason": "stop"
+    },
+    {
+      "checkpoint": 1,
+      "status": "settled",
+      "input_tokens": "991",
+      "output_tokens": "169",
+      "estimated": "667",
+      "completion_status": "complete",
+      "finish_reason": "stop"
+    },
+    {
+      "checkpoint": 2,
+      "status": "settled",
+      "input_tokens": "1248",
+      "output_tokens": "179",
+      "estimated": "786",
+      "completion_status": "complete",
+      "finish_reason": "stop"
+    },
+    {
+      "checkpoint": 3,
+      "status": "settled",
+      "input_tokens": "1543",
+      "output_tokens": "165",
+      "estimated": "882",
+      "completion_status": "complete",
+      "finish_reason": "stop"
+    },
+    {
+      "checkpoint": 4,
+      "status": "settled",
+      "input_tokens": "1816",
+      "output_tokens": "201",
+      "estimated": "1048",
+      "completion_status": "complete",
+      "finish_reason": "stop"
+    },
+    {
+      "checkpoint": 5,
+      "status": "settled",
+      "input_tokens": "3176",
+      "output_tokens": "810",
+      "estimated": "2567",
+      "completion_status": "complete",
+      "finish_reason": "stop"
+    }
+  ]
+}
