@@ -27,8 +27,8 @@ export async function scopedFixture(db:Database,config:RuntimeConfig,now=new Dat
   return {task,source,entry:id,policy,policies,session};
 }
 export async function parentBundle(db:Database,task:Task){
-  const hashes=[];
-  for(const role of ROLES){const text="Proposed approach: inspect one exact source. "+role;hashes.push(hash(text));await db.query("INSERT INTO outputs(id,task_id,role,text,hash) VALUES($1,$2,$3,$4,$5)",[randomUUID(),task.id,role,text,hash(text)]);}
+  for(const role of ROLES){const text="Proposed approach: inspect one exact source. "+role;await db.query("INSERT INTO outputs(id,task_id,role,text,hash) VALUES($1,$2,$3,$4,$5)",[randomUUID(),task.id,role,text,hash(text)]);}
   await db.query("UPDATE tasks SET status='review',checkpoint=6 WHERE id=$1",[task.id]);
-  return "original:"+hash(hashes.join('|'));
+  const outputs=await db.query<{hash:string}>("SELECT hash FROM outputs WHERE task_id=$1 ORDER BY created,id",[task.id]);
+  return "original:"+hash(outputs.map(output=>output.hash).join('|'));
 }

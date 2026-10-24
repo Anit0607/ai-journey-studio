@@ -6,7 +6,7 @@ import assert from "node:assert/strict";
 import {randomUUID} from "node:crypto";
 import {embedded,type Database} from "../lib/db";
 import {Store} from "../lib/store";
-import {type RuntimeConfig,type Task} from "../lib/domain";
+import {type RuntimeConfig,type Task,ROLES,hash} from "../lib/domain";
 import {step} from "../lib/workflow";
 import {queueAgentRevision} from "../lib/agent-revisions";
 import {SCOPED_REVISION_REQUEST,HOSTED_CANDIDATE_LIMIT,HostedCalendarScanExhausted} from "../lib/hosted-calendar-policy";
@@ -26,6 +26,33 @@ test("hosted policy excludes unrelated queued and expired manual rows before rec
  assert.deepEqual(await db.query("SELECT * FROM tasks WHERE id=ANY($1::uuid[]) ORDER BY id",[[queued.id,expired.id]]),before);assert.deepEqual(await db.query("SELECT * FROM events WHERE task_id=ANY($1::uuid[]) ORDER BY id",[[queued.id,expired.id]]),events);
  // Unscoped local behavior still claims the manual queue normally.
  assert.equal((await store.claim())?.id,queued.id);
+}));
+
+test("parent fixture token uses persisted created,id order under tied timestamps and rejects insertion-order tokens",()=>fixture(async(db,store,c,{task})=>{
+ const insertedHashes:string[]=[],timestamp="2026-10-24T00:00:00.000Z";
+ const deterministic:Database={...db,query:async<T>(sql:string,params:unknown[]=[])=>{
+   if(sql==="INSERT INTO outputs(id,task_id,role,text,hash) VALUES($1,$2,$3,$4,$5)"){
+     const id="00000000-0000-4000-8000-"+(ROLES.length-insertedHashes.length).toString(16).padStart(12,"0");
+     insertedHashes.push(String(params[4]));
+     return db.query<T>("INSERT INTO outputs(id,task_id,role,text,hash,created) VALUES($1,$2,$3,$4,$5,$6)",[id,...params.slice(1),timestamp]);
+   }
+   return db.query<T>(sql,params);
+ }};
+ const token=await parentBundle(deterministic,task);
+ const persisted=await db.query<{role:string;hash:string;created:Date}>("SELECT role,hash,created FROM outputs WHERE task_id=$1 ORDER BY created,id",[task.id]);
+ assert.equal(insertedHashes.length,ROLES.length);
+ assert.deepEqual(persisted.map(output=>output.role),[...ROLES].reverse());
+ assert.equal(new Set(persisted.map(output=>new Date(output.created).toISOString())).size,1);
+ const insertionToken="original:"+hash(insertedHashes.join("|"));
+ assert.equal(token,"original:"+hash(persisted.map(output=>output.hash).join("|")));
+ assert.notEqual(token,insertionToken);
+ for(const stale of [insertionToken,"original:"+hash("wrong persisted bundle")])await assert.rejects(queueAgentRevision(store,c,task.id,stale,"Shorten the supported proposal."),/Stale revision/);
+ assert.equal((await db.query("SELECT id FROM tasks WHERE revision_parent_task_id=$1",[task.id])).length,0);
+ assert.equal((await db.query("SELECT id FROM events WHERE kind=$1",[SCOPED_REVISION_REQUEST])).length,0);
+ const child=await queueAgentRevision(store,c,task.id,token,"Shorten the supported proposal.");
+ assert.equal(child.revision_base_token,token);
+ assert.equal((await db.query("SELECT id FROM events WHERE task_id=$1 AND kind=$2",[child.id,SCOPED_REVISION_REQUEST])).length,1);
+ assert.equal((await db.query("SELECT * FROM ledger")).length,0);
 }));
 
 test("genuine scoped initial and receipted owner revision execute mocked checkpoints",()=>fixture(async(db,store,c,{task})=>{
