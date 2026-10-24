@@ -4,6 +4,7 @@ import {hasInternalReviewMetadata} from "./platform-variants";
 import {assertBundle,bundleQuality,bundleVersion,verifiedSourceEnvelope,SUPPORTED_SENTENCES,type Artifact} from "./grounding";
 import {CAPSULE,hash} from "./domain";
 import {assertSourcePrivacy} from "./sources";
+import {assertArtifactPrivacy} from "./artifact-privacy";
 import type {Connection} from "./db";
 
 export const EVIDENCE_POLICY="evidence-review-v2";
@@ -148,7 +149,7 @@ export function validateEvidence(finding:Finding,source:string,sourceSpan:Span,q
  if(!words.some(x=>quote.toLowerCase().includes(x)))throw Error("Select relevant source evidence");
 }
 export function evidenceQuality(bundle:Artifact[],source:EvidenceSource,decisions:Decision[]=[],policy?:PlatformPolicy){
- let integrity=true;try{assertBundle(bundle);assertSourcePrivacy(source.text);if(hash(source.text)!==source.hash||source.cleared===false||source.revoked_at)throw Error();for(const x of bundle)assertSourcePrivacy(x.text);}catch{integrity=false;}
+ let integrity=true;try{assertBundle(bundle);assertSourcePrivacy(source.text);if(hash(source.text)!==source.hash||source.cleared===false||source.revoked_at)throw Error();for(const x of bundle)assertArtifactPrivacy(x.text);}catch{integrity=false;}
  const binding=evidenceBinding(bundle,source,policy),findings=evidenceFindings(bundle,source.text,source.reported_date,policy),latest=new Map<string,Decision>();
  for(const row of decisions)if(row.binding===binding&&row.policy_version===EVIDENCE_POLICY&&row.actor==='owner')latest.set(row.finding_id,row);
  const accepted:Decision[]=[];
@@ -184,7 +185,7 @@ function citationSuggestions(data:Record<string,unknown>,bundle:Artifact[],sourc
  const suggestions=data.evidence.map((value:unknown)=>{
   if(!value||typeof value!=='object'||Array.isArray(value))throw Error();const x=value as Record<string,unknown>;
   if(Object.keys(x).some(key=>!['claim_id','source_ids','verdict','reason'].includes(key))||typeof x.claim_id!=='string'||seen.has(x.claim_id)||!Array.isArray(x.source_ids)||x.source_ids.length>8||new Set(x.source_ids).size!==x.source_ids.length||typeof x.verdict!=='string'||!['wording_review','unsupported'].includes(x.verdict)||typeof x.reason!=='string'||!x.reason.trim()||x.reason.length>600)throw Error();
-  seen.add(x.claim_id);assertSourcePrivacy(x.reason);
+  seen.add(x.claim_id);assertArtifactPrivacy(x.reason);
   const artifact=index.artifacts.find(a=>a.sentences.some(sentence=>sentence.id===x.claim_id));const claim=artifact?.sentences.find(sentence=>sentence.id===x.claim_id);if(!artifact||!claim)throw Error();
   const base={role:artifact.role,artifact_hash:artifact.artifact_hash,start:claim.start,end:claim.end,claim:claim.text,verdict:x.verdict,reason:x.reason};
   if(x.verdict==='unsupported'){

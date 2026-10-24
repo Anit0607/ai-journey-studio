@@ -8,7 +8,8 @@ import {hash,istMonth,type Output,type Source,type Task} from "./domain";
 import {assertBundle,bundleVersion,type Artifact} from "./grounding";
 import {assertNoPendingAgentRevision} from "./agent-revisions";
 import {platformVariants,REQUIRED_PLATFORMS,type Platform} from "./platform-variants";
-import {assertSourcePrivacy,sourceEligible} from "./sources";
+import {sourceEligible} from "./sources";
+import {assertArtifactPrivacy} from "./artifact-privacy";
 import {xPostTextValidation} from "./x-text";
 
 export class PublicationValidationError extends Error{}
@@ -39,7 +40,7 @@ function normalizedPayload(platform:Platform,payload:PublishingPayload):Publishi
   if(!payload||typeof payload!=="object"||Array.isArray(payload))throw new PublicationValidationError("Publication payload required");
   objectKeys(payload,["text","media"]);
   if(typeof payload.text!=="string"||!payload.text.trim()||/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/.test(payload.text))throw new PublicationValidationError("Invalid publication text");
-  assertSourcePrivacy(payload.text);
+  assertArtifactPrivacy(payload.text);
   if(platform==="X"){
     const {weightedLength,valid}=xPostTextValidation(payload.text);
     if(weightedLength===null)throw new PublicationValidationError("X draft exceeds the app's 4,096-character input safety limit; shorten URLs or revise the draft before approval");

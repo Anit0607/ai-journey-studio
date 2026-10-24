@@ -1,6 +1,7 @@
 import type {PlatformPolicy} from "./platform-policy";
 import {platformVariants} from "./platform-variants";
 import {CAPSULE,ROLES,hash} from "./domain";
+import {attributedCommitSummary} from "./drafting-contract";
 export type Artifact={role:string;text:string;hash:string};
 export const SUPPORTED_SENTENCES=["I am a non-coder","I build and direct AI agents","I retain final approval","I use Codex and agents for implementation","I learn by doing","I want to share practical agent-building methods and honest lessons"];
 export const GROUNDING_RULES="The cleared note establishes only role, approach and intent, not demonstrated discoveries, outcomes, mistakes or tested methods. Personal statements must stay within these exact supported sentences: "+SUPPORTED_SENTENCES.join("; ")+". Never turn wanting to share into having shared. If evidence is insufficient, say Evidence needed and ask for a concrete cleared note. Write for existing ChatGPT/Codex users. Anchor personal stories in specific cleared events and user-documented feelings; ask for missing emotional context, never invent it or replace it with a generic tutorial. Generic suggestions must be labeled Proposed approach, not Anit's lived lesson. Prior artifacts are not independent evidence. Critic must include Unsupported claims:, Evidence needed:, and Proposed advice: sections; quote and flag every unsupported personal experience claim, even if an earlier agent endorsed it. User approval is not factual verification.";
@@ -46,20 +47,43 @@ const REVIEW_BOUNDARY=' Writer and Platform Adapter return public prose only. Ke
 
 const externalEvidence=(source:string)=>/^Attributed (?:GitHub|YouTube) evidence;/.test(source);
 export function groundingRules(source:string){
-  if(externalEvidence(source))return REVIEW_BOUNDARY+ "This is attributed external evidence, not evidence of the owner\'s lived experience. Preserve repository/author or channel attribution. Describe external claims in third person; never adopt first-person claims, achievements or feelings as the owner\'s. If owner experience is needed, ask for a separate owner-written source. "+GROUNDING_RULES;
+  if(externalEvidence(source))return REVIEW_BOUNDARY+ " This is attributed external evidence, not evidence of the owner's lived experience. Preserve repository/author or channel attribution. Describe external claims in third person; never adopt first-person claims, achievements or feelings as the owner's. Use only the exact supplied source and its reported date; no personal profile, prior artifact or editing feedback is independent evidence. Do not infer achievements, lessons, intentions, feelings, implementation success or tested outcomes. Keep reported claims distinct from demonstrated behavior. If owner experience is needed, ask for a separate owner-written source. Faithful paraphrases require owner comparison; never label them exact quotations. Critic must include Unsupported claims:, Evidence needed:, and Proposed advice: sections and flag unsupported claims. Every draft requires human factual review; approval never authorizes publishing.";
   if(source===CAPSULE)return GROUNDING_RULES+REVIEW_BOUNDARY;
   return REVIEW_BOUNDARY+" Use only the exact owner-cleared source as factual evidence. Faithful paraphrases are allowed, preserving source qualification, negation, timing and attribution. The owner reviews every uncertain claim against exact source passages. Never add certainty or describe paraphrases as exact quotations. Do not infer achievements, discoveries, mistakes, lessons, metrics or feelings. A request for a different tone is not new evidence. If a detail is missing, say Evidence needed. Generic suggestions must be labeled Proposed approach. Prior artifacts and revision feedback are not independent evidence. Critic must include Unsupported claims:, Evidence needed:, and Proposed advice: sections; quote and flag unsupported personal claims. Every draft requires human factual review; approval never authorizes publishing.";
 }
+/** Narrow checks for title-only GitHub evidence, not general semantic verification. */
+function commitInference(line:string):boolean{
+  return /\b(?:this(?:\s+(?:commit|addition|change|update))?|the\s+(?:commit|addition|change|update))\s+(?:shows?|indicates?|suggests?|demonstrates?|highlights?|proves?|reflects?|confirms?)\b/i.test(line)
+    || /^(?:the|this|a)\s+(?:feature|workflow|system|implementation|addition|change|execution)\s+(?:now\s+)?(?:restricts?|bounds?|enforces?|prevents?|protects?|ensures?|guarantees?|works?|allows?|supports?|enhances?|improves?)\b/i.test(line)
+    || /^(?:the|this)\s+(?:feature|workflow|system|implementation|addition|change|execution)\s+(?:is|was|has been)\s+(?:successfully\s+)?(?:tested|verified|deployed|implemented|operational)\b/i.test(line)
+    || /^Scope:\s*(?:restricting|bounding|enforcing|preventing|protecting|ensuring|enhancing|improving)\b/i.test(line);
+}
+function nonVerbatimLines(text:string,source:string):string[]{
+  const exactLines=new Set(source.split('\n').map(line=>line.trim())),bad:string[]=[];let active=false;
+  for(const raw of text.split('\n')){
+    const line=raw.trim();
+    if(/^(?:#{1,6}\s*)?(?:\*\*)?Verbatim evidence:?(?:\*\*)?$/i.test(line)){active=true;continue;}
+    if(!active)continue;
+    if(!line)continue;
+    if(/^(?:(?:[-*_]\s*){3,}|#{1,6}\s+.+|(?:\*\*)?[A-Za-z][A-Za-z ]{0,50}:(?:\*\*)?)$/.test(line)){active=false;continue;}
+    const quoted=line.replace(/^[-*+>]\s+/, '').replace(/\*\*/g,'');
+    if(!exactLines.has(quoted))bad.push(quoted);
+  }
+  return bad;
+}
 export function bundleQuality(bundle:Artifact[],source:string,reportedDate?:string,policy?:PlatformPolicy){
   const flags:GroundingFlag[]=[];
+  const commitSummary=attributedCommitSummary(source);
   if(!source.trim())flags.push({role:"Source",claim:"Source missing",category:"structure",reason:"Exact cleared evidence required"});
   const adapter=bundle.find(item=>item.role==="Platform Adapter");
   if(adapter){const variants=platformVariants(adapter,policy);if(!variants.complete)flags.push({role:"Platform Adapter",claim:"Incomplete platform variants",category:"structure",reason:variants.reason||"Separate platform drafts required"});}
   for(const artifact of bundle.filter(item=>item.role!=="Critic")){
+    if(commitSummary)for(const claim of nonVerbatimLines(artifact.text,source))flags.push({role:artifact.role,claim:claim.slice(0,500),reason:"Text labeled Verbatim evidence must copy exact source lines; correct the label or quote"});
     for(const line of claimLines(artifact,source,reportedDate)){
       const personal=/\b(?:I\b|I[’'](?:ve|m)|my\b|Anit\b|he\s+(?:found|discovered|learned|shares))/i.test(line);
       const clean=comparable(line);
       const directQuote=clean.length>=10&&sentences(source).some(sentence=>comparable(sentence)===clean);
+      if(commitSummary&&!directQuote&&commitInference(line)&&!flags.some(flag=>flag.role===artifact.role&&flag.claim===line.slice(0,500)))flags.push({role:artifact.role,claim:line.slice(0,500),reason:"Commit-summary evidence establishes a recorded title, not inferred learning, intent, benefits or working capability"});
       // Conservative: the short capsule supports only six personal assertions.
       if(personal&&(externalEvidence(source)||(!directQuote&&!(source===CAPSULE&&SUPPORTED_SENTENCES.some(sentence=>clean===sentence.toLowerCase())))))
         flags.push({role:artifact.role,claim:line.slice(0,500),reason:"Personal claim needs specific cleared evidence; use a supported sentence or remove it"});

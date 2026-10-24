@@ -11,6 +11,7 @@ import type {Connection,Database} from "./db";
 import {CAP,BUFFER,WARNING,ROLES,hash,istMonth,sourceAllowed,type Pricing,type Source,type Task,type Output} from "./domain";
 import {assertNoPendingAgentRevision,finalizeAgentRevision} from "./agent-revisions";
 import {assertSourcePrivacy,sourceEligible} from "./sources";
+import {assertArtifactPrivacy} from "./artifact-privacy";
 import type {Completion,Report} from "./providers";
 import {assertBundle,bundleVersion,type Artifact} from "./grounding";
 import {assertOwnerDraftScope,OWNER_DRAFT_STARTED,OWNER_DRAFT_MAX_RESERVED,OWNER_DRAFT_MAX_CALLS,type OwnerDraftScope} from "./owner-draft-policy";
@@ -228,7 +229,7 @@ export class Store{
     if(typeof note!=="string"||!note.trim()||note.length>1000)throw Error("Revision note required");
     if(edit&&(!ROLES.includes(edit.role as typeof ROLES[number])||typeof edit.text!=="string"||!edit.text.trim()||Buffer.byteLength(edit.text)>32000))throw Error("Invalid revision text");
     assertSourcePrivacy(note);
-    if(edit)assertSourcePrivacy(edit.text);
+    if(edit)assertArtifactPrivacy(edit.text);
     return this.db.transaction(async tx=>{
       const context=await this.revisionContext(tx,id,expected);
       if(edit&&context.bundle.find(item=>item.role===edit.role)?.text===edit.text)throw Error("No content change");

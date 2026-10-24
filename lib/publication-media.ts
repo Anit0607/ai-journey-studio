@@ -9,7 +9,8 @@ import {hash,type Source,type Output,type Task} from "./domain";
 import {assertNoPendingAgentRevision} from "./agent-revisions";
 import {assertBundle,bundleVersion,type Artifact} from "./grounding";
 import {platformVariants} from "./platform-variants";
-import {assertSourcePrivacy,ownerSourceEligible} from "./sources";
+import {ownerSourceEligible} from "./sources";
+import {assertArtifactPrivacy} from "./artifact-privacy";
 
 export const MEDIA_RENDERER_VERSION="ai-journey-instagram-text-v1";
 export const PUBLIC_MEDIA_ACKNOWLEDGEMENT="I approve making this exact owner-reviewed JPEG publicly accessible at the displayed Vercel Blob origin for Instagram delivery. Anyone with its URL may access or copy it. This public-media consent does not authorize publishing the Instagram post.";
@@ -56,7 +57,7 @@ async function textLayer(text:string,size:number,color:string,width?:number){
 /** Deterministic local rasterization of exact approved prose, never image generation or upload. */
 export async function renderInstagramCard(caption:string):Promise<{bytes:Buffer;sha256:string;mime_type:"image/jpeg";width:number;height:number}>{
   if(typeof caption!=="string"||!caption.trim()||caption.length>2200||Buffer.byteLength(caption)>8800||/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f\u00ad\u200b-\u200f\u202a-\u202e\u2060-\u206f\ufeff]/.test(caption)||(caption.match(/\n/g)||[]).length>40)throw new MediaValidationError("Instagram graphic needs nonempty approved text within 2,200 characters and 40 line breaks");
-  assertSourcePrivacy(caption);
+  assertArtifactPrivacy(caption);
   const font=await readFile(FONT_PATH);if(digest(font)!==FONT_HASH)throw new MediaValidationError("Pinned media font failed verification");
   if([...caption].some(c=>!fontSupports(font,c.codePointAt(0)!)))throw new MediaValidationError("The approved caption contains characters unsupported by the graphic font; revise and approve a supported caption");
   let body:Awaited<ReturnType<typeof textLayer>>|undefined;
@@ -92,7 +93,7 @@ async function approvedContext(tx:Connection,taskId:string,reviewToken:string):P
   if(!activePlatforms(platformPolicy).includes("Instagram"))throw new MediaValidationError("Instagram is not active for this task");
   const variants=platformVariants(bundle.find(item=>item.role==="Platform Adapter"),platformPolicy),caption=variants.variants.find(item=>item.platform==="Instagram")?.text;
   if(!variants.complete||!caption)throw new MediaValidationError("An approved Instagram variant is required");
-  assertSourcePrivacy(caption);return {source,caption,review_token:reviewToken};
+  assertArtifactPrivacy(caption);return {source,caption,review_token:reviewToken};
 }
 function verifiedRow(row:MediaArtifact,context:Context):MediaArtifact{
   if(row.source_id!==context.source.id||row.source_hash!==context.source.hash||row.source_clearance_id!==context.source.clearance_id||row.review_token!==context.review_token||row.caption!==context.caption||row.caption_hash!==hash(context.caption))throw new MediaValidationError("Media provenance changed; render and review a new artifact");
