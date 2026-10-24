@@ -1,3 +1,4 @@
+import {calendarGuard,scopedCalendarContext,revisionReceipt,SCOPED_REVISION_REQUEST} from "./hosted-calendar-policy";
 import {scopedTaskMatches} from "./scoped-source-proof";
 import {resolveScopedSource} from "./github-source-policy";
 import {randomUUID} from "node:crypto";
@@ -36,8 +37,13 @@ export async function queueAgentRevision(store:Store,config:RuntimeConfig,taskId
   validateFeedback(feedback);
   if(config.owner_cleared_sources_authorized!==true)throw Error("Standing OpenAI draft and revision permission required");
   return store.db.transaction(async tx=>{
+    // Calendar guard must precede revisionContext's parent -> source -> policy locks.
+    const guard=await calendarGuard(tx,taskId);
     const context=await store.revisionContext(tx,taskId,expectedToken);
     if(isAgentRevision(context.task))throw Error("Revise the parent content task instead");
+    const scoped=context.task.content_brief?.source_policy;
+    const calendar=scoped&&guard&&guard.rootId===context.task.id?await scopedCalendarContext(tx,taskId,config,guard,new Date(),false):undefined;
+    if(scoped&&!calendar)throw Error("Scoped calendar revision binding changed");
     if(!sourceAuthorized(config,context.source,"openai"))throw Error("Source not authorized for OpenAI revision");
     for(const item of context.bundle)assertArtifactPrivacy(item.text);
     const origin="revision:"+hash(taskId+"|"+expectedToken),note=feedback.trim();
@@ -50,6 +56,7 @@ export async function queueAgentRevision(store:Store,config:RuntimeConfig,taskId
     await assertNoPendingAgentRevision(tx,taskId);
     const id=randomUUID();
     const child=(await tx.query<AgentRevisionTask>("INSERT INTO tasks(id,source_id,source_hash,status,origin_key,revision_parent_task_id,revision_base_token,revision_note,content_brief) VALUES($1,$2,$3,'queued',$4,$5,$6,$7,$8) RETURNING *",[id,context.source.id,context.source.hash,origin,taskId,expectedToken,note,JSON.stringify((context.task as AgentRevisionTask).content_brief||{})]))[0];
+    if(calendar)await store.event(tx,id,SCOPED_REVISION_REQUEST,JSON.stringify(revisionReceipt(calendar,child)));
     await store.event(tx,id,"agent_revision_queued","Regenerate all six artifacts from the exact source and feedback; parent "+taskId+"; fresh approval required");
     await store.event(tx,taskId,"agent_revision_requested","Child "+id+" queued for exact base "+expectedToken+"; historical approvals preserved");
     return child;

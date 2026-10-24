@@ -1,3 +1,4 @@
+import {HOSTED_SCAN_EXHAUSTED} from "./hosted-calendar-policy";
 import {randomUUID} from "node:crypto";
 import {Calendar} from "./calendar";
 import {CAP,BUFFER,configReady,istMonth,type RuntimeConfig} from "./domain";
@@ -11,9 +12,9 @@ export const HOSTED_STEP_HEADROOM_MS=80_000;
 // Longer than the platform's 300-second hard limit. Never extended by a heartbeat.
 export const HOSTED_LEASE_MS=360_000;
 type BatchStatus="idle"|"blocked"|"deadline"|"max_steps"|"failed"|"interrupted";
-type Reason="postgres_required"|"runtime_not_ready"|"generation_disabled"|"unresolved_accounting"|"budget_exhausted"|"daily_already_attempted"|"another_batch_running"|"stale_batch"|"lease_lost"|"cancelled"|"checkpoint_blocked"|"runtime_failure"|"run_budget"|"step_limit";
+type Reason="postgres_required"|"runtime_not_ready"|"generation_disabled"|"unresolved_accounting"|"budget_exhausted"|"daily_already_attempted"|"another_batch_running"|"stale_batch"|"lease_lost"|"cancelled"|"checkpoint_blocked"|"scoped_scan_exhausted"|"runtime_failure"|"run_budget"|"step_limit";
 export type HostedBatchResult={status:BatchStatus|"duplicate";day:string;steps:number;reason?:Reason};
-type StepResult={status:string;task?:string};
+type StepResult={status:string;task?:string;reason?:string};
 export type HostedBatchOptions={
   /** The route supplies its full hosted-readiness gate. Defaults to the stricter local live gate. */
   isReady?:(config:RuntimeConfig,now:Date)=>boolean|Promise<boolean>;
@@ -23,6 +24,7 @@ export type HostedBatchOptions={
   now?:()=>Date;
   step?:(store:Store,config:RuntimeConfig)=>Promise<StepResult>;
   provider?:typeof providerCall;
+  refill?:(now:Date)=>Promise<unknown>;
   dispatch?:(config:RuntimeConfig,enabled:boolean,now:Date)=>Promise<unknown>;
   /** Stops subsequent checkpoints; never abandons a possibly billable in-flight completion. */
   signal?:AbortSignal;
@@ -104,8 +106,10 @@ export async function runHostedBatch(store:Store,config:RuntimeConfig,options:Ho
     if(!enoughTime())return await finish("deadline","run_budget");
     let gate=await persistedGate(date);
     if(gate)return await finish("blocked",gate);
+    // Refill owns a separate settings-first transaction after runtime/accounting gates.
+    await (options.refill||((now)=>new Calendar(store.db,120).refillHorizon(now)))(date);
     // Dispatch is idempotent and queues only; it never invokes a provider or reserves spending.
-    await (options.dispatch||((c,enabled,now)=>new Calendar(store.db,120).dispatchDue(c,enabled,now)))(current,true,date);
+    await (options.dispatch||((c,enabled,now)=>new Calendar(store.db,120).dispatchDue(c,enabled,now,{hostedScopedOnly:true})))(current,true,date);
     while(attempts<HOSTED_MAX_STEPS){
       if(options.signal?.aborted)return await finish("blocked","cancelled");
       current=await read();date=time();
@@ -124,7 +128,7 @@ export async function runHostedBatch(store:Store,config:RuntimeConfig,options:Ho
       time();
       if(!enoughTime())return await finish("deadline","run_budget");
       if(options.signal?.aborted)return await finish("blocked","cancelled");
-      const outcome=await (options.step||((s,c)=>workflowStep(s,c,options.provider||providerCall,true,{ownerClearedOnly:true,minimumGenerationLeadHours:120})))(store,current);
+      const outcome=await (options.step||((s,c)=>workflowStep(s,c,options.provider||providerCall,true,{hostedScopedCalendar:true,ownerClearedOnly:true,minimumGenerationLeadHours:120})))(store,current);
       if(outcome.status==="step_saved")steps++;
       if(!await touch(time()))return await finish("interrupted","lease_lost");
       if(outcome.task){
@@ -132,7 +136,7 @@ export async function runHostedBatch(store:Store,config:RuntimeConfig,options:Ho
         if(task?.status==="cancelled")return await finish("blocked","cancelled");
       }
       if(outcome.status==="idle")return await finish("idle");
-      if(outcome.status!=="step_saved")return await finish("blocked","checkpoint_blocked");
+      if(outcome.status!=="step_saved")return await finish("blocked",outcome.reason===HOSTED_SCAN_EXHAUSTED?"scoped_scan_exhausted":"checkpoint_blocked");
     }
     return await finish("max_steps","step_limit");
   }catch{

@@ -1,3 +1,4 @@
+import {previewApprovalPlan,approveApprovalPlan} from "../../../../lib/approval-plan";
 import {runOwnerDraft,ownerDraftSnapshot,validOwnerDraftRequest} from "../../../../lib/owner-draft";
 import {renderApprovedInstagram,getPrivateMedia,approvePublicMedia,safeMediaError} from "../../../../lib/publication-media";
 import {integrationConfig} from "../../../../lib/integration-config";
@@ -48,15 +49,17 @@ export async function GET(request:Request,context:Context){
     if(state.pricing_blocked)blockers.push("Unexpected provider billing tier requires reconciliation");
     const enabled=liveReady(c)&&(!hostedEnvironment()||hostedCronReady(c))&&!state.pricing_blocked;
     const hosted=hostedEnvironment()?{mode:"vercel-hobby",daily_batches:await store.db.query("SELECT day,status,attempts,steps,reason,started_at,heartbeat,finished_at FROM hosted_batches ORDER BY day DESC LIMIT 14"),notice:"One bounded daily batch, with up to an hour of scheduling variation. Backlog or slow calls may miss a review deadline; nothing is published automatically."}:null;
-    return response({...state,owner_draft:await ownerDraftSnapshot(store.db,c),integrations:await (await createIntegrations(store.db)).snapshot(),hosted,calendar:await new Calendar(store.db,hostedEnvironment()?120:49).snapshot(state,c,enabled),blockers,live_enabled:enabled,source_approved:sourceApproved,owner_cleared_sources_authorized:c.owner_cleared_sources_authorized===true,proposed_source:CAPSULE});
+    const integrations=await createIntegrations(store.db);
+    const approval_plans=await Promise.all(state.reviews.filter((review:any)=>state.tasks.some((task:any)=>task.id===review.task_id&&task.checkpoint===6&&["review","approved"].includes(task.status))).map(async(review:any)=>{try{return {task_id:review.task_id,plan:await previewApprovalPlan(store.db,integrations.publishing.runtime,review.task_id,review.token)};}catch(error){return {task_id:review.task_id,plan:null,reason:safePublicationError(error)||"Current source or review is not eligible; refresh and review its gates"};}}));
+    return response({...state,approval_plans,owner_draft:await ownerDraftSnapshot(store.db,c),integrations:await integrations.snapshot(),hosted,calendar:await new Calendar(store.db,hostedEnvironment()?120:49).snapshot(state,c,enabled),blockers,live_enabled:enabled,source_approved:sourceApproved,owner_cleared_sources_authorized:c.owner_cleared_sources_authorized===true,proposed_source:CAPSULE});
   }catch{return response({error:"Relational database unavailable. Configure an approved PostgreSQL connection or use the laptop-only embedded option."},503);}
 }
 export async function POST(request:Request,context:Context){
   const {action}=await context.params;
-  // A local worker bearer is not an owner action-time publication confirmation.
-  if(!await (["publication-publish","owner-draft-run"].includes(action)?passwordOwnerAuthenticated(request):ownerApiAuthenticated(request)))return response({error:"Private access required"},401);
+  // Worker execution credentials cannot grant owner source, evidence, content or publication consent.
+  if(!await (["publication-publish","owner-draft-run","approval-plan-approve","source-clear","evidence-review","approve","approve-revision","publication-approve","publication-media-approve","agent-revise"].includes(action)?passwordOwnerAuthenticated(request):ownerApiAuthenticated(request)))return response({error:"Private access required"},401);
   if(!allowedOrigin(request))return response({error:"Origin rejected"},403);
-  if(!["owner-draft-run","publication-media-stage","publication-media-approve","integration-sync","integration-import","publication-enqueue","publication-approve","publication-cancel","publication-revise","publication-publish","metrics-save","money-add","money-void","coverage-confirm","source-stage","source-clear","source-revoke","agent-revise","calendar-dispatch","source","run","approve","cancel","retry","step","evidence-review","request-changes","revise","approve-revision","calendar-configure","calendar-plan","calendar-link","calendar-prepare","calendar-recover"].includes(action))return response({error:"Unknown action"},404);
+  if(!["approval-plan-approve","owner-draft-run","publication-media-stage","publication-media-approve","integration-sync","integration-import","publication-enqueue","publication-approve","publication-cancel","publication-revise","publication-publish","metrics-save","money-add","money-void","coverage-confirm","source-stage","source-clear","source-revoke","agent-revise","calendar-dispatch","source","run","approve","cancel","retry","step","evidence-review","request-changes","revise","approve-revision","calendar-configure","calendar-plan","calendar-link","calendar-prepare","calendar-recover"].includes(action))return response({error:"Unknown action"},404);
   if(hostedEnvironment()&&action==="step")return response({error:"Hosted checkpoints run only through the protected daily scheduler"},403);
   const limit=action==="evidence-review"?12000:action==="integration-import"?1_050_000:action==="publication-enqueue"||action==="publication-revise"?40000:["revise","source-stage"].includes(action)?40000:4096;
   if(Number(request.headers.get("content-length")||0)>limit)return response({error:"Request too large"},413);
@@ -64,6 +67,7 @@ export async function POST(request:Request,context:Context){
     const raw=await readBody(request,limit);
     const body=JSON.parse(raw),store=new Store(await database()),c=runtimeConfig();
     let value:unknown;
+    if(action==="approval-plan-approve")value=await approveApprovalPlan(store.db,(await createIntegrations(store.db)).publishing.runtime,body);
     if(action==="owner-draft-run"){
       if(!validOwnerDraftRequest(body))return response({error:"Exact owner draft acknowledgement required"},400);
       const result=await runOwnerDraft(store.db,body,{readConfig:runtimeConfig,signal:request.signal});

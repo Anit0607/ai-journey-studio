@@ -1,3 +1,4 @@
+import {admittedHostedTask,HostedCalendarScanExhausted,HOSTED_SCAN_EXHAUSTED} from "./hosted-calendar-policy";
 import {assertArtifactPrivacy} from './artifact-privacy';
 import {resolveScopedSource} from "./github-source-policy";
 import {scopedTaskMatches} from "./scoped-source-proof";
@@ -14,10 +15,12 @@ import {providerCall,ProviderFailure,AccountingFailure,TerminationFailure,liveRe
 import {groundingRules,bundleQuality} from "./grounding";
 import type {OwnerDraftScope} from "./owner-draft-policy";
 const goals=["Extract factual claims and provenance.","Find an honest learning-story angle supported by the source.","Produce a content brief for practical agent users.","Write a draft with no unsupported claims.","Produce LinkedIn, X and Instagram variants.","Critique factual support and privacy for each exact variant; flag unsupported claims. "+CRITIC_CONTRACT];
-export async function step(store:Store,c:RuntimeConfig,call=providerCall,enabled=liveReady(c),policy:{ownerClearedOnly?:boolean;minimumGenerationLeadHours?:number;ownerDraft?:OwnerDraftScope;beforeProvider?:()=>Promise<void>}={}){
+export async function step(store:Store,c:RuntimeConfig,call=providerCall,enabled=liveReady(c),policy:{hostedScopedCalendar?:boolean;ownerClearedOnly?:boolean;minimumGenerationLeadHours?:number;ownerDraft?:OwnerDraftScope;beforeProvider?:()=>Promise<void>}={}){
   await store.heartbeat(enabled);
   if(!enabled)return {status:"blocked",reason:"Consent, credentials, current pricing or safety verification pending"};
-  const task=await store.claim(policy.ownerDraft);
+  let task:Task|null;
+  try{task=await store.claim(policy.ownerDraft,policy.hostedScopedCalendar?{config:c}:undefined);}
+  catch(error){if(error instanceof HostedCalendarScanExhausted)return {status:"blocked",reason:HOSTED_SCAN_EXHAUSTED};throw error;}
   if(!task)return {status:"idle"};
   let reservation:string|null=null;
   try{
@@ -47,7 +50,7 @@ export async function step(store:Store,c:RuntimeConfig,call=providerCall,enabled
         await policy.beforeProvider?.();
         if(task.content_brief?.source_policy){
           const admitted=await store.db.transaction(async tx=>{
-            const current=(await tx.query<Task>("SELECT * FROM tasks WHERE id=$1 FOR UPDATE",[task.id]))[0];
+            const current=policy.hostedScopedCalendar?await admittedHostedTask(tx,task.id,c):(await tx.query<Task>("SELECT * FROM tasks WHERE id=$1 FOR UPDATE",[task.id]))[0];
             if(!current||current.status!=="running"||current.lease_token!==task.lease_token||!current.lease_until||new Date(current.lease_until)<=new Date()||current.checkpoint!==task.checkpoint||current.source_id!==task.source_id||current.source_hash!==task.source_hash||JSON.stringify(current.content_brief)!==JSON.stringify(task.content_brief))return false;
             const pending=(await tx.query<{status:string;provider:string;checkpoint:number}>("SELECT status,provider,checkpoint FROM ledger WHERE id=$1 AND task_id=$2 FOR UPDATE",[reservation,task.id]))[0];
             if(!pending||pending.status!=="reserved"||pending.provider!==provider||pending.checkpoint!==task.checkpoint)return false;
