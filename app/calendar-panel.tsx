@@ -2,20 +2,21 @@
 import {useState,type CSSProperties} from "react";
 import {ACTIVE_PLATFORMS as PLATFORMS,BENCHMARK_PRESET} from "../lib/schedule-presets";
 import CalendarRecoveryForm from "./calendar-recovery-form";
+import CalendarNormalizationForm from "./calendar-normalization-form";
 import type {PlatformTimes} from "../lib/calendar";
 const linkedInTimes=(times:PlatformTimes):PlatformTimes=>({LinkedIn:{...times.LinkedIn}});
 const weekdays=["Sunday","Monday","Tuesday","Wednesday","Thursday","Friday","Saturday"];
 const field:CSSProperties={display:"block",margin:"8px 0 16px",padding:"10px",background:"#0d141c",color:"#dce8ed",border:"1px solid #30404b"};
 const displayDate=(value:string|null)=>value?new Date(value).toLocaleString("en-IN",{timeZone:"Asia/Kolkata",dateStyle:"medium",timeStyle:"short"})+" IST":"Not chosen";
 function SourceSelectionStatus({selection}:{selection:any}){
-  return <aside aria-label="Calendar source selection">
+  return <div role="region" aria-label="Calendar source selection">
     <h3>Source selection</h3>
     <p>Link an exact cleared source manually, or use an optional active bounded GitHub policy for unlinked, due LinkedIn plans. Automatic selection never replaces existing links and does not apply to legacy plans.</p>
     <p role="status">{!selection?"Automatic source selection status unavailable; do not assume it is enabled.":selection.enabled===true?"Automatic source selection: an active policy matches the current runtime scope.":"Automatic source selection OFF: no matching active policy."}</p>
     {selection?.enabled===true&&<p>Eligible unused GitHub evidence in this snapshot: {selection.eligible_candidates}.</p>}
     {selection?.notice&&<p role="status">{selection.notice}</p>}
     <p className="fine">This snapshot does not reserve evidence or start drafting. Dispatch rechecks source authorization, evidence, timing, budget and runtime. Source policy, GitHub access, paid-generation activation and scheduler setup are separate; this status does not configure them.</p>
-  </aside>;
+  </div>;
 }
 function Entry({entry,sources,tasks,busy,action,minimumLeadHours}:{minimumLeadHours:number;entry:any;sources:any[];tasks:any[];busy:boolean;action:(path:string,body:unknown)=>Promise<void>}){
   const [source,setSource]=useState(entry.source_id||""),[task,setTask]=useState(entry.task_id||"");
@@ -46,6 +47,7 @@ export default function CalendarPanel({calendar,sources,tasks,busy,action}:{cale
     <p><strong>{calendar.configuration_needed?"Configuration needed: choose a start date and required posting hours":"Calendar timing saved"}</strong></p>
     <p>Agents are intended to draft; you review. Manual revision is an optional correction path. Scheduled drafting needs your saved opt-in, valid source authorization through an explicit link or an active bounded GitHub policy, current OpenAI setup and an active approved scheduler. These calendar controls never publish. Every final post still needs your approval before scheduling and publication. {calendar.scheduler}</p>
     <SourceSelectionStatus selection={calendar.automatic_source_selection}/>
+    <CalendarNormalizationForm busy={busy} snapshot={JSON.stringify([settings.updated,calendar.entries.map((entry:any)=>[entry.id,entry.updated,entry.source_id,entry.task_id,entry.job])])}/>
     <label>Start date<input style={field} aria-label="Calendar start date" type="date" value={date} onChange={event=>setDate(event.target.value)}/></label>
     <label>Timing mode<select style={field} aria-label="Timing mode" value={mode} onChange={event=>setMode(event.target.value as "shared"|"per_platform")}><option value="per_platform">LinkedIn weekday hours</option><option value="shared">Same LinkedIn hour each day</option></select></label>
     {mode==="shared"&&<label>Intended posting time (IST)<input style={field} aria-label="Posting time IST" type="time" value={time} onChange={event=>setTime(event.target.value)}/></label>}
