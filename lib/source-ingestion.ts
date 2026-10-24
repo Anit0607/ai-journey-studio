@@ -1,4 +1,4 @@
-import {GitHubAppAuthError} from "./github-app-auth";
+import {GitHubAppAuthError,githubAppRepositoryReadAuthorized} from "./github-app-auth";
 import {createHash,randomUUID} from "node:crypto";
 import type {Connection,Database} from "./db";
 import {hash,type Source} from "./domain";
@@ -68,6 +68,7 @@ function sum(into:IngestionCounts,other:IngestionCounts){into.staged+=other.stag
 /** Official read-only metadata adapters with explicit private-repository consent. No model calls, task enqueue, clearance, or publishing. */
 export class SourceIngestion {
   private readonly fetcher:typeof fetch;private readonly env:Record<string,string|undefined>;private readonly now:()=>Date;
+  private readonly appAuthorizedRepositoryResponses=new WeakSet<object>();
   private githubNoteFetches=0;
   private githubReadCounts:GithubReadCounts={repository:0,commit_pages:0,commit_resolution:0,tree_metadata:0,note_contents:0,total:0};
   constructor(readonly db:Database,readonly config:SourceIngestionConfig={},readonly deps:SourceIngestionDependencies={}){this.fetcher=deps.fetch||fetch;this.env=deps.env||process.env;this.now=deps.now||(()=>new Date());}
@@ -127,14 +128,16 @@ export class SourceIngestion {
     const valid=provider==="github"?url.origin==="https://api.github.com"&&url.pathname.startsWith("/repos/"):url.origin==="https://www.googleapis.com"&&url.pathname.startsWith("/youtube/v3/");
     if(!valid||url.username||url.password)throw new IngestionError("invalid_provider_endpoint");
     const headers:Record<string,string>={Accept:"application/json"};
+    let appRepositoryCheck:((value:Obj)=>boolean|null)|undefined;
     if(provider==="github"){
       headers.Accept="application/vnd.github+json";headers["User-Agent"]="AI-Journey-Studio/source-ingestion";headers["X-GitHub-Api-Version"]="2026-03-10";
       // Only reached after enabled + explicit sync authorization + allowlist validation.
       if(this.deps.githubCredential&&this.config.github?.private_read_authorized===true){
         const repository=url.pathname.split('/').slice(2,4).join('/');
-        const token=await this.deps.githubCredential(repository,this.deps.signal);
+        const resolve=this.deps.githubCredential,token=await resolve(repository,this.deps.signal);
         if(typeof token!=="string"||!token.trim()||/[\r\n]/.test(token))throw new IngestionError("github_credential_unavailable");
         headers.Authorization="Bearer "+token;
+        if(url.pathname==="/repos/"+repository)appRepositoryCheck=value=>githubAppRepositoryReadAuthorized(resolve,token,repository,value.id);
       }else if(this.env.STUDIO_SOURCE_GITHUB_TOKEN)headers.Authorization="Bearer "+this.env.STUDIO_SOURCE_GITHUB_TOKEN;
     }else headers["X-Goog-Api-Key"]=this.env.STUDIO_SOURCE_YOUTUBE_API_KEY!;
     let response:Response;
@@ -150,7 +153,16 @@ export class SourceIngestion {
     if(contentLength>maxBytes){await response.body?.cancel();throw new IngestionError("provider_response_too_large");}
     const reader=response.body?.getReader();if(!reader)throw invalid();let total=0;const chunks:Uint8Array[]=[];
     try{while(true){const {value,done}=await reader.read();if(done)break;total+=value.byteLength;if(total>maxBytes){await reader.cancel();throw new IngestionError("provider_response_too_large");}chunks.push(value);}}catch(error){if(error instanceof IngestionError)throw error;throw new IngestionError("provider_network_error");}finally{reader.releaseLock();}
-    try{return JSON.parse(new TextDecoder("utf-8",{fatal:true}).decode(Buffer.concat(chunks)));}catch{throw invalid();}
+    let value:unknown;
+    try{value=JSON.parse(new TextDecoder("utf-8",{fatal:true}).decode(Buffer.concat(chunks)));}catch{throw invalid();}
+    if(appRepositoryCheck){
+      const repo=object(value),authorized=appRepositoryCheck(repo);
+      // Bind the actual request token to the selected numeric ID, even for public
+      // repositories or a misleading pull:true field. Never fall back on mismatch.
+      if(authorized===false)throw new IngestionError("github_app_repository_response_mismatch");
+      if(authorized===true)this.appAuthorizedRepositoryResponses.add(repo);
+    }
+    return value;
   }
   private async persist(provider:SourceProvider,scope:string,lease:string,candidates:ImportedCandidate[],cursor:Obj,rejected:number,rejectedReasons?:Record<string,number>):Promise<IngestionCounts>{
     return this.db.transaction(async tx=>{
@@ -186,7 +198,9 @@ export class SourceIngestion {
     if(typeof repo.full_name!=="string"||repo.full_name.toLowerCase()!==scope)throw new IngestionError("repository_allowlist_mismatch");
     if(repo.private===true&&(repo.visibility==="private"||repo.visibility==="internal")){
       if(this.config.github?.private_read_authorized!==true||(!this.env.STUDIO_SOURCE_GITHUB_TOKEN&&!this.deps.githubCredential))throw new IngestionError("private_repository_authorization_required");
-      if(repo.permissions&&object(repo.permissions).pull!==true)throw new IngestionError("repository_read_permission_required");
+      // Installation-token Contents/Metadata grants are not user-style pull flags.
+      // Only an exact response-bound, resolver-validated App grant replaces that check.
+      if(!this.appAuthorizedRepositoryResponses.has(repo)&&repo.permissions&&object(repo.permissions).pull!==true)throw new IngestionError("repository_read_permission_required");
     }else if(repo.private!==false||repo.visibility!=="public")throw new IngestionError("repository_visibility_unknown");
     const notePaths=this.config.github?.notes?.enabled===true?normalizeGithubNotePaths(this.config.github.notes.paths):[];
     const configured=this.config.github?.since?iso(this.config.github.since):null;
