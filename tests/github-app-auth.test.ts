@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {generateKeyPairSync,verify} from "node:crypto";
-import {createGitHubAppCredentialResolver,githubAppStatus,GITHUB_APP_PRIVATE_KEY_ENV,type GitHubAppConfig} from "../lib/github-app-auth";
+import {createGitHubAppCredentialResolver,githubAppRepositoryReadAuthorized,githubAppStatus,GITHUB_APP_PRIVATE_KEY_ENV,type GitHubAppConfig} from "../lib/github-app-auth";
 
 // Ephemeral, local fixture key only. No test reads process credentials or contacts GitHub.
 const {privateKey,publicKey}=generateKeyPairSync("rsa",{modulusLength:2048});
@@ -199,4 +199,23 @@ test("malformed calendar dates cannot normalize into an apparently valid expiry"
   const date=Date.parse("2026-03-02T03:00:00Z");
   const credential=createGitHubAppCredentialResolver(config(),repositories,{env,now:()=>new Date(date),fetch:async(_input,init)=>init?.method==="POST"?json({...token(date),expires_at:"2026-02-30T04:00:00Z"},201):json(installation())});
   await assert.rejects(credential(repositories[0]),/github_app_invalid_expiry/);
+});
+
+test("repository read proof requires the actual factory, current token, exact name/ID pair and live cache",async()=>{
+  const fake=Object.assign(async()=>token().token,{authorized:true,repositoryIds:new Map([[repositories[0],101]]),permissions:{contents:"read",metadata:"read"}});
+  assert.equal(githubAppRepositoryReadAuthorized(fake,token().token,repositories[0],101),null);
+  const mutable=config(),mutableEnv={...env};let time=start,generation=0;
+  const credential=createGitHubAppCredentialResolver(mutable,repositories,{env:mutableEnv,now:()=>new Date(time),fetch:async(_input,init)=>init?.method==="POST"?json({...token(time),token:'fixture-'+(++generation)},201):json(installation())});
+  assert.equal(githubAppRepositoryReadAuthorized(credential,'fixture-1',repositories[0],101),false);
+  const first=await credential(repositories[0]);
+  assert.equal(githubAppRepositoryReadAuthorized(credential,first,'BuIlDeR/OnE',101),true);
+  for(const [presented,name,id] of [[first,repositories[0],102],[first,repositories[1],101],[first,'builder/other',101],[first,repositories[0],'101'],['wrong',repositories[0],101]] as const)assert.equal(githubAppRepositoryReadAuthorized(credential,presented,name,id),false);
+  time=start+3_540_000;assert.equal(githubAppRepositoryReadAuthorized(credential,first,repositories[0],101),false);
+  const second=await credential(repositories[0]);assert.notEqual(first,second);
+  assert.equal(githubAppRepositoryReadAuthorized(credential,first,repositories[0],101),false);
+  assert.equal(githubAppRepositoryReadAuthorized(credential,second,repositories[0],101),true);
+  time--;assert.equal(githubAppRepositoryReadAuthorized(credential,second,repositories[0],101),false);time++;
+  mutable.authorized=false;assert.equal(githubAppRepositoryReadAuthorized(credential,second,repositories[0],101),false);mutable.authorized=true;
+  mutable.selected_repository_ids=[101,103];assert.equal(githubAppRepositoryReadAuthorized(credential,second,repositories[0],101),false);mutable.selected_repository_ids=[102,101];
+  mutableEnv[GITHUB_APP_PRIVATE_KEY_ENV]=privateKey.export({type:'pkcs1',format:'pem'}).toString();assert.equal(githubAppRepositoryReadAuthorized(credential,second,repositories[0],101),false);
 });

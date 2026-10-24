@@ -11,8 +11,14 @@ const REFRESH_MARGIN_MS=60_000,MAX_TOKEN_LIFETIME_MS=3_600_000;
 const REPOSITORY=/^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})\/[A-Za-z0-9_.-]{1,100}$/;
 type ObjectValue=Record<string,unknown>;
 type Scope={appId:number;installationId:number;repositoryIds:number[];repositories:string[];owner:string};
-type CachedToken={identity:string;token:string;expiresAt:number;observedAt:number};
+type CachedToken={identity:string;token:string;expiresAt:number;observedAt:number;repositoryIds:Map<string,number>};
 type Flight={identity:string;promise:Promise<CachedToken>;controller:AbortController;waiters:number;settled:boolean};
+// Only this factory can register a checker. Config flags or a custom callback are not proof.
+const repositoryReadChecks=new WeakMap<GitHubCredentialResolver,(token:string,repository:string,id:unknown)=>boolean>();
+/** null means a legacy/custom callback; false means a registered App grant no longer matches. */
+export function githubAppRepositoryReadAuthorized(resolver:GitHubCredentialResolver,token:string,repository:string,id:unknown):boolean|null{
+  const check=repositoryReadChecks.get(resolver);return check?check(token,repository,id):null;
+}
 
 /** Error messages are stable codes. Never attach provider payloads, JWTs, keys, or tokens. */
 export class GitHubAppAuthError extends Error {constructor(readonly code:string){super(code);this.name="GitHubAppAuthError";}}
@@ -88,11 +94,11 @@ function validateToken(value:ObjectValue,selected:Scope,ownerId:number,identity:
   const permissions=object(value.permissions);
   if(permissions.contents!=="read"||permissions.metadata!=="read"||Object.keys(permissions).some(key=>key!=="contents"&&key!=="metadata"))return fail("github_app_permissions_mismatch");
   if(value.repository_selection!=="selected"||!Array.isArray(value.repositories)||value.repositories.length!==selected.repositoryIds.length)return fail("github_app_repository_selection_mismatch");
-  const ids=new Set<number>(),names=new Set<string>();
+  const ids=new Set<number>(),names=new Set<string>(),repositoryIds=new Map<string,number>();
   for(const entry of value.repositories){
     const repo=object(entry),owner=object(repo.owner);
     if(!isId(repo.id)||!selected.repositoryIds.includes(repo.id)||typeof repo.full_name!=="string"||!selected.repositories.includes(repo.full_name.toLowerCase())||owner.id!==ownerId||typeof owner.login!=="string"||owner.login.toLowerCase()!==selected.owner)return fail("github_app_repository_selection_mismatch");
-    ids.add(repo.id);names.add(repo.full_name.toLowerCase());
+    ids.add(repo.id);names.add(repo.full_name.toLowerCase());repositoryIds.set(repo.full_name.toLowerCase(),repo.id);
   }
   if(ids.size!==selected.repositoryIds.length||names.size!==selected.repositories.length)return fail("github_app_repository_selection_mismatch");
   // GitHub's 2026 stateless installation tokens are variable-length. Treat them as opaque.
@@ -100,7 +106,7 @@ function validateToken(value:ObjectValue,selected:Scope,ownerId:number,identity:
   if(typeof value.expires_at!=="string"||!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?Z$/.test(value.expires_at))return fail("github_app_invalid_expiry");
   const expiresAt=Date.parse(value.expires_at);
   if(!Number.isFinite(expiresAt)||new Date(expiresAt).toISOString().slice(0,10)!==value.expires_at.slice(0,10)||expiresAt<=observedAt+REFRESH_MARGIN_MS||expiresAt>observedAt+MAX_TOKEN_LIFETIME_MS)return fail("github_app_invalid_expiry");
-  return {identity,token:value.token,expiresAt,observedAt};
+  return {identity,token:value.token,expiresAt,observedAt,repositoryIds};
 }
 async function waitFor<T>(promise:Promise<T>,signal?:AbortSignal):Promise<T>{
   if(!signal)return promise;
@@ -126,7 +132,7 @@ export function createGitHubAppCredentialResolver(config:GitHubAppConfig|undefin
   let cacheExpiry:ReturnType<typeof setTimeout>|undefined;
   const clearCache=()=>{cached=undefined;if(cacheExpiry){clearTimeout(cacheExpiry);cacheExpiry=undefined;}};
   const assertCurrent=(fingerprint:string)=>{if(identity(scope(config,repositories),privateKey(env))!==fingerprint)return fail("github_app_configuration_changed");};
-  return async(repository,signal)=>{
+  const resolve:GitHubCredentialResolver=async(repository,signal)=>{
     if(signal?.aborted)return fail("github_app_cancelled");
     let selected:Scope,key:string,fingerprint:string;
     try{
@@ -170,4 +176,13 @@ export function createGitHubAppCredentialResolver(config:GitHubAppConfig|undefin
       return value.token;
     }finally{flight.waiters--;if(!flight.waiters&&!flight.settled){flight.controller.abort();if(inflight===flight)inflight=undefined;}}
   };
+  repositoryReadChecks.set(resolve,(token,repository,id)=>{
+    try{
+      if(!cached||cached.token!==token||!isId(id)||cached.repositoryIds.get(repository.toLowerCase())!==id)return false;
+      assertCurrent(cached.identity);
+      const checkedAt=milliseconds(now);
+      return checkedAt>=cached.observedAt&&cached.expiresAt>checkedAt+REFRESH_MARGIN_MS;
+    }catch{return false;}
+  });
+  return resolve;
 }
