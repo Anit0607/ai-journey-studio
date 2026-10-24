@@ -1,3 +1,4 @@
+import {scopedCalendarContext} from "./hosted-calendar-policy";
 import {githubSelectionPool} from "./github-source-selection";
 import {githubEvidenceEligibility,githubProvenanceHash,resolveScopedSource} from "./github-source-policy";
 import {NEW_PLATFORM_POLICY,NEW_PLATFORMS,activePlatforms,calendarPlatformPolicy,taskPlatformPolicy} from "./platform-policy";
@@ -20,6 +21,7 @@ function timingMissing(settings:any){
   if(settings.timing_mode!=="per_platform")return !settings.post_time;
   return [...settings.short_days,settings.long_day].some(day=>NEW_PLATFORMS.some(platform=>!validTime(settings.platform_times[platform]?.[day])));
 }
+function validCadence(days:unknown,longDay:unknown):days is number[]{return Array.isArray(days)&&days.length>=1&&days.length<=6&&days.every(day=>Number.isInteger(day)&&day>=0&&day<=6)&&new Set(days).size===days.length&&Number.isInteger(longDay)&&Number(longDay)>=0&&Number(longDay)<=6&&!days.includes(longDay);}
 function validDate(value:unknown):value is string{return typeof value==="string"&&/^\d{4}-\d{2}-\d{2}$/.test(value)&&Number.isFinite(Date.parse(value))&&new Date(value).toISOString().slice(0,10)===value;}
 type BudgetState={used:number;unresolved:number;pricingBlocked:boolean};
 type DispatchEntry={entry_id:string;task_id:string|null;status:string;reason?:string};
@@ -60,7 +62,7 @@ export class Calendar{
   async settings(){return (await this.db.query<any>("SELECT * FROM calendar_settings WHERE id=1"))[0];}
   async configure(input:{start_date:string|null;post_time:string|null;short_days:number[];long_day:number;generation_lead_hours:number|null;timing_mode?:"shared"|"per_platform";platform_times?:PlatformTimes;timing_basis?:string|null;generation_enabled?:boolean}){
     if((input.start_date!==null&&!validDate(input.start_date))||(input.post_time!==null&&!/^([01]\d|2[0-3]):[0-5]\d$/.test(input.post_time)))throw Error("Invalid calendar date or time");
-    if(!Array.isArray(input.short_days)||input.short_days.length<1||input.short_days.length>6||input.short_days.some(day=>!Number.isInteger(day)||day<0||day>6)||new Set(input.short_days).size!==input.short_days.length||!Number.isInteger(input.long_day)||input.long_day<0||input.long_day>6||input.short_days.includes(input.long_day))throw Error("Invalid cadence");
+    if(!validCadence(input.short_days,input.long_day))throw Error("Invalid cadence");
     if(input.generation_lead_hours!==null&&(!Number.isInteger(input.generation_lead_hours)||input.generation_lead_hours<this.minimumGenerationLeadHours||input.generation_lead_hours>336))throw Error("Generation lead must be "+this.minimumGenerationLeadHours+" to 336 hours or unset");
     if(input.timing_mode!==undefined&&!["shared","per_platform"].includes(input.timing_mode))throw Error("Invalid platform timing");
     if(input.platform_times!==undefined&&!validateTimes(input.platform_times))throw Error("Invalid platform timing");
@@ -97,6 +99,40 @@ export class Calendar{
       await tx.query("INSERT INTO events(id,kind,detail) VALUES($1,'calendar_planned','User requested LinkedIn-only planned dates; existing entries unchanged; no source selected and no paid generation')",[randomUUID()]);
     });
   }
+  /** Extend only future generation opportunities; never replan existing dates or bind content. */
+  async refillHorizon(now=new Date()){
+    if(!Number.isFinite(now.getTime()))throw Error("Invalid refill time");
+    return this.db.transaction(async tx=>{
+      // Standalone settings-first transaction; callers must not hold a budget guard.
+      const s=(await tx.query<any>("SELECT * FROM calendar_settings WHERE id=1 FOR UPDATE"))[0];
+      if(!s||s.generation_enabled!==true)return {inserted:0};
+      // Apply the same date, cadence, time and lead constraints as owner configuration.
+      if(!validDate(s.start_date)||!validCadence(s.short_days,s.long_day)||
+        !Number.isInteger(s.generation_lead_hours)||s.generation_lead_hours<this.minimumGenerationLeadHours||s.generation_lead_hours>336||
+        !["shared","per_platform"].includes(s.timing_mode)||!validateTimes(s.platform_times)||
+        (s.timing_mode==="shared"&&!validTime(s.post_time))||timingMissing(s))return {inserted:0};
+      const today=new Date(now.getTime()+330*60_000).toISOString().slice(0,10);
+      let inserted=0;
+      for(let offset=0;offset<28;offset++){
+        const date=new Date(Date.parse(today)+offset*DAY),planned=date.toISOString().slice(0,10),weekday=date.getUTCDay();
+        if(planned<s.start_date)continue;
+        const kind=weekday===s.long_day?"longform":s.short_days.includes(weekday)?"shortform":null;
+        if(!kind)continue;
+        // Automatic refill treats the whole date as occupied, including other/legacy kinds.
+        if((await tx.query("SELECT id FROM calendar_entries WHERE planned_date=$1 LIMIT 1",[planned])).length)continue;
+        const schedule=Object.fromEntries(NEW_PLATFORMS.map(platform=>{
+          const hour=s.timing_mode==="per_platform"?s.platform_times[platform][weekday]:s.post_time;
+          const post=new Date(planned+"T"+hour+":00+05:30"),review=new Date(post.getTime()-48*3_600_000);
+          return [platform,{intended_post:post.toISOString(),draft_due:review.toISOString(),review_due:review.toISOString()}];
+        }));
+        const post=new Date(Math.min(...Object.values(schedule).map(item=>Date.parse(item.intended_post))));
+        const generation=new Date(post.getTime()-s.generation_lead_hours*3_600_000),review=new Date(post.getTime()-48*3_600_000);
+        if(generation.getTime()<=now.getTime())continue;
+        inserted+=(await tx.query("INSERT INTO calendar_entries(id,planned_date,kind,intended_post,draft_due,review_due,generation_due,platform_schedule) VALUES($1,$2,$3,$4,$5,$5,$6,$7) ON CONFLICT(planned_date,kind) DO NOTHING RETURNING id",[randomUUID(),planned,kind,post,review,generation,JSON.stringify({...schedule,platform_policy:NEW_PLATFORM_POLICY})])).length;
+      }
+      return {inserted};
+    });
+  }
   async link(entry:string,source:string|null,task:string|null){
     await this.db.transaction(async tx=>{
       // Keep explicit links serialized with recovery and dispatch.
@@ -125,19 +161,44 @@ export class Calendar{
       return {inserted,paid_execution:false};
     });
   }
-  async dispatchDue(c:RuntimeConfig,runtimeEnabled:boolean,now=new Date()){
+  async dispatchDue(c:RuntimeConfig,runtimeEnabled:boolean,now=new Date(),options:{hostedScopedOnly?:boolean}={}){
     if(!Number.isFinite(now.getTime()))throw Error("Invalid dispatch time");
     return this.db.transaction(async tx=>{
       // Owner toggle and all due entry locks serialize concurrent scheduler delivery.
       const settings=(await tx.query<any>("SELECT * FROM calendar_settings WHERE id=1 FOR UPDATE"))[0];
-      const due=await tx.query<any>("SELECT * FROM calendar_entries WHERE generation_due IS NOT NULL AND generation_due<=$1 ORDER BY generation_due,id FOR UPDATE",[now]);
+      let due=await tx.query<any>("SELECT * FROM calendar_entries WHERE generation_due IS NOT NULL AND generation_due<=$1 ORDER BY generation_due,id FOR UPDATE",[now]);
       const result={queued:0,blocked:0,existing:0,paid_execution:false as const,entries:[] as DispatchEntry[]};
       if(!due.length)return result;
+      const hostedJobs=new Map<string,any>();
+      if(options.hostedScopedOnly&&(settings?.generation_enabled!==true||!runtimeEnabled||!configReady(c,now)||c.owner_cleared_sources_authorized!==true||c.fallback_authorized===true))return result;
+      if(options.hostedScopedOnly){
+        const allowed:any[]=[];
+        for(const entry of due){
+          // Scope is decided before any job/task mutation or budget guard.
+          const job=(await tx.query<any>("SELECT * FROM calendar_jobs WHERE entry_id=$1 FOR UPDATE",[entry.id]))[0];
+          if(entry.source_id||entry.task_id||job?.source_id||job?.source_hash||job?.task_id){
+            if(!entry.task_id||job?.task_id!==entry.task_id)continue;
+            const grant=await tx.query("SELECT id FROM github_source_grants WHERE task_id=$1 AND entry_id=$2 AND source_id=$3 AND source_hash=$4",[entry.task_id,entry.id,entry.source_id,job.source_hash]);
+            if(grant.length!==1)continue;
+            hostedJobs.set(entry.id,job);allowed.push(entry);
+          }else{
+            try{if(calendarPlatformPolicy(entry))allowed.push(entry);}catch{/* Invalid/legacy slots remain untouched. */}
+          }
+        }
+        due=allowed;if(!due.length)return result;
+      }
       // Lock all source rows before the shared budget guard to match worker order.
       const selection=await githubSelectionPool(tx,c,now),usedEvidence=new Set<string>();
       const sourceIds=[...new Set([...due.map(entry=>entry.source_id).filter(Boolean),...selection.candidates.map(item=>item.source.id)])].sort();
       const rawSources=sourceIds.length?await tx.query<Source>("SELECT * FROM sources WHERE id=ANY($1::uuid[]) ORDER BY id FOR UPDATE",[sourceIds]):[];
       const sources=await Promise.all(rawSources.map(source=>resolveScopedSource(tx,source,now)));
+      if(options.hostedScopedOnly){
+        const allowed:any[]=[];
+        for(const entry of due){
+          if(!entry.task_id||await scopedCalendarContext(tx,entry.task_id,c,{rootId:entry.task_id,entry,job:hostedJobs.get(entry.id)},now,false,false))allowed.push(entry);
+        }
+        due=allowed;if(!due.length)return result;
+      }
       await tx.query("INSERT INTO budget_months(month) VALUES('__combined_guard__') ON CONFLICT DO NOTHING");
       await tx.query("SELECT month FROM budget_months WHERE month='__combined_guard__' FOR UPDATE");
       const accounting=(await tx.query<any>("SELECT COALESCE(SUM(CASE WHEN status='settled' THEN estimated ELSE reserved END) FILTER (WHERE month=$1 OR status!='settled'),0) AS used,COUNT(*) FILTER (WHERE status!='settled') AS unresolved,COUNT(*) FILTER (WHERE pricing_anomaly=true AND status!='settled') AS pricing_anomalies FROM ledger",[istMonth(now)]))[0];
@@ -148,8 +209,7 @@ export class Calendar{
         if(!entry.task_id&&!priorJob?.task_id&&!calendarPlatformPolicy(entry)){
           result.blocked++;result.entries.push({entry_id:entry.id,task_id:null,status:"blocked",reason:LEGACY_CALENDAR_BLOCKER});continue;
         }
-        await tx.query("INSERT INTO calendar_jobs(id,entry_id,status) VALUES($1,$2,'blocked') ON CONFLICT(entry_id) DO NOTHING",[randomUUID(),entry.id]);
-        const job=(await tx.query<any>("SELECT * FROM calendar_jobs WHERE entry_id=$1 FOR UPDATE",[entry.id]))[0];
+        let job=priorJob||{};
         let source=sources.find(item=>item?.id===entry.source_id);
         let selected:typeof selection.candidates[number]|undefined;
         if(!entry.source_id&&!entry.task_id&&!job.source_id&&!job.task_id&&calendarPlatformPolicy(entry)&&selection.policy){
@@ -162,6 +222,11 @@ export class Calendar{
             selected={...candidate,source:current};source=current;break;
           }
         }
+        // A hosted run cannot create even a blocked job for a manually linked or
+        // unproven source. Unlinked slots must first select genuine scoped evidence.
+        if(options.hostedScopedOnly&&!entry.task_id&&!job.task_id&&!selected)continue;
+        await tx.query("INSERT INTO calendar_jobs(id,entry_id,status) VALUES($1,$2,'blocked') ON CONFLICT(entry_id) DO NOTHING",[randomUUID(),entry.id]);
+        job=(await tx.query<any>("SELECT * FROM calendar_jobs WHERE entry_id=$1 FOR UPDATE",[entry.id]))[0];
         // Once any task is bound, neither retries, edits, cancellation nor time
         // passing can create a replacement task for this scheduled slot.
         if(job.task_id||entry.task_id){

@@ -1,3 +1,4 @@
+import {scopedFixture} from "./hosted-calendar-fixture";
 import test from "node:test";
 import assert from "node:assert/strict";
 import {readFileSync} from "node:fs";
@@ -102,7 +103,7 @@ test("maximum twelve checkpoints per daily attempt is enforced even for immediat
 }));
 
 test("safe checkpoints resume the next UTC day, never during same-day retries",()=>fixture(async(db,store,intake,inTransaction)=>{
-  let now=new Date();const task=await queued(store,intake);let calls=0,advance=true;
+  let now=new Date();const {task}=await scopedFixture(db,configuration(now),now);let calls=0,advance=true;
   const approved={...configuration(now),pricing_window_authorized:true,pricing_valid_until:new Date(now.getTime()+2*dayMs).toISOString().slice(0,10)};
   const options:HostedBatchOptions={...isolated(()=>now),readConfig:()=>approved,provider:async()=>{assert.equal(inTransaction(),false);calls++;if(advance)now=new Date(now.getTime()+90_000);return completion;}};
   const first=await runHostedBatch(store,configuration(now),options);assert.equal(first.status,"deadline");assert.equal(first.steps,2);assert.equal(calls,2);
@@ -133,8 +134,8 @@ test("budget headroom, persisted toggle and runtime config are checked between s
   });}
 });
 
-test("cancellation stops following checkpoints without discarding in-flight accounting",()=>fixture(async(db,store,intake)=>{
-  const now=new Date(),task=await queued(store,intake);let calls=0;
+test("cancellation stops following checkpoints without discarding in-flight accounting",()=>fixture(async(db,store)=>{
+  const now=new Date(),{task}=await scopedFixture(db,configuration(now),now);let calls=0;
   const result=await runHostedBatch(store,configuration(now),{...isolated(()=>now),provider:async()=>{calls++;await store.cancel(task.id);return completion;}});
   assert.equal(result.reason,"cancelled");assert.equal(calls,1);assert.equal(result.steps,1);assert.equal((await db.query<any>("SELECT status FROM tasks WHERE id=$1",[task.id]))[0].status,"cancelled");
   assert.equal((await db.query<any>("SELECT status FROM ledger"))[0].status,"settled");
@@ -146,8 +147,8 @@ test("abort signal stops later checkpoints and never abandons an active request"
   assert.equal(result.reason,"cancelled");assert.equal(result.steps,1);assert.equal(calls,1);
 }));
 
-test("uncertain completion stays reserved and never automatically retries the same or next day",()=>fixture(async(db,store,intake)=>{
-  let now=new Date();const task=await queued(store,intake);let calls=0;
+test("uncertain completion stays reserved and never automatically retries the same or next day",()=>fixture(async(db,store)=>{
+  let now=new Date();const {task}=await scopedFixture(db,configuration(now),now);let calls=0;
   const options:HostedBatchOptions={...isolated(()=>now),provider:async()=>{calls++;throw Error("secret credential and source must not appear");}};
   const first=await runHostedBatch(store,configuration(now),options);assert.equal(first.reason,"checkpoint_blocked");assert.equal(calls,1);
   assert.equal((await db.query<any>("SELECT status FROM ledger"))[0].status,"unknown");assert.equal((await db.query<any>("SELECT status FROM tasks WHERE id=$1",[task.id]))[0].status,"blocked");
@@ -194,7 +195,7 @@ test("production default checkpoint rejects legacy capsule clearance even when l
   const now=new Date(),source=await store.source(CAPSULE,"user-reported-notes","2026-10-09",true);await store.enqueue(source.id);let calls=0;
   const config={...configuration(now),source_approved:true,approved_source_hash:hash(CAPSULE),transmission_authorized:true};
   const result=await runHostedBatch(store,config,{now:()=>now,isReady:()=>true,provider:async()=>{calls++;return completion;}});
-  assert.equal(result.reason,"checkpoint_blocked");assert.equal(calls,0);assert.equal((await db.query("SELECT id FROM ledger")).length,0);assert.equal((await db.query<any>("SELECT status FROM tasks"))[0].status,"blocked");
+  assert.equal(result.status,"idle");assert.equal(calls,0);assert.equal((await db.query("SELECT id FROM ledger")).length,0);assert.equal((await db.query<any>("SELECT status FROM tasks"))[0].status,"queued");
 }));
 
 test("production default checkpoint rejects a previously queued forty-nine-hour calendar brief",()=>fixture(async(db,store,intake)=>{
@@ -202,5 +203,27 @@ test("production default checkpoint rejects a previously queued forty-nine-hour 
   const post=new Date(now.getTime()+72*3_600_000),brief={kind:"shortform",intended_post:post.toISOString(),generation_due:new Date(post.getTime()-49*3_600_000).toISOString(),review_due:new Date(post.getTime()-48*3_600_000).toISOString()};
   await db.query("UPDATE tasks SET origin_key=$2,content_brief=$3 WHERE id=$1",[task.id,"calendar:"+randomUUID(),JSON.stringify(brief)]);
   const result=await runHostedBatch(store,configuration(now),{now:()=>now,isReady:()=>true,provider:async()=>{calls++;return completion;}});
-  assert.equal(result.reason,"checkpoint_blocked");assert.equal(calls,0);assert.equal((await db.query("SELECT id FROM ledger")).length,0);assert.equal((await db.query<any>("SELECT status FROM tasks"))[0].status,"blocked");
+  assert.equal(result.status,"idle");assert.equal(calls,0);assert.equal((await db.query("SELECT id FROM ledger")).length,0);assert.equal((await db.query<any>("SELECT status FROM tasks"))[0].status,"queued");
+}));
+
+
+test("refill runs outside transactions after hosted gates and before dispatch",()=>fixture(async(db,store,_intake,inTransaction)=>{
+  const now=new Date(),order:string[]=[];
+  const options:HostedBatchOptions={...isolated(()=>now),refill:async()=>{
+    assert.equal(inTransaction(),false);order.push("refill");
+  },dispatch:async()=>{assert.deepEqual(order,["refill"]);order.push("dispatch");},step:async()=>{order.push("step");return {status:"idle"};}};
+  assert.equal((await runHostedBatch(store,configuration(now),options)).status,"idle");
+  assert.deepEqual(order,["refill","dispatch","step"]);
+}));
+
+test("hosted runtime, OFF and accounting gates prevent refill and dispatch",()=>fixture(async(db,store,intake)=>{
+  const now=new Date();let calls=0;
+  const options:HostedBatchOptions={...isolated(()=>now),refill:async()=>{calls++;},dispatch:async()=>{calls++;},step:async()=>{calls++;return {status:"idle"};}};
+  assert.equal((await runHostedBatch(store,{...configuration(now),owner_cleared_sources_authorized:false},{...options,readConfig:()=>({...configuration(now),owner_cleared_sources_authorized:false})})).reason,"runtime_not_ready");
+  await db.query("UPDATE calendar_settings SET generation_enabled=false WHERE id=1");
+  assert.equal((await runHostedBatch(store,configuration(now),options)).reason,"generation_disabled");
+  const tomorrow=new Date(now.getTime()+dayMs),task=await queued(store,intake);
+  await db.query("UPDATE calendar_settings SET generation_enabled=true WHERE id=1");await accounting(db,task.id);
+  assert.equal((await runHostedBatch(store,configuration(tomorrow),{...options,now:()=>tomorrow,readConfig:()=>configuration(tomorrow)})).reason,"unresolved_accounting");
+  assert.equal(calls,0);
 }));

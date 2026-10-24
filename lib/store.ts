@@ -1,3 +1,4 @@
+import {admittedHostedTask,hostedCandidates,HOSTED_CANDIDATE_LIMIT,HostedCalendarScanExhausted,type HostedCalendarPolicy} from "./hosted-calendar-policy";
 import {resolveScopedSource} from "./github-source-policy";
 import {scopedSourceProof,scopedTaskMatches} from "./scoped-source-proof";
 import {taskPlatformPolicyHash} from "./platform-policy-binding";
@@ -65,7 +66,34 @@ export class Store{
       pricing_blocked:data.ledger.some((r:any)=>r.pricing_anomaly&&r.status!=="settled"),
       updated:new Date().toISOString()};
   }
-  async claim(scope?:OwnerDraftScope){
+  async claim(scope?:OwnerDraftScope,hosted?:HostedCalendarPolicy){
+    if(hosted){
+      if(scope)throw Error("Conflicting execution policy");
+      // This is a read-only candidate snapshot, never an admission. Each attempt
+      // owns a separate transaction so a rejected source/policy lock cannot
+      // precede another candidate's entry or task lock.
+      const candidates=await hostedCandidates(this.db);
+      for(const candidate of candidates.slice(0,HOSTED_CANDIDATE_LIMIT)){
+        const claimed=await this.db.transaction(async tx=>{
+          let task=await admittedHostedTask(tx,candidate.id,hosted.config);
+          if(!task)return null;
+          if(task.status==="running"&&task.lease_until&&new Date(task.lease_until)<new Date()){
+            const uncertain=await tx.query("SELECT id FROM ledger WHERE task_id=$1 AND status IN ('reserved','unknown')",[task.id]);
+            await tx.query("UPDATE tasks SET status=$2,lease_token=NULL,lease_until=NULL,updated=now() WHERE id=$1",[task.id,uncertain.length?"blocked":"queued"]);
+            await this.event(tx,task.id,"lease_expired",uncertain.length?"Reservation retained; replay blocked":"Resumable checkpoint queued");
+            if(uncertain.length)return null;
+            task={...task,status:"queued"};
+          }
+          if(task.status!=="queued")return null;
+          const next=(await tx.query<Task>("UPDATE tasks SET status='running',lease_token=$2,lease_until=now()+interval '240 seconds',updated=now() WHERE id=$1 RETURNING *",[task.id,randomUUID()]))[0];
+          await this.event(tx,task.id,"step_claimed","Scoped calendar checkpoint "+task.checkpoint+" claimed");
+          return next;
+        });
+        if(claimed)return claimed;
+      }
+      if(candidates.length>HOSTED_CANDIDATE_LIMIT)throw new HostedCalendarScanExhausted();
+      return null;
+    }
     return this.db.transaction(async tx=>{
       if(scope){
         const task=(await tx.query<Task>("SELECT * FROM tasks WHERE id=$1 FOR UPDATE",[scope.task_id]))[0];

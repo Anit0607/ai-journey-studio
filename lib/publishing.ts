@@ -1,4 +1,5 @@
 import {resolveScopedSource} from "./github-source-policy";
+import {calendarPublicationCurrent,lockPublicationGuards} from "./calendar-publication-binding";
 import {scopedTaskMatches} from "./scoped-source-proof";
 import {taskPlatformPolicy,activePlatforms} from "./platform-policy";
 import {reviewReadiness,evidenceApprovalCurrent} from "./evidence-review";
@@ -138,6 +139,7 @@ export class Publishing{
       let reason:string|null=null;
       try{
         reason=await this.db.transaction(async tx=>{
+          await lockPublicationGuards(tx);
           if(row.status!=="approved")return "Only an exact approved manual plan can be published";
           const account=await this.validate(tx,row),blocked=runtimeBlocker(this.runtime,account,"manual");if(blocked)return blocked;
           if(!await this.hasExactApproval(tx,row))return "Exact manual publication approval missing";
@@ -203,16 +205,19 @@ export class Publishing{
   }
   private async validate(tx:Connection,row:PublishRow,requireFresh=false){
     if(intentVersion(row)!==row.version)throw new PublicationValidationError("Publication intent integrity check failed");
+    if(!await calendarPublicationCurrent(tx,row))throw new PublicationValidationError("Calendar publication plan changed; fresh owner approval required");
     const account=accountFor(this.runtime,row.account_id,row.platform);
     if(account.authorization_version!==row.account_version||account.remote_id!==row.remote_id)throw new PublicationValidationError("Publishing account changed; fresh owner approval required");
-    if(this.runtime.accountCurrent&&!await this.runtime.accountCurrent(account,tx,requireFresh))throw new PublicationValidationError("Publishing account changed; fresh owner approval required");
     const context=await finalArtifact(tx,row.task_id,row.review_token,row.platform);
+    // Connection SHARE follows task/source/policy, with both singleton guards already held.
+    if(this.runtime.accountCurrent&&!await this.runtime.accountCurrent(account,tx,requireFresh))throw new PublicationValidationError("Publishing account changed; fresh owner approval required");
     if(context.source.id!==row.source_id||context.source.hash!==row.source_hash||clearanceToken(context.source)!==row.source_clearance_token||context.artifact.hash!==row.artifact_hash||context.variant.hash!==row.variant_hash||context.variant.text!==row.payload.text)throw new PublicationValidationError("Final artifact changed; fresh owner approval required");
     return account;
   }
   async approve(id:string,expectedVersion:string,ownerAcknowledged:boolean){
     reference(id);if(ownerAcknowledged!==true)throw new PublicationValidationError("Explicit publication acknowledgement is required");
     return this.db.transaction(async tx=>{
+      await lockPublicationGuards(tx);
       const row=await this.lock(tx,id,expectedVersion);if(!["staged","approved"].includes(row.status))throw new PublicationValidationError("Publication is not available for approval");
       await this.validate(tx,row);
       await tx.query("INSERT INTO publishing_approvals(id,outbox_id,version,acknowledgement) VALUES($1,$2,$3,$4) ON CONFLICT(outbox_id,version) DO NOTHING",[randomUUID(),id,row.version,acknowledgementFor(row)]);
@@ -248,6 +253,7 @@ export class Publishing{
     if(!Number.isFinite(now.getTime()))throw new PublicationValidationError("Invalid dispatch time");
     if(this.runtime.enabled!==true)return {status:"disabled"};
     const claim=await this.db.transaction(async tx=>{
+      await lockPublicationGuards(tx);
       await tx.query("UPDATE publishing_outbox SET status='uncertain',reason='Claim expired; reconcile provider receipt before any further publication',updated=now() WHERE status='claimed' AND claimed_at<$1"+(target?" AND id=$2":""),[new Date(now.getTime()-10*60_000),...(target?[target.id]:[])]);
       const row=target?await this.lock(tx,target.id,target.version):(await tx.query<PublishRow>("SELECT * FROM publishing_outbox WHERE delivery_mode='scheduled' AND status='approved' AND scheduled_at<=$1 ORDER BY scheduled_at,id FOR UPDATE SKIP LOCKED LIMIT 1",[now]))[0];
       if(!row)return null;
@@ -288,6 +294,7 @@ export class Publishing{
         before:async(stage)=>{
           if(signal?.aborted)throw new PublishFailure("Publishing invocation deadline reached before request",false);
           await this.db.transaction(async tx=>{
+            await lockPublicationGuards(tx);
             const current=await this.lock(tx,row.id,row.version);if(current.status!=="claimed"||current.claim_token!==row.claim_token)throw new PublishFailure("Publication claim is no longer active",false);
             const checked=await this.validate(tx,current,true),blocked=runtimeBlocker(this.runtime,checked,current.delivery_mode);if(blocked)throw new PublishFailure(blocked,false);
             if(!await this.hasExactApproval(tx,current))throw new PublishFailure("Exact publication approval is no longer current",false);
