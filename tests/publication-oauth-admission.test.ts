@@ -1,3 +1,4 @@
+import {APPROVAL_PLAN_CONTRACT_V2} from "../lib/approval-plan-contract";
 import test from "node:test";
 import assert from "node:assert/strict";
 import {randomUUID} from "node:crypto";
@@ -32,7 +33,7 @@ async function seed(db:Database){
  await db.query("INSERT INTO calendar_entries(id,planned_date,kind,intended_post,draft_due,review_due,source_id,task_id,platform_schedule) VALUES($1,'2026-10-20','shortform',$2,$2,$2,$3,$4,$5)",[entry,when,source.id,task.id,JSON.stringify(schedule)]);
  let sent=0;
  const runtime:PublishingRuntime={enabled:true,credential_use_authorized:true,scheduler_authorized:true,scheduler_interval_seconds:60,max_lateness_seconds:300,now:()=>clock,accounts:[account],credential:a=>oauth.credential(a),accountCurrent:(a,tx,fresh)=>oauth.validateAccount(a,tx,!fresh),fetch:async()=>{sent++;return new Response(null,{status:201,headers:{"x-restli-id":"urn:li:share:12345"}});}};
- const plan=await previewApprovalPlan(db,runtime,task.id,token),body={task_id:task.id,review_token:token,expected_plan:plan.version,acknowledged:true};
+ const plan=await previewApprovalPlan(db,runtime,task.id,token),body={...APPROVAL_PLAN_CONTRACT_V2,task_id:task.id,review_token:token,expected_plan:plan.version,acknowledged:true};
  return {db,oauth,session,account,runtime,body,task,plan,counts:()=>({sent}),due:()=>{clock=post;},rejectIdentity:()=>{identityRejected=true;}};
 }
 

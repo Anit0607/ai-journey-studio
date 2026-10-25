@@ -20,7 +20,7 @@ type Options={readConfig:()=>RuntimeConfig;ready:()=>boolean;provider?:typeof co
 const configHash=(c:RuntimeConfig)=>hash(JSON.stringify(c));
 async function event(tx:Connection,kind:string,detail:unknown,id=randomUUID()) {await tx.query('INSERT INTO events(id,task_id,kind,detail) VALUES($1,$2,$3,$4)',[id,target.task_id,kind,JSON.stringify(detail)]);}
 /** Read-only preview binds original artifacts too; never changes or resumes a task. */
-async function context(tx:Connection,c:RuntimeConfig,lock=false){
+export async function comparisonContext(tx:Connection,c:RuntimeConfig,lock=false){
  const task=(await tx.query<Task>('SELECT * FROM tasks WHERE id=$1'+(lock?' FOR UPDATE':''),[target.task_id]))[0];
  const source=await resolveScopedSource(tx,(await tx.query<Source>('SELECT * FROM sources WHERE id=$1'+(lock?' FOR UPDATE':''),[target.source_id]))[0]);
  const calendar=(await tx.query('SELECT * FROM calendar_entries WHERE id=$1'+(lock?' FOR UPDATE':''),[target.calendar_id]))[0];
@@ -33,7 +33,7 @@ async function context(tx:Connection,c:RuntimeConfig,lock=false){
 }
 export async function comparisonSnapshot(db:Database,c:RuntimeConfig){
  const history=await db.query<{id:string;kind:string;detail:string}>('SELECT id,kind,detail FROM events WHERE task_id=$1 AND kind IN ($2,$3,$4,$5) ORDER BY created,id',[target.task_id,START,STAGE,END,'private_comparison_admitted']);
- let preview:{state_hash:string}|null=null;try{preview={state_hash:(await context(db,c)).state_hash};}catch{}
+ let preview:{state_hash:string}|null=null;try{preview={state_hash:(await comparisonContext(db,c)).state_hash};}catch{}
  return {scope:COMPARISON_SCOPE,scope_hash:COMPARISON_SCOPE_HASH,preview,history:history.map(e=>({...e,detail:JSON.parse(e.detail)})),notice:'Private comparison only. Raw output is unchanged; factual and editorial holds remain. No approval or publication action exists here.'};
 }
 /** One reservation, one terminal attempt. Never inserts/updates tasks, outputs, approvals or Calendar. */
@@ -50,7 +50,7 @@ export async function runPrivateComparison(rawDb:Database,input:ComparisonReques
  async function finish(status:string,assessment?:unknown){
   if(!reservation)return {...result,status};
   await db.transaction(async tx=>{
-   if(status==='completed_requires_review')try{runtime();if((await context(tx,options.readConfig(),true)).state_hash!==input.expected_state_hash)status='stale_state';}catch{status='stale_state';}
+   if(status==='completed_requires_review')try{runtime();if((await comparisonContext(tx,options.readConfig(),true)).state_hash!==input.expected_state_hash)status='stale_state';}catch{status='stale_state';}
    await tx.query('SELECT id FROM ledger WHERE id=$1 FOR UPDATE',[reservation]);
    await tx.query("UPDATE ledger SET status=$2,estimated=$3,input_tokens=$4,output_tokens=$5,completion_status=$6,pricing_anomaly=$7 WHERE id=$1 AND status='reserved'",[reservation,known?'settled':'unknown',known?spent:null,known?inputs:null,known?outputs:null,status,pricingAnomaly]);
    await event(tx,END,{run_id:reservation,status,steps:result.steps,known_microdollars:spent,reservation_retained:!known,assessment});
@@ -64,7 +64,7 @@ export async function runPrivateComparison(rawDb:Database,input:ComparisonReques
    await tx.query("INSERT INTO budget_months(month) VALUES('__combined_guard__') ON CONFLICT DO NOTHING");
    await tx.query("SELECT month FROM budget_months WHERE month='__combined_guard__' FOR UPDATE");
    if((await tx.query('SELECT id FROM events WHERE task_id=$1 AND kind=$2',[target.task_id,START])).length)return null;
-   const current=await context(tx,initial,true);if(current.state_hash!==input.expected_state_hash)throw Error('Comparison stale preview');
+   const current=await comparisonContext(tx,initial,true);if(current.state_hash!==input.expected_state_hash)throw Error('Comparison stale preview');
    const usage=(await tx.query<{used:string;unresolved:string}>("SELECT COALESCE(SUM(CASE WHEN status='settled' THEN estimated ELSE reserved END) FILTER (WHERE month=$1 OR status!='settled'),0) AS used,COUNT(*) FILTER (WHERE status!='settled' OR estimated IS NULL OR estimated<0) AS unresolved FROM ledger",[istMonth()]))[0];
    if(!usage||Number(usage.unresolved)!==0||!Number.isSafeInteger(Number(usage.used))||Number(usage.used)<0||Number(usage.used)+COMPARISON_CAP>CAP-BUFFER)throw Error('Comparison budget unavailable');
    runtime();const id=proposedRunId,month=istMonth();
@@ -77,12 +77,12 @@ export async function runPrivateComparison(rawDb:Database,input:ComparisonReques
   reservation=claimed.id;result.run_id=reservation;
   for(let checkpoint=0;checkpoint<6;checkpoint++){
    runtime();
-   await db.transaction(async tx=>{const current=await context(tx,options.readConfig(),true);if(current.state_hash!==input.expected_state_hash)throw Error('Comparison state changed');const row=(await tx.query<{status:string}>('SELECT status FROM ledger WHERE id=$1 FOR UPDATE',[reservation]))[0];if(row?.status!=='reserved'||(await tx.query("SELECT id FROM ledger WHERE id!=$1 AND status!='settled' LIMIT 1",[reservation])).length)throw Error('Comparison accounting changed');});
+   await db.transaction(async tx=>{const current=await comparisonContext(tx,options.readConfig(),true);if(current.state_hash!==input.expected_state_hash)throw Error('Comparison state changed');const row=(await tx.query<{status:string}>('SELECT status FROM ledger WHERE id=$1 FOR UPDATE',[reservation]))[0];if(row?.status!=='reserved'||(await tx.query("SELECT id FROM ledger WHERE id!=$1 AND status!='settled' LIMIT 1",[reservation])).length)throw Error('Comparison accounting changed');});
    const task={...claimed.task,checkpoint},prompt=buildDraftPrompt(task,claimed.source,artifacts),contract=draftArtifactContract(task,claimed.source,artifacts);
    const inputBound=Buffer.byteLength(prompt)+providerResponseFormatBytes('openai',contract)+1024;
    if(inputBound>COMPARISON_INPUT_BOUNDS[checkpoint]||spent+tokenCost(COMPARISON_PRICING,inputBound,COMPARISON_OUTPUT_CAP)>COMPARISON_CAP)throw Error('Comparison input too large');
    await db.transaction(async tx=>{
-    runtime();if((await context(tx,options.readConfig(),true)).state_hash!==input.expected_state_hash)throw Error('Comparison state changed');
+    runtime();if((await comparisonContext(tx,options.readConfig(),true)).state_hash!==input.expected_state_hash)throw Error('Comparison state changed');
     await event(tx,'private_comparison_admitted',{run_id:reservation,checkpoint,role:ROLES[checkpoint],model:COMPARISON_PRICING.model,prompt_hash:hash(prompt),input_bound:inputBound,completion_cap:COMPARISON_OUTPUT_CAP,contract});
    });
    runtime();known=false;
@@ -95,7 +95,7 @@ export async function runPrivateComparison(rawDb:Database,input:ComparisonReques
    const cost=tokenCost(COMPARISON_PRICING,completion.input,completion.output);spent+=cost;inputs+=completion.input;outputs+=completion.output;known=true;
    if(completion.input>inputBound||completion.output>COMPARISON_OUTPUT_CAP||spent>COMPARISON_CAP){known=false;pricingAnomaly=true;throw Error('Comparison pricing anomaly');}
    artifacts.push({id:randomUUID(),task_id:target.task_id,role:ROLES[checkpoint],text:completion.text,hash:hash(completion.text),created:new Date().toISOString()});result.steps++;
-   runtime();const current=await context(db,options.readConfig());if(current.state_hash!==input.expected_state_hash)throw Error('Comparison state changed');
+   runtime();const current=await comparisonContext(db,options.readConfig());if(current.state_hash!==input.expected_state_hash)throw Error('Comparison state changed');
    if(!completion.complete)return await finish('incomplete');
    assertArtifactPrivacy(completion.text);
    const issue=noteStageIssue(checkpoint,completion.text,claimed.source,artifacts);

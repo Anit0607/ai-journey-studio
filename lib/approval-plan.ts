@@ -10,7 +10,7 @@ import {calendarPlatformPolicy,taskPlatformPolicy} from "./platform-policy";
 import {Publishing,PublicationValidationError,type PublishingRuntime} from "./publishing";
 import {APPROVAL_PLAN_EVENT,calendarPublicationBinding,lockPublicationGuards} from "./calendar-publication-binding";
 
-import {APPROVAL_PLAN_ACK,type ApprovalPlan} from "./approval-plan-contract";
+import {APPROVAL_PLAN_CONTRACT_V2,currentApprovalPlanContract,type ApprovalPlan} from "./approval-plan-contract";
 function fail(message:string):never{throw new PublicationValidationError(message);}
 const scopedDb=(db:Database,tx:Connection):Database=>({...db,query:tx.query.bind(tx),transaction:work=>work(tx),close:async()=>{}});
 
@@ -40,15 +40,16 @@ export async function previewApprovalPlan(db:Database,runtime:PublishingRuntime,
     if(quality.flags.length)fail("Resolve source-grounding flags before approval");
     const variants=platformVariants(context.bundle.find(a=>a.role==="Platform Adapter"),policy),variant=variants.variants.find(v=>v.platform==="LinkedIn");
     if(!variants.complete||!variant?.hash||variant.text===null)fail("Exact LinkedIn draft is incomplete");
-    const values={task_id:taskId,review_token:token,entry_id:entry.id,calendar_binding:calendarPublicationBinding(entry),source_hash:context.source.hash,clearance_id:context.source.clearance_id||null,quality_binding:quality.binding,evidence_version:quality.evidence_version,account_id:account.id,account_version:account.authorization_version,account_label:account.label,remote_id:account.remote_id,scheduled_at:at.toISOString(),scheduler_policy_hash,timezone:"UTC" as const,delivery_mode:"scheduled" as const,text:variant.text,variant_hash:variant.hash};
+    const values={...APPROVAL_PLAN_CONTRACT_V2,task_id:taskId,review_token:token,entry_id:entry.id,calendar_binding:calendarPublicationBinding(entry),source_hash:context.source.hash,clearance_id:context.source.clearance_id||null,quality_binding:quality.binding,evidence_version:quality.evidence_version,account_id:account.id,account_version:account.authorization_version,account_label:account.label,remote_id:account.remote_id,scheduled_at:at.toISOString(),scheduler_policy_hash,timezone:"UTC" as const,delivery_mode:"scheduled" as const,text:variant.text,variant_hash:variant.hash};
     return {...values,version:hash(JSON.stringify(values))};
   });
 }
 
 /** One explicit owner approval, with both audit records committed or neither. */
 export async function approveApprovalPlan(db:Database,runtime:PublishingRuntime,input:unknown){
-  if(!input||typeof input!=="object"||Array.isArray(input)||Object.keys(input).sort().join(",")!=="acknowledged,expected_plan,review_token,task_id")fail("Exact plan approval request required");
+  if(!input||typeof input!=="object"||Array.isArray(input)||Object.keys(input).sort().join(",")!=="acknowledged,acknowledgement,acknowledgement_hash,acknowledgement_version,expected_plan,review_token,task_id")fail("Exact plan approval request required");
   const body=input as Record<string,unknown>;
+  if(!currentApprovalPlanContract(body))fail("Current final-post acknowledgement required; refresh the approval preview");
   if(body.acknowledged!==true||typeof body.task_id!=="string"||typeof body.review_token!=="string"||typeof body.expected_plan!=="string")fail("Explicit exact plan acknowledgement required");
   return db.transaction(async tx=>{
     // Settings -> OAuth guard -> outbox -> entry -> task -> source/policy -> connection.
@@ -60,13 +61,13 @@ export async function approveApprovalPlan(db:Database,runtime:PublishingRuntime,
     // An uncertain, claimed or completed prior delivery must never be auto-replayed.
     if(existing.some(row=>["claimed","uncertain","published"].includes(row.status)))fail("Prior delivery requires reconciliation; automatic replay is blocked");
     const store=new Store(local),context=await store.revisionContext(tx,plan.task_id,plan.review_token);
-    if(context.latest)await store.approveRevision(plan.task_id,plan.review_token,true);
-    else if(context.task.status!=="approved")await store.approve(plan.task_id,plan.review_token.slice("original:".length));
+    if(context.latest)await store.approveRevision(plan.task_id,plan.review_token,true,"final-post");
+    else if(context.task.status!=="approved")await store.approve(plan.task_id,plan.review_token.slice("original:".length),"final-post");
     else{
       const approved=(await tx.query<{version:string}>("SELECT version FROM approvals WHERE task_id=$1",[plan.task_id]))[0];
       if(approved?.version!==plan.review_token.slice("original:".length))fail("Exact original content approval is missing");
       // Preserve the original immutable approval; append a fresh source/evidence
-      // receipt only because this action explicitly approves the complete preview.
+      // receipt only because this action explicitly approves the final post and exact delivery plan.
       await saveEvidenceApproval(tx,plan.task_id,plan.review_token,await reviewReadiness(tx,plan.task_id,context.bundle,context.source));
     }
     const key=plan.version,requestId=`${key.slice(0,8)}-${key.slice(8,12)}-${key.slice(12,16)}-${key.slice(16,20)}-${key.slice(20,32)}`;
@@ -75,7 +76,7 @@ export async function approveApprovalPlan(db:Database,runtime:PublishingRuntime,
     // Replace only unattempted older plans; never create a second eligible delivery.
     for(const previous of existing)if(previous.id!==row.id&&["staged","approved","invalidated","missed"].includes(previous.status))await publisher.cancel(previous.id,previous.version);
     const receipts=await tx.query<{detail:string}>("SELECT detail FROM events WHERE task_id=$1 AND kind=$2",[plan.task_id,APPROVAL_PLAN_EVENT]);
-    if(!receipts.some(event=>JSON.parse(event.detail).plan_version===plan.version))await tx.query("INSERT INTO events(id,task_id,kind,detail) VALUES($1,$2,$3,$4)",[randomUUID(),plan.task_id,APPROVAL_PLAN_EVENT,JSON.stringify({outbox_id:row.id,entry_id:plan.entry_id,calendar_binding:plan.calendar_binding,plan_version:plan.version,scheduler_policy_hash:plan.scheduler_policy_hash,acknowledgement:APPROVAL_PLAN_ACK})]);
+    if(!receipts.some(event=>JSON.parse(event.detail).plan_version===plan.version))await tx.query("INSERT INTO events(id,task_id,kind,detail) VALUES($1,$2,$3,$4)",[randomUUID(),plan.task_id,APPROVAL_PLAN_EVENT,JSON.stringify({outbox_id:row.id,entry_id:plan.entry_id,calendar_binding:plan.calendar_binding,plan_version:plan.version,scheduler_policy_hash:plan.scheduler_policy_hash,acknowledgement_version:plan.acknowledgement_version,acknowledgement:plan.acknowledgement,acknowledgement_hash:plan.acknowledgement_hash})]);
     return publisher.approve(row.id,row.version,true);
   });
 }

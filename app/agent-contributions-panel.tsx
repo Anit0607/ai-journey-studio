@@ -1,7 +1,7 @@
 "use client";
 type Row=Record<string,any>;
 const money=(value:number|null)=>value===null?'unknown':'$'+(value/1_000_000).toFixed(6);
-const originLabel=(kind:string)=>kind==='manual_edit'?'Manual editor change, not an agent run':kind==='agent_revision'?'Saved agent-revision output':kind==='saved_original'?'Saved original-run artifact':'Origin not recorded or cannot be verified';
+const originLabel=(kind:string)=>kind==='private_comparison'?'Private model comparison output — gpt-6.1-sol':kind==='manual_edit'?'Manual editor change, not an agent run':kind==='agent_revision'?'Saved agent-revision output':kind==='saved_original'?'Saved original-run artifact':'Origin not recorded or cannot be verified';
 export default function AgentContributionsPanel({contributions,profile}:{contributions:Row;profile?:Row}){
  if(!contributions)return null;
  return <section aria-label="Six-agent contributions"><h3>What each agent actually produced</h3><p>{contributions.notice}</p>

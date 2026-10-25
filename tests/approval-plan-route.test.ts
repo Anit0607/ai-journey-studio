@@ -1,3 +1,4 @@
+import {APPROVAL_PLAN_CONTRACT_V2} from "../lib/approval-plan-contract";
 import test from "node:test";
 import assert from "node:assert/strict";
 import {embedded,type Database} from "../lib/db";
@@ -12,11 +13,11 @@ test("combined plan approval requires the live owner cookie and same origin; bea
   const password="6728194035";await provisionOwner(db,password,true);
   const login=await handleOwnerAuth(new Request(origin+"/api/auth/login",{method:"POST",headers:{Origin:origin,Host:"127.0.0.1:3197","Content-Type":"application/json"},body:JSON.stringify({password})}),"login",env,async()=>db);assert.equal(login.status,200);
   const cookie=login.headers.getSetCookie().map(value=>value.split(";")[0]).join("; ");
-  const body={task_id:"task",review_token:"token",expected_plan:"plan",acknowledged:true};
+  const body={...APPROVAL_PLAN_CONTRACT_V2,task_id:"task",review_token:"token",expected_plan:"plan",acknowledged:true};
   const call=(payload:unknown=body,session=cookie,from=origin,extra:Record<string,string>={})=>POST(new Request(origin+"/api/studio/approval-plan-approve",{method:"POST",headers:{Cookie:session,Origin:from,"Content-Type":"application/json",...extra},body:JSON.stringify(payload)}),{params:Promise.resolve({action:"approval-plan-approve"})});
   assert.equal((await call(body,"")).status,401);assert.equal((await call(body,"",origin,{Authorization:"Bearer "+env.STUDIO_ACCESS_TOKEN})).status,401);
   assert.equal((await call(body,cookie,"https://other.example.test")).status,403);assert.equal((await call(body,cookie,"")).status,403);
-  for(const payload of [null,{},[],{...body,acknowledged:false},{...body,acknowledged:"true"},{...body,account_id:"override"},{...body,scheduled_at:"2030-01-01T00:00Z"},{...body,payload:{text:"replacement"}},{...body,enabled:true}])assert.equal((await call(payload)).status,400);
+  for(const payload of [null,{},[],{task_id:body.task_id,review_token:body.review_token,expected_plan:body.expected_plan,acknowledged:true},{...body,acknowledgement_version:1},{...body,acknowledgement:"Different acknowledgement"},{...body,acknowledgement_hash:"changed"},{...body,acknowledged:false},{...body,acknowledged:"true"},{...body,account_id:"override"},{...body,scheduled_at:"2030-01-01T00:00Z"},{...body,payload:{text:"replacement"}},{...body,enabled:true}])assert.equal((await call(payload)).status,400);
   for(const table of ["approvals","revision_approvals","publishing_outbox","publishing_approvals"])assert.equal((await db.query("SELECT * FROM "+table)).length,0);
  }finally{globals.studioDb=priorDb;globalThis.fetch=priorFetch;for(const [key,value] of Object.entries(previous)){if(value===undefined)delete process.env[key];else process.env[key]=value;}await db.close();}
 });

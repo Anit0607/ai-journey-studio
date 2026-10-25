@@ -2,7 +2,7 @@ import {randomUUID} from "node:crypto";
 import type {Connection,Database} from "./db";
 import {hash} from "./domain";
 import {NEW_PLATFORM_POLICY} from "./platform-policy";
-import {APPROVAL_PLAN_ACK} from "./approval-plan-contract";
+import {validApprovalPlanReceipt} from "./approval-plan-receipt";
 
 export const NORMALIZATION_EVENT="calendar_legacy_normalized_v1";
 export const NORMALIZATION_ACK="I approve normalizing only these four unbound legacy Calendar entries, including the displayed old/new aggregate timestamps and LinkedIn-only scope, without enabling generation, import, source clearance, model execution or publication.";
@@ -16,7 +16,7 @@ const verified=[
 const verifiedSettings={generation_enabled:false,generation_lead_hours:120,id:1,long_day:0,platform_times:{LinkedIn:{"0":"22:00","1":"22:00","3":"16:00","5":"15:00"}},post_time:null,review_hours:48,short_days:[1,3,5],start_date:"2026-11-02",timezone:"Asia/Kolkata",timing_basis:"india-first-buffer-hypothesis-v1",timing_mode:"per_platform",updated:"2026-10-24T07:27:03.211Z"};
 const ROW_KEYS=["id","planned_date","kind","intended_post","draft_due","review_due","generation_due","source_id","task_id","platform_schedule","updated"];
 const TIME_KEYS=["intended_post","draft_due","review_due","generation_due","updated"];
-const UUID=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i,SHA=/^[0-9a-f]{64}$/;
+const SHA=/^[0-9a-f]{64}$/;
 const UTC_MICROS=/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{6}Z$/;
 const MAX_HISTORY_ROWS=1024,MAX_HISTORY_BYTES=1_048_576,MAX_DETAIL_BYTES=65_536;
 type Row=Record<string,any>;
@@ -81,7 +81,7 @@ async function assertUnused(tx:Connection){
  if((await tx.query("SELECT id FROM public.tasks WHERE origin_key=ANY($1::text[]) LIMIT 1",[NORMALIZATION_IDS.map(id=>"calendar:"+id)])).length)fail("Calendar-origin task history blocks normalization");
  if((await tx.query("SELECT id FROM public.github_source_grants WHERE entry_id=ANY($1::uuid[]) LIMIT 1",[NORMALIZATION_IDS])).length)fail("Calendar source-grant history blocks normalization");
  for(const {receipt} of await history(tx,"calendar_publication_approved")){
-  if(!keys(receipt,["outbox_id","entry_id","calendar_binding","plan_version","acknowledgement"])||typeof receipt.entry_id!=="string"||!UUID.test(receipt.entry_id)||typeof receipt.outbox_id!=="string"||!UUID.test(receipt.outbox_id)||typeof receipt.calendar_binding!=="string"||!SHA.test(receipt.calendar_binding)||typeof receipt.plan_version!=="string"||!SHA.test(receipt.plan_version)||receipt.acknowledgement!==APPROVAL_PLAN_ACK)fail("Unknown Calendar publication receipt shape");
+  if(!validApprovalPlanReceipt(receipt))fail("Unknown Calendar publication receipt shape");
   if(NORMALIZATION_IDS.includes(receipt.entry_id.toLowerCase()))fail("Calendar publication approval history blocks normalization");
  }
 }

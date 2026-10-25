@@ -9,7 +9,7 @@ import {COMPARISON_SCOPE_HASH,validComparisonRequest} from '../../../lib/private
 export const runtime='nodejs',dynamic='force-dynamic',maxDuration=300;
 export async function GET(request:Request){
  if(!await passwordOwnerAuthenticated(request))return response({error:'Private owner access required'},401);
- try{return response(await comparisonSnapshot(await database(),runtimeConfig()));}catch{return response({error:'Comparison unavailable'},503);}
+ try{const c=runtimeConfig();return response({...await comparisonSnapshot(await database(),c),execution_ready:process.env.STUDIO_PRIVATE_COMPARISON_SCOPE===COMPARISON_SCOPE_HASH&&liveReady(c)&&(!hostedEnvironment()||hostedOwnerDraftReady(c))});}catch{return response({error:'Comparison unavailable'},503);}
 }
 export async function POST(request:Request){
  if(!await passwordOwnerAuthenticated(request))return response({error:'Private owner access required'},401);

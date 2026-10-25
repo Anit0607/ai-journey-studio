@@ -4,7 +4,7 @@ import {randomUUID} from "node:crypto";
 import {embedded,type Database} from "../lib/db";
 import {hash} from "../lib/domain";
 import {Calendar} from "../lib/calendar";
-import {APPROVAL_PLAN_ACK} from "../lib/approval-plan-contract";
+import {APPROVAL_PLAN_ACK,APPROVAL_PLAN_CONTRACT_V2} from "../lib/approval-plan-contract";
 import {previewLegacyNormalization,commitLegacyNormalization,NORMALIZATION_EVENT,type LegacyNormalizationPreview} from "../lib/calendar-legacy-normalization";
 
 // Independent golden inputs from the reviewed nonsecret capture. These are
@@ -120,4 +120,15 @@ test("receipt inspection caps count and UTF-8 bytes before loading; malformed TE
   let loaded=false;const traced:Database={...db,transaction:work=>db.transaction(tx=>work({query:async(sql,params)=>{if(sql.startsWith("SELECT id,detail")&&params?.[0]==="calendar_publication_approved")loaded=true;return tx.query(sql,params);}}))};
   await assert.rejects(previewLegacyNormalization(traced,now));if(["count","single-bytes","total-bytes"].includes(mode))assert.equal(loaded,false,mode+" must fail before loading TEXT history");await noAudit(db);
  }
+}));
+
+
+test("V2 and legacy scheduled publication receipts remain recognizable without rewriting their history",()=>fixture(async db=>{
+ const unrelated=randomUUID();
+ for(const receipt of [JSON.parse(publicationReceipt(unrelated)),{...JSON.parse(publicationReceipt(unrelated)),scheduler_policy_hash:null},{...JSON.parse(publicationReceipt(unrelated)),scheduler_policy_hash:null,...APPROVAL_PLAN_CONTRACT_V2}])await event(db,JSON.stringify(receipt));
+ const before=await db.query("SELECT * FROM events ORDER BY id");
+ await previewLegacyNormalization(db,now);
+ assert.deepEqual(await db.query("SELECT * FROM events ORDER BY id"),before,"Read-only compatibility does not migrate legacy or V2 consent");
+ await event(db,JSON.stringify({...JSON.parse(publicationReceipt(cases[0][0])),scheduler_policy_hash:null,...APPROVAL_PLAN_CONTRACT_V2}));
+ await assert.rejects(previewLegacyNormalization(db,now),/publication approval history blocks/);await noAudit(db);
 }));

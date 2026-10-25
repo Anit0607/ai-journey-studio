@@ -5,7 +5,7 @@ import {calendarPlatformPolicy} from './platform-policy';
 import {githubSelectionPool} from './github-source-selection';
 import {githubProvenanceHash,stableJson} from './github-source-policy';
 import {parseLegacyNormalizationRequest as parseBoundedJSON,NORMALIZATION_IDS} from './calendar-legacy-normalization';
-import {APPROVAL_PLAN_ACK} from './approval-plan-contract';
+import {validApprovalPlanReceipt} from './approval-plan-receipt';
 
 const HOUR=3_600_000;
 export const GENERATION_ADVANCED='calendar_generation_advanced';
@@ -48,8 +48,7 @@ function validatedHistory(events:HistoryEvent[]){
    const lead=milliseconds(receipt.intended_post)-milliseconds(receipt.generation_due);
    if(lead<120*HOUR||lead>336*HOUR||milliseconds(receipt.previous_generation_due)<=milliseconds(receipt.generation_due)||milliseconds(receipt.draft_due)!==milliseconds(receipt.review_due)||milliseconds(receipt.intended_post)-milliseconds(receipt.review_due)!==48*HOUR)return fail('Inconsistent generation-time receipt');
   }else if(event.kind==='calendar_publication_approved'){
-   const expected=['outbox_id','entry_id','calendar_binding','plan_version','acknowledgement'];
-   if(!(keys(receipt,expected)||keys(receipt,[...expected,'scheduler_policy_hash']))||!isUuid(receipt.entry_id)||!isUuid(receipt.outbox_id)||!isHash(receipt.calendar_binding)||!isHash(receipt.plan_version)||receipt.acknowledgement!==APPROVAL_PLAN_ACK||('scheduler_policy_hash' in receipt&&receipt.scheduler_policy_hash!==null&&!isHash(receipt.scheduler_policy_hash)))return fail('Unknown Calendar publication receipt shape');
+   if(!validApprovalPlanReceipt(receipt))return fail('Unknown Calendar publication receipt shape');
   }else if(!keys(receipt,['old_entry','old_task','old_version','new_entry','source_id','source_hash','reason','intended_post','generation_due','review_due','note'])||!['old_entry','new_entry','old_task','source_id'].every(key=>isUuid(receipt[key]))||!isHash(receipt.old_version)||!isHash(receipt.source_hash)||!['intended_post','generation_due','review_due'].every(key=>storedStamp(receipt[key]))||typeof receipt.reason!=='string'||!receipt.reason.trim()||receipt.reason.length>1000||typeof receipt.note!=='string')return fail('Unknown Calendar recovery receipt shape');
   return {...event,receipt};
  });

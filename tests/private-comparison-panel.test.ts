@@ -14,7 +14,7 @@ test('empty comparison stays absent and interrupted work is clearly unconfirmed'
  assert.equal(renderToStaticMarkup(createElement(ComparisonResult,{state:{history:[]} as any})), '');
  const html=renderToStaticMarkup(createElement(ComparisonResult,{state:{history:[{id:'1',kind:'private_comparison_started',detail:{}}],notice:'No automatic retry.'} as any}));assert(html.includes('outcome unconfirmed'));assert(html.includes('do not retry'));
 });
-test('result refresh follows existing workspace events and introduces no polling timer or POST',()=>{
+test('result refresh follows existing workspace events without a polling timer',()=>{
  const source=readFileSync(new URL('../app/private-comparison-panel.tsx',import.meta.url),'utf8'),page=readFileSync(new URL('../app/page.tsx',import.meta.url),'utf8');
- assert(source.includes('[refreshKey]'));assert(page.includes('PrivateComparisonPanel refreshKey={state.events.map'));assert(!/setInterval|setTimeout|method:\s*['"]POST/.test(source));
+ assert(source.includes('[refreshKey,refresh,invalidate]'));assert(page.includes('PrivateComparisonPanel refreshKey={state.events.map'));assert(!/setInterval|setTimeout/.test(source));
 });

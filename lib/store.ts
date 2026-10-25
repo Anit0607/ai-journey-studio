@@ -249,7 +249,7 @@ export class Store{
       await this.event(tx,id,"retry_queued","User requested resume at saved checkpoint");
     });
   }
-  async approve(id:string,version:string){
+  async approve(id:string,version:string,approvalScope:"artifacts"|"final-post"="artifacts"){
     await this.db.transaction(async tx=>{
       const t=(await tx.query<Task>("SELECT * FROM tasks WHERE id=$1 FOR UPDATE",[id]))[0];
       if(!t||t.status!=="review"||t.revision_parent_task_id)throw Error("Task is not ready for approval");
@@ -269,7 +269,7 @@ export class Store{
       await tx.query("INSERT INTO approvals(task_id,version,evidence_version) VALUES($1,$2,$3) ON CONFLICT(task_id) DO NOTHING",[id,version,quality.evidence_version]);
       await saveEvidenceApproval(tx,id,"original:"+version,quality);
       await tx.query("UPDATE tasks SET status='approved',updated=now() WHERE id=$1",[id]);
-      await this.event(tx,id,"approved","User approved exact artifact bundle; publication disabled");
+      await this.event(tx,id,"approved",approvalScope==="final-post"?"Owner approved the exact final LinkedIn post; artifact bundle retained as review context; see versioned publication approval receipt":"User approved exact artifact bundle; publication disabled");
     });
   }
   async revisionContext(tx:Connection,id:string,expected:string){
@@ -306,7 +306,7 @@ export class Store{
       return saveEvidenceDecision(tx,id,context.bundle,context.source,input);
     });
   }
-  async approveRevision(id:string,expected:string,acknowledged:boolean){
+  async approveRevision(id:string,expected:string,acknowledged:boolean,approvalScope:"artifacts"|"final-post"="artifacts"){
     if(acknowledged!==true)throw Error("Human factual review acknowledgement required");
     await this.db.transaction(async tx=>{
       const context=await this.revisionContext(tx,id,expected);
@@ -318,7 +318,7 @@ export class Store{
       if(bundleVersion(context.bundle,context.source.hash)!==context.latest.version)throw Error("Stale artifact version");
       const inserted=await tx.query("INSERT INTO revision_approvals(revision_id,version,evidence_version) VALUES($1,$2,$3) ON CONFLICT DO NOTHING RETURNING revision_id",[context.latest.id,context.latest.version,quality.evidence_version]);
       await saveEvidenceApproval(tx,id,context.token,quality);
-      if(inserted.length)await this.event(tx,id,"revision_approved","User approved revision "+context.latest.id+" after factual review; publication disabled");
+      if(inserted.length)await this.event(tx,id,"revision_approved",approvalScope==="final-post"?"Owner approved the exact final LinkedIn post in revision "+context.latest.id+"; artifact bundle retained as review context; see versioned publication approval receipt":"User approved revision "+context.latest.id+" after factual review; publication disabled");
     });
   }
   async heartbeat(enabled:boolean){await this.db.query("INSERT INTO runtime(name,heartbeat,enabled) VALUES('job-step',now(),$1) ON CONFLICT(name) DO UPDATE SET heartbeat=now(),enabled=$1",[enabled]);}
