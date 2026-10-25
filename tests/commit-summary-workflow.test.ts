@@ -27,7 +27,7 @@ test('six mock checkpoints keep the imported source attributed and LinkedIn-only
    assert(!prompt.includes('Find an honest learning-story angle supported by the source.'));
    assert(!prompt.includes('Learning journey, no sales funnel.'));assert(prompt.includes('Attributed source update, no sales funnel.'));
    assert(prompt.includes('not code, a diff, tests or deployment results'));
-   if(checkpoint===1)assert(prompt.includes('Choose one concise attributed source update'));
+   if(checkpoint===1){assert(prompt.includes('Choose one specific source-supported problem, decision or method'));assert(prompt.includes('internal editorial hold'));assert(prompt.includes('Do not infer a personal learning story.'));}
    if(checkpoint===0)assert(!prompt.includes('Do not rewrite the facts into third person.'));
    if(checkpoint===4){assert(prompt.includes('Produce the LinkedIn variant only.'));assert(!prompt.includes('Produce LinkedIn, X and Instagram variants.'));}
    let text=checkpoint<3?'SOURCE: '+source.text:checkpoint===3?copy:'### LinkedIn\n'+copy;

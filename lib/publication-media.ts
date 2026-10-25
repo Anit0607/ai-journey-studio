@@ -88,6 +88,7 @@ async function approvedContext(tx:Connection,taskId:string,reviewToken:string):P
   const approval=latest?(await tx.query<{version:string;evidence_version:string|null}>("SELECT version,evidence_version FROM revision_approvals WHERE revision_id=$1",[latest.id]))[0]:(await tx.query<{version:string;evidence_version:string|null}>("SELECT version,evidence_version FROM approvals WHERE task_id=$1",[taskId]))[0];
   if(approval?.version!==version)throw new MediaValidationError("Approve the exact final content before rendering media");
   const quality=await reviewReadiness(tx,taskId,bundle,source);
+  if(quality.editorial.blocking)throw new MediaValidationError("Resolve the saved editorial hold before rendering media");
   if(!await evidenceApprovalCurrent(tx,taskId,reviewToken,quality,approval?.evidence_version))throw new MediaValidationError("Resolve factual review flags before rendering media");
   const platformPolicy=taskPlatformPolicy(task);
   if(!activePlatforms(platformPolicy).includes("Instagram"))throw new MediaValidationError("Instagram is not active for this task");

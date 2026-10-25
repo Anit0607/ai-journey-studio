@@ -285,6 +285,7 @@ export class Calendar{
       if(source?.text===CAPSULE)blockers.push("Source lacks concrete events and emotional context; do not invent personal lessons or feelings");
       const reviewReady=task?.status==="review"||task?.status==="approved";
       if(reviewReady&&review?.quality.flags.length)blockers.push("Linked content has source-grounding flags");
+      if(reviewReady&&review?.quality.editorial?.blocking)blockers.push("Linked content has a saved editorial hold; story/source correction required");
       const linkageReason=task||job?.task_id?linkedBlocker(task,entry,job||{},source):null;
       if(linkageReason)blockers.push(linkageReason);
       const due=!!entry.generation_due&&new Date(entry.generation_due)<=now;
@@ -293,7 +294,7 @@ export class Calendar{
       const variants=activePlatforms(policy).map(platform=>{const variant=parsed.variants.find(item=>item.platform===platform)!;return {platform,...(entry.platform_schedule[platform]||{intended_post:entry.intended_post,draft_due:entry.draft_due,review_due:entry.review_due}),status:content?(variant.hash?review?.approval&&parsed.complete?"user_approved_quality_separate":"review_needed":"not_separately_identified"):"not_generated",artifact_hash:variant.hash,source_artifact_hash:content?.hash||null};});
       const generationLate=!!entry.generation_due&&(job?.dispatched_at?new Date(job.dispatched_at)>new Date(entry.generation_due):!task&&new Date(entry.generation_due)<now);
       const timingNotice=generationLate?(job?.dispatched_at?"Queued after the target generation time; the review deadline is unchanged":"Target generation time has passed. Catch-up is allowed only while the review deadline remains in the future"):null;
-      return {...entry,platform_policy:policy||null,active_platforms:activePlatforms(policy),job,recovery:calendarRecoverySnapshot(entry,job,task,source,state.ledger||[],now),generation_late:generationLate,timing_notice:timingNotice,status:(review?.approval||(!review?.latest_revision&&review?.original_approval))&&!parsed.complete?"historical_approval_completeness_unverified":reviewReady&&review?.quality.flags.length?"changes_needed":review?.approval?"user_approved_quality_separate":review?.latest_revision?"review_needed":task?.status==="review"?"review_needed":task?task.status:due?blockers.length?"due_blocked":"due_ready":blockers.length?"planned_blocked":"planned_ready",blocked_reasons:blockers,variants,linked_task_status:task?.status||null,linked_content_version:review?.token||null};
+      return {...entry,platform_policy:policy||null,active_platforms:activePlatforms(policy),job,recovery:calendarRecoverySnapshot(entry,job,task,source,state.ledger||[],now),generation_late:generationLate,timing_notice:timingNotice,status:(review?.approval||(!review?.latest_revision&&review?.original_approval))&&!parsed.complete?"historical_approval_completeness_unverified":reviewReady&&(review?.quality.flags.length||review?.quality.editorial?.blocking)?"changes_needed":review?.approval?"user_approved_quality_separate":review?.latest_revision?"review_needed":task?.status==="review"?"review_needed":task?task.status:due?blockers.length?"due_blocked":"due_ready":blockers.length?"planned_blocked":"planned_ready",blocked_reasons:blockers,variants,linked_task_status:task?.status||null,linked_content_version:review?.token||null};
     })};
   }
 }

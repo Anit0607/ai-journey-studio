@@ -130,6 +130,7 @@ async function finalArtifact(tx:Connection,id:string,expected:string,platform:Pl
   const approval=latest?(await tx.query<{version:string;evidence_version:string|null}>("SELECT version,evidence_version FROM revision_approvals WHERE revision_id=$1",[latest.id]))[0]:(await tx.query<{version:string;evidence_version:string|null}>("SELECT version,evidence_version FROM approvals WHERE task_id=$1",[id]))[0];
   if(approval?.version!==version)throw new PublicationValidationError("Approve the exact final artifact before scheduling publication");
   const quality=await reviewReadiness(tx,id,bundle,source);
+  if(quality.editorial.blocking)throw new PublicationValidationError("Resolve the saved editorial hold before approval or publication");
   if(!await evidenceApprovalCurrent(tx,id,token,quality,approval?.evidence_version))throw new PublicationValidationError("Resolve source-grounding flags before publishing");
   const artifact=bundle.find(item=>item.role==="Platform Adapter")!,variants=platformVariants(artifact,platformPolicy),variant=variants.variants.find(item=>item.platform===platform)!;
   if(!variants.complete||!variant?.text||!variant.hash)throw new PublicationValidationError("Final platform variants are incomplete");

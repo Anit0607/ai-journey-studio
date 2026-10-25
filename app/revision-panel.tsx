@@ -106,6 +106,7 @@ export default function RevisionPanel({task,review,busy,action,agentRevisionElig
     <p><strong>User approval:</strong> {pending?"agent revision pending; approval blocked":review.approval?"approved for this exact version":"fresh approval required"} · <strong>Factual quality:</strong> {review.quality.status.replaceAll("_"," ")}</p>
     <p>Original approval remains in history. Approval does not establish truth or authorize publishing.</p>
     <p className="fine">{review.quality.notice}</p>
+    {review.quality.editorial&&<section aria-label="Editorial review"><h3>Story and reader value</h3><p><strong>{review.quality.editorial.status.replaceAll("_"," ")}</strong></p><p>{review.quality.editorial.notice}</p>{review.quality.editorial.issues.map((issue:any,index:number)=><p key={index}><strong>{issue.role}:</strong> {issue.message}</p>)}</section>}
     {review.quality.flags.length>0&&<details><summary>Source-grounding flags ({review.quality.flags.length})</summary>{review.quality.flags.map((flag:any,index:number)=><p key={index}><strong>{flag.role}:</strong> {flag.claim}<br/>{flag.reason}</p>)}</details>}
     <EvidencePanel quality={review.quality} task={task} token={review.token} busy={busy||saving} action={action}/>
     <label>Reason / revision note<textarea style={textStyle} aria-label="Revision note" value={note} maxLength={1000} onChange={event=>setNote(event.target.value)}/></label>
@@ -138,8 +139,8 @@ export default function RevisionPanel({task,review,busy,action,agentRevisionElig
       <section aria-label="Separate revision approval"><h3>Approve saved artifacts separately</h3>
         <p>Approval applies only to the saved version, never to unsaved editor drafts.</p>
         {unsaved.length>0&&<p>Save your unsaved roles before reviewing the complete saved revision for approval.</p>}
-        <label><input type="checkbox" disabled={busy||saving||!!editor.pending||unsaved.length>0||stale} checked={acknowledged} onChange={event=>{setAck(event.target.checked);setAckToken(approvalToken);}}/> I reviewed all six current artifacts against the cleared note; approval is not publishing.</label>
-        <button disabled={busy||saving||!!editor.pending||unsaved.length>0||stale||!acknowledged||!!review.approval||!!pending||!!review.is_agent_revision||review.quality.flags.length>0} onClick={()=>void action("approve-revision",{task,expected:review.token,acknowledged})}>Approve this exact revision</button>
+        <label><input type="checkbox" disabled={busy||saving||!!editor.pending||unsaved.length>0||stale} checked={acknowledged} onChange={event=>{setAck(event.target.checked);setAckToken(approvalToken);}}/> I reviewed all six current artifacts against the cleared note and the practical-journey brief, including the specific method, reader value and natural voice; approval is not publishing.</label>
+        <button disabled={busy||saving||!!editor.pending||unsaved.length>0||stale||!acknowledged||!!review.approval||!!pending||!!review.is_agent_revision||review.quality.flags.length>0||review.quality.editorial?.blocking} onClick={()=>void action("approve-revision",{task,expected:review.token,acknowledged})}>Approve this exact revision</button>
       </section>
     </>}
     <details><summary>Original artifacts · {review.original_approval?"historical user approval preserved":"not approved"}</summary>{review.original_bundle.map((item:any)=><details key={item.role}><summary>{item.role}</summary><pre>{item.text}</pre><small>SHA-256 {item.hash}</small></details>)}</details>

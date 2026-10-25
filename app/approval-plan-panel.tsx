@@ -5,7 +5,7 @@ import {APPROVAL_PLAN_ACK,type ApprovalPlan} from "../lib/approval-plan-contract
 // Browser-safe display data and consent text only; no server implementation import.
 type Props={preview:{plan:ApprovalPlan|null;reason?:string};publishingEnabled?:boolean;busy:boolean;action:(path:string,body:unknown)=>Promise<unknown>};
 export default function ApprovalPlanPanel(props:Props){
-  return props.preview.plan?<ExactPlan key={props.preview.plan.version} {...props} plan={props.preview.plan}/>:<section aria-label="Automatic LinkedIn approval"><p>Automatic LinkedIn plan unavailable: {props.preview.reason}</p><p>The assistant must prepare the missing owner-approved calendar linkage or verified destination before this plan can be approved. No posting time or destination has been chosen automatically.</p></section>;
+  return props.preview.plan?<ExactPlan key={props.preview.plan.version} {...props} plan={props.preview.plan}/>:<section aria-label="Automatic LinkedIn approval"><p>Automatic LinkedIn plan unavailable: {props.preview.reason}</p><p>The assistant must resolve the stated content-review, owner-approved calendar linkage or verified-destination blocker before this plan can be approved. No posting time or destination has been chosen automatically.</p></section>;
 }
 function ExactPlan({plan,publishingEnabled,busy,action}:Props&{plan:ApprovalPlan}){
   const [ack,setAck]=useState(false),[pending,setPending]=useState(false),[submitted,setSubmitted]=useState(false),lock=useRef(false);
@@ -21,6 +21,7 @@ function ExactPlan({plan,publishingEnabled,busy,action}:Props&{plan:ApprovalPlan
     <p>Existing calendar time (UTC): <strong>{plan.scheduled_at}</strong></p>
     <p>Delivery mode: scheduled automatic publication.</p>
     <pre>{plan.text}</pre>
+    <p>Editorial review is still required: does this exact post show a specific supported problem, decision or method that is useful to people already using ChatGPT/Codex, in a natural voice? Factual checks alone do not establish content quality.</p>
     <p className="fine">Source SHA-256 {plan.source_hash}<br/>Review {plan.review_token}<br/>LinkedIn draft SHA-256 {plan.variant_hash}<br/>Scheduler policy SHA-256 {plan.scheduler_policy_hash||"generic cadence"}<br/>Plan SHA-256 {plan.version}</p>
     <label><input type="checkbox" checked={ack} disabled={busy||pending||submitted} onChange={event=>setAck(event.target.checked)}/>{APPROVAL_PLAN_ACK}</label>
     <button disabled={busy||pending||submitted||!ack} onClick={()=>void approve()}>Approve exact content and publication plan</button>
