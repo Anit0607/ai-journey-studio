@@ -72,7 +72,7 @@ test('artifact review, manual edits, content approval, publication staging and m
 
 for(const unsafe of [false,true])test('revision prior and final bundles use artifact scanning while feedback stays conservative'+(unsafe?' and terminal credentials stay blocked':''),()=>isolated(async(db,store)=>{
  const {task,review}=await seed(db,store);await assert.rejects(queueAgentRevision(store,config,task.id,review.token,'Discuss authorization concepts'),/Excluded private/);
- const child=await queueAgentRevision(store,config,task.id,review.token,'Shorten the proposed approach');assert((await revisionPromptContext(store,child)).includes(TEXT));let calls=0;
+ const child=await queueAgentRevision(store,config,task.id,review.token,'Shorten the proposed approach');assert((await revisionPromptContext(store,{...child,checkpoint:3})).includes(TEXT));let calls=0;
  for(let n=0;n<6;n++)await step(store,config,async()=>{const role=ROLES[calls++];return completion(role==='Critic'?(unsafe?'Authorization: Basic YWxpY2U6c2VjcmV0':CRITIC):role==='Platform Adapter'?variantFixture(TEXT):TEXT);},true);
  const state=await store.snapshot(),current=state.reviews[0];assert.equal(calls,6);assert.equal(state.ledger.length,6);assert(state.ledger.every((x:{status:string})=>x.status==='settled'));assert.equal(state.outputs.filter((x:{task_id:string})=>x.task_id===child.id).length,6);assert.equal(state.approvals.length,0);
  if(unsafe){assert.equal(current.history.length,0);assert.equal(state.tasks.find((x:{id:string})=>x.id===child.id).status,'blocked');}
