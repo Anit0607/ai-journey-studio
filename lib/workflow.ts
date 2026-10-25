@@ -1,3 +1,4 @@
+import {draftPromptMetadata} from './draft-run-receipt';
 import {buildDraftPrompt} from './draft-prompt';
 import {assertOwnerCalendarScope,type OwnerCalendarScope} from "./owner-calendar-policy";
 import {admittedHostedTask,HostedCalendarScanExhausted,HOSTED_SCAN_EXHAUSTED} from "./hosted-calendar-policy";
@@ -41,7 +42,7 @@ export async function step(store:Store,c:RuntimeConfig,call=providerCall,enabled
       const provider=providers[index],p=c[provider]!;
       const inputBytes=Buffer.byteLength(groundedPrompt)+providerResponseFormatBytes(provider,artifactContract);
       if(inputBytes>(revisionContext?96000:48000))throw Error("Input size cap reached");
-      reservation=await store.reserve(task,provider,p,tokenCost(p,inputBytes+256,1200),undefined,policy.ownerDraft,policy.ownerCalendar?{scope:policy.ownerCalendar,config:c}:undefined);
+      reservation=await store.reserve(task,provider,p,tokenCost(p,inputBytes+256,1200),undefined,policy.ownerDraft,policy.ownerCalendar?{scope:policy.ownerCalendar,config:c}:undefined,draftPromptMetadata(task,s,previous,groundedPrompt));
       try{
         await policy.beforeProvider?.();
         if(task.content_brief?.source_policy){
