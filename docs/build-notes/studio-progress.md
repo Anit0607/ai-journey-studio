@@ -1,20 +1,19 @@
-# Studio progress and evidence quality
+# Studio progress and database sleep
 
 ## Verified progress
-- Documented assistant-observed Studio workflow, review, test and deployment results from 25 October 2026; these are system observations, not the owner's personal experiences or feelings.
-- Verified that the scheduled batch ran from 00:15:03.207 to 00:15:20.411 UTC on 25 October 2026 and saved six agent outputs for one LinkedIn draft.
-- Documented that the run's source contained repository and account attribution plus one commit title, with no implementation details, test results or evidence of the owner's learning.
-- Documented that the generated copy expanded that title into claims about privacy settings and audit trails that the supplied evidence did not establish.
-- Verified that the original draft's quality status was needs_revision with 25 findings when inspected at 00:17:35.351 UTC; completing all six stages did not make the content ready for approval.
-- Replaced the unsupported copy with an assistant-authored manual repository-attributed commit record; the correction observed at 00:21:39 UTC remained unapproved and needed human review, and no model was rerun to evaluate the replacement.
-- Updated the commit-title drafting instructions to remove requirements for a hook, payoff or takeaway when the source cannot support them, and to keep technical title terms from becoming invented implementation details.
-- Added regression coverage for the observed draft and for malformed structured Critic responses being rejected rather than accepted as a legacy plain-text critique.
-- Verified that all 845 offline tests passed for the reviewed candidate, with zero failures or skipped tests; type checking, lint and the production build also passed, as recorded at 00:35:40 UTC.
-- Documented that these offline checks establish prompt composition and response parsing, not the quality of a future live model draft; no live model call or publication was made by this validation.
-- Verified the production release of the reviewed change and its public application alias at 00:38:22 UTC; this confirms deployment, not that a later generated post will be accurate or useful.
-- Verified that the delivery check finishing at 00:40:01.724 UTC reported publishing idle; by the 00:40:27.714 UTC observation, no new post or publication approval had been created, and only the historical publication job remained.
-- Documented the evidence gap: the manual correction could accurately quote the repository record, but that record contained no substantive account of the problem, the change or an observed result for a richer learning story.
-- Documented that the commit linked below identifies the reviewed implementation change; the live-run, manual-review, validation and deployment statements above come from separately inspected receipts, not from treating a commit link as runtime proof.
+- Documented assistant-observed database configuration, scheduler behavior and provider status on 25 October 2026; these are system observations, not the owner's personal experiences or feelings.
+- Verified that the existing Neon Free account had a monthly allowance of 100 compute-unit hours per project.
+- Verified that the production endpoint was configured with both minimum and maximum compute at 0.25 compute units and a five-minute autosuspend delay.
+- Documented two sources of database reads in the previous setup: two-minute integration requests and five-second signed-in dashboard polling.
+- Updated signed integration-request handling to validate the request and return before database access when outside the configured source-intake and publishing windows.
+- Updated source intake to use hourly windows and publication handling to use exact configured windows.
+- Updated background dashboard polling to pause when the page is hidden or unfocused, or after 60 seconds without activity; polling remains available when the page is active and recently used.
+- Verified that fresh Neon provider observations reported at 04:10:55 UTC and 04:12:20 UTC on 25 October 2026 showed the production endpoint as SUSPENDED; these are reported observation times, not suspension event timestamps.
+- Verified that a fresh Neon observation reported at 04:14:50 UTC again showed SUSPENDED; a separate Upstash metadata observation recorded the scheduled 04:12 integration wake as SUCCESS, without establishing a response body, HTTP status code or request-level SQL trace.
+- Documented that the observation used provider status reads without SQL queries, manual resume or settings changes during the observation window.
+- Documented that the verification used the existing connected account and Free plan, without a paid-plan upgrade.
+- Documented the limits of this result: the checks establish endpoint state at the observed times, not uninterrupted sleep, measured monthly compute savings, guaranteed use within the Free allowance or successful LinkedIn publication.
+- Documented that the commit linked below identifies the implementation change; the endpoint settings and runtime observations above come from separately inspected provider receipts, not from treating a commit link as runtime proof.
 
 ## Evidence
-- https://github.com/anit0607/ai-journey-studio/commit/e92682b8e57861dc10248bc8eb4bbcc238546545
+- https://github.com/anit0607/ai-journey-studio/commit/e2a608b9f7a9e1dfde4f96709e8cb47a182819ff
