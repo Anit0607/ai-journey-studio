@@ -7,14 +7,17 @@ import {assertSourcePrivacy} from "./sources";
 import {assertArtifactPrivacy} from "./artifact-privacy";
 import type {Connection} from "./db";
 
-export const EVIDENCE_POLICY="evidence-review-v2";
+export const EVIDENCE_POLICY="evidence-review-v3-lossless-spans";
 export type Span={start:number;end:number};
 export type Finding={category?:'structure';id:string;kind:"wording_review"|"hard";role:string;claim:string;reason:string;artifact_hash:string;span:Span};
 export type Decision={id:string;binding:string;finding_id:string;decision:"accept"|"withdraw";policy_version:string;actor:string;reason:string;evidence:{source_span:Span;source_quote:string};context:{source_hash:string;artifact_hash:string;bundle_hash:string;claim_span:Span;claim_text:string;reported_date?:string|null};created?:string};
 type EvidenceSource={text:string;hash:string;cleared?:boolean;clearance_id?:string|null;cleared_at?:unknown;revoked_at?:unknown;reported_date?:string};
 const plain=(text:string)=>text.trim().replace(/^(?:[-*+>]\s+|#{1,3}\s+)/,'').replace(/\*\*/g,'').replace(/^["“]|["”,]$/g,'').replace(/[.!]$/,'').replace(/\s+/g,' ').toLowerCase();
 function spans(text:string):Array<Span&{text:string}>{
- const out:Array<Span&{text:string}>=[];const re=/[^\n.!?]+(?:[.!?](?=\s|$)|$)/g;let m;
+ // Keep interior punctuation (decimal times/amounts, paths and URLs) and
+ // unpunctuated lines. Every non-whitespace character belongs to an atom;
+ // offsets remain slices of the original UTF-16 text, never rewritten text.
+ const out:Array<Span&{text:string}>=[];const re=/[^\n]+?(?:[.!?](?=\s|$)|(?=\n|$))/g;let m;
  while((m=re.exec(text))){const lead=m[0].length-m[0].trimStart().length,body=m[0].trim();if(body)out.push({start:m.index+lead,end:m.index+lead+body.length,text:body});}return out;
 }
 /** Provenance/format hints only, using exactly the sentence boundaries accepted below.
@@ -182,7 +185,7 @@ export async function saveEvidenceDecision(tx:Connection,task:string,bundle:Arti
  await tx.query("INSERT INTO events(id,task_id,kind,detail) VALUES($1,$2,'evidence_review_saved',$3)",[randomUUID(),task,'Individual '+input.decision+' decision '+id+' for '+item.id+'; policy '+EVIDENCE_POLICY+'; content approval remains separate']);return {id};
 }
 
-export const CRITIC_CONTRACT=' Return JSON only, without Markdown fences or surrounding prose: {"schema":2,"source_hash":"copy current source_hash","index_hash":"copy current index_hash","Unsupported claims:":"short assessment, never factual certification","Evidence needed:":"short gaps","Proposed advice:":"short proposed approach","evidence":[{"claim_id":"writer:0 or platform:0 from the current index","source_ids":["source:0"],"verdict":"wording_review","reason":"why owner comparison is needed"}]}. Select only server-issued sentence IDs from CURRENT CRITIC EVIDENCE INDEX. Never calculate offsets, invent IDs, copy draft text as source evidence, or reuse a previous revision index. For unsupported claims use verdict="unsupported", source_ids=[], and a concise reason; nonexistent support must not be invented. Reasons are critique, never factual evidence. For wording_review select one or more consecutive complete source sentences whose text actually supports the wording; a repository/account metadata line cannot support implementation, results or benefits. At most 8 entries and 600 characters per reason; prioritize uncertain public claims and action attribution. Missing coverage still requires owner review; an empty list is not verification. Do not contradict an unsupported verdict by declaring all claims supported. Fit within the existing 1200 output-token cap; no extra call.';
+export const CRITIC_CONTRACT=' Return JSON only, without Markdown fences or surrounding prose: {"schema":2,"source_hash":"copy current source_hash","index_hash":"copy current index_hash","Unsupported claims:":"short assessment, never factual certification","Evidence needed:":"short gaps","Proposed advice:":"short proposed approach","evidence":[{"claim_id":"writer:0 or platform:0 from the current index","source_ids":["source:0"],"verdict":"wording_review","reason":"why owner comparison is needed"}]}. Preserve these exact key names, including their trailing colons; do not rename or add fields. Select only server-issued sentence IDs from CURRENT CRITIC EVIDENCE INDEX. Never calculate offsets, invent IDs, copy draft text as source evidence, or reuse a previous revision index. For unsupported claims use verdict="unsupported", source_ids=[], and a concise reason; nonexistent support must not be invented. Never attach source IDs to an unsupported verdict. Reporting that an earlier draft made unsupported claims is not asserting those claims: compare the complete current sentence, attribution and negation against SOURCE. Reasons are critique, never factual evidence. For wording_review select one or more consecutive complete source sentences whose text actually supports the wording; a repository/account metadata line cannot support implementation, results or benefits. At most 8 entries and 600 characters per reason; prioritize uncertain public claims and action attribution. Missing coverage still requires owner review; an empty list is not verification. Do not contradict an unsupported verdict by declaring all claims supported. Fit within the existing 1200 output-token cap; no extra call.';
 function citationSuggestions(data:Record<string,unknown>,bundle:Artifact[],source:EvidenceSource){
  const allowed=['schema','source_hash','index_hash','Unsupported claims:','Evidence needed:','Proposed advice:','evidence'];
  if(Object.keys(data).some(key=>!allowed.includes(key))||data.source_hash!==source.hash||!Array.isArray(data.evidence)||data.evidence.length>8||['Unsupported claims:','Evidence needed:','Proposed advice:'].some(key=>typeof data[key]!=='string'||!String(data[key]).trim()||String(data[key]).length>1000))throw Error();
@@ -229,7 +232,7 @@ export async function saveEvidenceApproval(tx:Connection,task:string,token:strin
  const rows=await tx.query<{id:string}>("INSERT INTO evidence_approval_receipts(id,task_id,binding,evidence_version,review_token) VALUES($1,$2,$3,$4,$5) ON CONFLICT DO NOTHING RETURNING id",[randomUUID(),task,quality.binding,quality.evidence_version||"",token]);
  if(rows.length)await tx.query("INSERT INTO events(id,task_id,kind,detail) VALUES($1,$2,'evidence_bound_content_approval',$3)",[randomUUID(),task,"Approval receipt "+rows[0].id+" bound to "+quality.binding+"; individual evidence version "+(quality.evidence_version||"none")+"; publication remains separate"]);
 }
-export async function evidenceApprovalCurrent(tx:Connection,task:string,token:string,quality:ReturnType<typeof evidenceQuality>,stored:string|null|undefined){
+export async function evidenceApprovalCurrent(tx:Connection,task:string,token:string,quality:ReturnType<typeof evidenceQuality>,_stored:string|null|undefined){
  const rows=await tx.query<{binding:string;evidence_version:string;review_token:string}>('SELECT binding,evidence_version,review_token FROM evidence_approval_receipts WHERE task_id=$1',[task]);
- return !quality.flags.length&&(rows.some(row=>row.binding===quality.binding&&row.review_token===token&&row.evidence_version===(quality.evidence_version||""))||(!rows.length&&!quality.evidence_version&&stored==null));
+ return !quality.flags.length&&rows.some(row=>row.binding===quality.binding&&row.review_token===token&&row.evidence_version===(quality.evidence_version||""));
 }

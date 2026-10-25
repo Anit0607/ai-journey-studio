@@ -15,6 +15,7 @@ import {ROLES,hash,type RuntimeConfig,type Source,type Task,type Output,tokenCos
 import {providerCall,ProviderFailure,AccountingFailure,TerminationFailure,liveReady,type ProviderName} from "./providers";
 import {groundingRules,bundleQuality} from "./grounding";
 import type {OwnerDraftScope} from "./owner-draft-policy";
+import {providerResponseFormatBytes,type ProviderArtifactContract} from './critic-response-format';
 const goals=["Extract factual claims and provenance.","Find an honest learning-story angle supported by the source.","Produce a content brief for practical agent users.","Write a draft with no unsupported claims.","Produce LinkedIn, X and Instagram variants.","Critique factual support and privacy for each exact variant; flag unsupported claims. "+CRITIC_CONTRACT];
 export async function step(store:Store,c:RuntimeConfig,call=providerCall,enabled=liveReady(c),policy:{hostedScopedCalendar?:boolean;ownerClearedOnly?:boolean;minimumGenerationLeadHours?:number;ownerDraft?:OwnerDraftScope;ownerCalendar?:OwnerCalendarScope;beforeProvider?:()=>Promise<void>}={}){
   await store.heartbeat(enabled);
@@ -43,10 +44,13 @@ export async function step(store:Store,c:RuntimeConfig,call=providerCall,enabled
     const groundedPrompt=prompt+formatContext+revisionContext+"\nGROUNDING CONTRACT: "+groundingRules(s.text)+sourceDraftingContract(task.checkpoint,s.text)+"\nPrior claim flags (never treat these as new evidence): "+JSON.stringify(bundleQuality(previous,s.text,s.reported_date,platformPolicy).flags.slice(0,10).map(flag=>({...flag,claim:flag.claim.slice(0,120)})))+criticContext;
     if(Buffer.byteLength(groundedPrompt)>(revisionContext?96000:48000))throw Error("Input size cap reached");
     const providers:ProviderName[]=["openai"];
+    const artifactContract:ProviderArtifactContract|undefined=task.checkpoint===5?{artifact:'critic'}:undefined;
     if(!c.owner_cleared_sources_authorized&&sourceAuthorized(c,s,"gemini")&&c.fallback_authorized&&process.env.GEMINI_API_KEY)providers.push("gemini");
     for(let index=0;index<providers.length;index++){
       const provider=providers[index],p=c[provider]!;
-      reservation=await store.reserve(task,provider,p,tokenCost(p,Buffer.byteLength(groundedPrompt)+256,1200),undefined,policy.ownerDraft,policy.ownerCalendar?{scope:policy.ownerCalendar,config:c}:undefined);
+      const inputBytes=Buffer.byteLength(groundedPrompt)+providerResponseFormatBytes(provider,artifactContract);
+      if(inputBytes>(revisionContext?96000:48000))throw Error("Input size cap reached");
+      reservation=await store.reserve(task,provider,p,tokenCost(p,inputBytes+256,1200),undefined,policy.ownerDraft,policy.ownerCalendar?{scope:policy.ownerCalendar,config:c}:undefined);
       try{
         await policy.beforeProvider?.();
         if(task.content_brief?.source_policy){
@@ -64,7 +68,7 @@ export async function step(store:Store,c:RuntimeConfig,call=providerCall,enabled
           });
           if(!admitted){await store.reject(reservation,false);reservation=null;throw Error("Source invalidated");}
         }
-        const result=await call(provider,groundedPrompt,p);
+        const result=await call(provider,groundedPrompt,p,undefined,undefined,artifactContract);
         if(provider==="openai"&&result.report.serviceTier!=="default")throw new AccountingFailure(result.report);
         await store.report(reservation,result.report);
         await store.settle(task,reservation,result.text,result.input,result.output,tokenCost(p,result.input,result.output),result.outcome,policy.ownerCalendar);

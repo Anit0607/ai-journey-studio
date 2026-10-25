@@ -1,9 +1,10 @@
+import {providerResponseFormatBytes,type ProviderArtifactContract} from '../lib/critic-response-format';
 import {taskPlatformPolicyHash} from "../lib/platform-policy-binding";
 import test,{before,after,beforeEach} from "node:test";
 import assert from "node:assert/strict";
 import {randomUUID} from "node:crypto";
 import {embedded,type Database} from "../lib/db";
-import {CAP,BUFFER,CAPSULE,ROLES,hash,istMonth,type RuntimeConfig,type Source,type Task} from "../lib/domain";
+import {CAP,BUFFER,CAPSULE,ROLES,hash,istMonth,tokenCost,type RuntimeConfig,type Source,type Task} from "../lib/domain";
 import {Store} from "../lib/store";
 import {hostedOwnerDraftReady,type HostedEnvironment} from "../lib/hosted";
 import {SourceIntake} from "../lib/sources";
@@ -38,16 +39,18 @@ async function ledger(task:Task,{reserved=1,estimated=1,status="settled",month=i
 
  test("owner draft completes exactly six selected checkpoints and leaves every other queue item untouched",async()=>{
   const unrelated=await fixture("unrelated older queue entry"),selected=await fixture();
-  const c=config(),calls:Array<{provider:string;prompt:string}>=[];
-  const result=await runOwnerDraft(db,request(selected.task,selected.source,c),runner(c,async(provider,prompt)=>{calls.push({provider,prompt});return completion();}));
+  const c=config(),calls:Array<{provider:string;prompt:string;contract?:ProviderArtifactContract}>=[];
+  const result=await runOwnerDraft(db,request(selected.task,selected.source,c),runner(c,async(provider,prompt,_pricing,_transport,_credential,contract)=>{calls.push({provider,prompt,contract});return completion();}));
   assert.equal(result.status,"review");assert.equal(result.steps,6);assert.ok(result.run_id);
   assert.deepEqual(calls.map(call=>call.provider),Array(6).fill("openai"));
+  assert.deepEqual(calls.map(call=>call.contract),[undefined,undefined,undefined,undefined,undefined,{artifact:"critic"}]);
   assert.ok(calls.every(call=>call.prompt.includes(selected.source.text)&&!call.prompt.includes(unrelated.source.text)));
   const saved=await state(selected.task.id);assert.equal(saved.status,"review");assert.equal(saved.checkpoint,6);
   assert.equal((await state(unrelated.task.id)).status,"queued");assert.equal((await state(unrelated.task.id)).checkpoint,0);
   assert.equal((await rows("outputs",unrelated.task.id)).length,0);assert.equal((await rows("ledger",unrelated.task.id)).length,0);
   const outputs=await rows("outputs",selected.task.id);assert.equal(outputs.length,6);assert.deepEqual(outputs.map(o=>o.role).sort(),[...ROLES].sort());
   const usage=await rows("ledger",selected.task.id);assert.equal(usage.length,6);assert.ok(usage.every(item=>item.status==="settled"));
+  for(const item of usage)assert.equal(Number(item.reserved),tokenCost(c.openai!,Buffer.byteLength(calls[item.checkpoint].prompt)+providerResponseFormatBytes("openai",calls[item.checkpoint].contract)+256,1200));
   assert.ok(usage.reduce((sum,item)=>sum+Number(item.reserved),0)<=OWNER_DRAFT_MAX_RESERVED);
   assert.equal((await rows("approvals",selected.task.id)).length,0);assert.equal((await db.query("SELECT * FROM publishing_outbox")).length,0);
   assert.equal((await db.query("SELECT * FROM calendar_entries")).length,0);assert.equal((await db.query("SELECT * FROM hosted_batches")).length,0);
@@ -135,6 +138,21 @@ async function ledger(task:Task,{reserved=1,estimated=1,status="settled",month=i
   await assert.rejects(store.retry(task.id),/cannot be replayed/);
   assert.equal((await runOwnerDraft(db,request(task,source,c),runner(c,fake))).status,"duplicate");assert.equal(calls,2);
 });
+
+ test("Critic schema overhead can block the sixth call at the unchanged cumulative reservation cap",async()=>{
+  const first=await fixture(),c=config(),prompts:string[]=[];
+  assert.equal((await runOwnerDraft(db,request(first.task,first.source,c),runner(c,async(_provider,prompt)=>{prompts.push(prompt);return completion();}))).status,"review");
+  const bytes=prompts.reduce((total,prompt)=>total+Buffer.byteLength(prompt)+256,0);
+  c.openai!.input_microdollars_per_token=(Math.floor(129000/bytes*1000)/1000).toFixed(3);
+  const oldTotal=prompts.reduce((total,prompt)=>total+tokenCost(c.openai!,Buffer.byteLength(prompt)+256,1200),0);
+  const extra=tokenCost(c.openai!,Buffer.byteLength(prompts[5])+256+providerResponseFormatBytes('openai',{artifact:'critic'}),1200)-tokenCost(c.openai!,Buffer.byteLength(prompts[5])+256,1200);
+  assert(oldTotal<=OWNER_DRAFT_MAX_RESERVED);assert(oldTotal+extra>OWNER_DRAFT_MAX_RESERVED);
+  await db.query("TRUNCATE sources,events,budget_months,runtime CASCADE");
+  const selected=await fixture();let calls=0;const run=()=>runOwnerDraft(db,request(selected.task,selected.source,c),runner(c,async()=>{calls++;return completion();}));
+  const result=await run();assert.equal(result.status,"blocked");assert.equal(result.steps,5);assert.equal(calls,5);
+  const usage=await rows('ledger',selected.task.id);assert.equal(usage.length,5);assert(usage.every(item=>item.status==='settled'));
+  assert.equal((await run()).status,'duplicate');assert.equal(calls,5);assert.equal((await rows('approvals',selected.task.id)).length,0);
+ });
 
  test("unresolved accounting from any task or month blocks selection, and monthly cap is not bypassed",async()=>{
   const c=config();let calls=0;const fake:typeof providerCall=async()=>{calls++;return completion();};

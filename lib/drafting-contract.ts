@@ -1,9 +1,13 @@
 /** Editorial constraints only. They grant neither source access nor factual approval. */
-export const SOURCE_DRAFTING_CONTRACT_VERSION = '2026-10-25-commit-record-only';
+export const SOURCE_DRAFTING_CONTRACT_VERSION = '2026-10-25-attributed-progress-note';
 /** Editorial classification only; it never grants source or transmission permission. */
 export function attributedCommitSummary(source: string): string | null {
   const match = /^Attributed GitHub evidence; this record does not establish the owner’s experience\.\nRepository: [^\r\n]+\nAuthor account: [^\r\n]+\nCommitter account: [^\r\n]+\nCommit: [a-f0-9]{40}\n([^\r\n]+)$/.exec(source);
   return match?.[1] || null;
+}
+/** Editorial classification only, matching the bounded imported note envelope. */
+export function attributedProgressNote(source:string):boolean{
+  return /^Attributed GitHub evidence; this record does not establish the owner’s experience\.\nRepository: [^\r\n]+\nCommit: [a-f0-9]{40}\nNote: [^\r\n]+\.md\n\n## Verified progress\n/.test(source);
 }
 /** Remove the owner-learning goal itself, not merely contradict it later. */
 export function sourceRoleGoal(checkpoint: number, source: string, ordinaryGoal: string): string {
@@ -31,5 +35,8 @@ export function sourceDraftingContract(checkpoint: number, source: string): stri
   const commit = attributedCommitSummary(source)
     ? ' COMMIT-SUMMARY LIMIT: The supplied evidence is repository/account/commit metadata and one commit title, not code, a diff, tests or deployment results. Describe only what the repository records; quote the title exactly. A title does not establish that a feature works, enforces a boundary, improves security, expresses the author’s intent or represents a learned lesson. Do not expand exact-task or owner-only into unstated implementation details, role-based access or benefits. Do not reinterpret artifact privacy as privacy settings, ground attributed summaries as audit trails, or a fix: prefix as confirmation that an issue was resolved. These technical terms remain an exact quote, not evidence of implementation. SOURCE DATE is source-record metadata, not proof of when a commit was made, deployed or published; do not add it to public copy or insert it into a verbatim source. A thin source warrants a short attributed update, not a manufactured takeaway, even for a longform slot. Harvester returns only SOURCE: followed by the complete SOURCE including its attribution disclaimer. Any Verbatim evidence section contains only exact copied source lines, never interpreted Scope, combined metadata or paraphrases. Keep missing evidence in internal artifacts, not public copy. Critic treats inferred fix effects, dates absent from SOURCE, implementation details and benefits as unsupported with source_ids=[], not a wording-only paraphrase. Preserve its required JSON contract.'
     : '';
-  return '\nSOURCE AND NARRATION CONTRACT (instructions, not additional evidence):' + common + voice + role + commit;
+  const progress=attributedProgressNote(source)
+    ? ' ATTRIBUTED PROGRESS-NOTE LIMIT: This is a repository-attributed progress note, not evidence of the owner’s personal story. Preserve the observer and actor explicitly stated in SOURCE; do not infer who observed or performed an action from the note envelope. Harvester returns only SOURCE: followed by the complete SOURCE, unchanged; no rewritten bullet list, invented date or extra summary. Story Miner selects one supported point and keeps its complete source sentences verbatim. Strategist keeps the brief source-only: no required audience need, hook, payoff, advice or generalized takeaway. Writer and Platform Adapter prefer a short selection of complete supported source sentences, retaining attribution, actors, negation and the original historical subject. Do not turn a statement about an earlier record into a claim about the whole current note. Omit clock times unless necessary; otherwise copy them exactly. Do not round, truncate or reformat timestamps, because a by/before boundary may change. Do not add quality labels such as thorough, robust or smooth, or say tests prove correctness. Preserve the stated test scope: type checking, lint and builds are separate checks, not included in the numbered test count unless SOURCE explicitly establishes otherwise. Keep limitations and advice internal unless the selected source sentence itself is the supported point. Reporting that an earlier draft made unsupported claims is not asserting those claims; Critic must compare the complete current assertion, not flag a negated historical claim as an endorsed capability. Exact excerpts still need human content review, and paraphrases still need the existing evidence review. Preserve the required Critic JSON and verdict/source-ID contract.'
+    : '';
+  return '\nSOURCE AND NARRATION CONTRACT (instructions, not additional evidence):' + common + voice + role + commit + progress;
 }

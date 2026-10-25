@@ -1,8 +1,9 @@
+import {providerResponseFormatBytes,type ProviderArtifactContract} from '../lib/critic-response-format';
 import test,{before,after,beforeEach} from "node:test";
 import assert from "node:assert/strict";
 import {randomUUID} from "node:crypto";
 import {embedded,type Database} from "../lib/db";
-import {CAP,BUFFER,hash,istMonth,type RuntimeConfig,type Task} from "../lib/domain";
+import {CAP,BUFFER,hash,istMonth,tokenCost,type RuntimeConfig,type Task} from "../lib/domain";
 import {Store} from "../lib/store";
 import {queueAgentRevision} from "../lib/agent-revisions";
 import {scopedFixture,parentBundle} from "./hosted-calendar-fixture";
@@ -27,11 +28,12 @@ async function otherLedger(taskId:string,status="unknown",estimated=1){const id=
 test("initial one-shot completes only the previewed task, leaves the daily claim and unrelated queue unchanged, never approves",async()=>{
  const f=await fixture();const other=await scopedFixture(db,f.c,new Date(),2),daily={day:new Date().toISOString().slice(0,10),status:"idle"};
  await db.query("INSERT INTO hosted_batches(day,status,attempts,steps,reason,lease_token,started_at,heartbeat,finished_at) VALUES($1,$2,6,6,'daily_already_attempted',$3,now(),now(),now())",[daily.day,daily.status,randomUUID()]);
- const before=await db.query("SELECT * FROM hosted_batches"),unrelated=await row(other.task.id);let calls=0;
- const result=await runOwnerCalendar(db,f.input,runner(f.c,async(provider,prompt)=>{calls++;assert.equal(provider,"openai");assert.ok(prompt.includes(f.source.text));assert.ok(!prompt.includes(other.source.text));return completion();}));
+ const before=await db.query("SELECT * FROM hosted_batches"),unrelated=await row(other.task.id);let calls=0;const requests:Array<{prompt:string;contract?:ProviderArtifactContract}>=[];
+ const result=await runOwnerCalendar(db,f.input,runner(f.c,async(provider,prompt,_pricing,_transport,_credential,contract)=>{requests.push({prompt,contract});calls++;assert.equal(provider,"openai");assert.ok(prompt.includes(f.source.text));assert.ok(!prompt.includes(other.source.text));return completion();}));
+ assert.deepEqual(requests.map(request=>request.contract),[undefined,undefined,undefined,undefined,undefined,{artifact:"critic"}]);
  assert.equal(result.status,"review");assert.equal(result.steps,6);assert.equal(calls,6);assert.equal((await row(f.task.id)).status,"review");assert.equal((await row(f.task.id)).checkpoint,6);
  assert.deepEqual(await row(other.task.id),unrelated);assert.deepEqual(await db.query("SELECT * FROM hosted_batches"),before);
- assert.equal((await rows("outputs",f.task.id)).length,6);const ledger=await rows("ledger",f.task.id);assert.equal(ledger.length,6);assert(ledger.every(x=>x.status==="settled"));assert(ledger.reduce((n,x)=>n+Number(x.reserved),0)<=OWNER_CALENDAR_MAX_RESERVED);
+ assert.equal((await rows("outputs",f.task.id)).length,6);const ledger=await rows("ledger",f.task.id);assert.equal(ledger.length,6);assert(ledger.every(x=>x.status==="settled"));for(const item of ledger)assert.equal(Number(item.reserved),tokenCost(f.c.openai!,Buffer.byteLength(requests[item.checkpoint].prompt)+providerResponseFormatBytes("openai",requests[item.checkpoint].contract)+256,1200));assert(ledger.reduce((n,x)=>n+Number(x.reserved),0)<=OWNER_CALENDAR_MAX_RESERVED);
  for(const table of ["approvals","revision_approvals","publishing_outbox","content_revisions"])assert.equal((await db.query("SELECT * FROM "+table)).length,0);
  assert.equal((await ownerCalendarSnapshot(db,f.c,true)).runs[0].status,"review");
 });

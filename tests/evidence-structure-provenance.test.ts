@@ -49,6 +49,6 @@ test('dates and capitalized terms are not globally exempted by structural labels
  const q=evidenceQuality(bundle('I founded Acme Corporation on 2026-10-21.','No separate platform sections'),context);assert(q.findings.some(x=>x.category==='structure'&&x.role==='Platform Adapter'));assert(q.flags.some(x=>x.role==='Harvester'&&x.kind==='hard'&&!x.category));
 });
 test('policy/date binding invalidates stale decisions without altering approval or schema logic',()=>{
- assert.equal(EVIDENCE_POLICY,'evidence-review-v2');const b=bundle(observedJson(envelope));assert.notEqual(evidenceBinding(b,context),evidenceBinding(b,{...context,reported_date:'2026-10-20'}));
+ assert.equal(EVIDENCE_POLICY,'evidence-review-v3-lossless-spans');const b=bundle(observedJson(envelope));assert.notEqual(evidenceBinding(b,context),evidenceBinding(b,{...context,reported_date:'2026-10-20'}));
  assert(bundleQuality([artifact('Platform Adapter','No headings')],source,date).flags.some(x=>x.category==='structure'));
 });
