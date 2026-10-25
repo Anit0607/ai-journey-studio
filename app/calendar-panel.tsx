@@ -3,6 +3,7 @@ import {useState,type CSSProperties} from "react";
 import {ACTIVE_PLATFORMS as PLATFORMS,BENCHMARK_PRESET} from "../lib/schedule-presets";
 import CalendarRecoveryForm from "./calendar-recovery-form";
 import CalendarNormalizationForm from "./calendar-normalization-form";
+import CalendarGenerationForm from './calendar-generation-form';
 import type {PlatformTimes} from "../lib/calendar";
 const linkedInTimes=(times:PlatformTimes):PlatformTimes=>({LinkedIn:{...times.LinkedIn}});
 const weekdays=["Sunday","Monday","Tuesday","Wednesday","Thursday","Friday","Saturday"];
@@ -26,6 +27,7 @@ function Entry({entry,sources,tasks,busy,action,minimumLeadHours}:{minimumLeadHo
     <p>Intended posting: {displayDate(entry.intended_post)}<br/>Draft ready / review deadline: {displayDate(entry.review_due)}<br/>Generation due: {displayDate(entry.generation_due)}</p>
     {entry.timing_notice&&<p role="status">{entry.timing_notice}</p>}
     <CalendarRecoveryForm entryId={entry.id} recovery={entry.recovery} minimumLeadHours={minimumLeadHours} busy={busy} action={action}/>
+    <CalendarGenerationForm entryId={entry.id} preview={entry.generation_time_preview} busy={busy} action={action}/>
     <label>Cleared source<select style={field} aria-label={"Source for "+entry.planned_date} value={source} onChange={event=>{setSource(event.target.value);setTask("");}}><option value="">No source linked</option>{sources.map(item=><option key={item.id} value={item.id}>{item.category} · {item.reported_date} · {item.id.slice(0,8)}</option>)}</select></label>
     <label>Existing content task<select style={field} aria-label={"Task for "+entry.planned_date} value={task} onChange={event=>setTask(event.target.value)}><option value="">No task linked</option>{tasks.filter(item=>item.source_id===source&&!item.revision_parent_task_id&&JSON.stringify(item.content_brief?.platform_policy||null)===JSON.stringify(entry.platform_policy)).map(item=><option key={item.id} value={item.id}>{item.id.slice(0,8)} · {item.status}</option>)}</select></label>
     <button disabled={busy} onClick={()=>void action("calendar-link",{entry:entry.id,source:source||null,task:task||null})}>Save explicit links</button>
