@@ -29,7 +29,7 @@ export async function calendarGuard(tx:Connection,taskId:string):Promise<Calenda
 }
 
 /** Guard already held; locks child -> root -> source -> policy, then re-reads all bindings. */
-export async function scopedCalendarContext(tx:Connection,taskId:string,config:RuntimeConfig,guard:CalendarGuard,now=new Date(),execution=true,lockTasks=true){
+export async function scopedCalendarContext(tx:Connection,taskId:string,config:RuntimeConfig,guard:CalendarGuard,now=new Date(),execution=true,lockTasks=true,completion=false){
   // Dispatch uses read-only task checks under its existing source locks; only
   // claim/admission/request paths take task locks, always before source locks.
   const taskSql="SELECT * FROM tasks WHERE id=$1"+(lockTasks?" FOR UPDATE":"");
@@ -48,7 +48,7 @@ export async function scopedCalendarContext(tx:Connection,taskId:string,config:R
   if(execution){
     const settings=(await tx.query<{generation_enabled:boolean}>("SELECT generation_enabled FROM calendar_settings WHERE id=1"))[0];
     const lead=Date.parse(post)-Date.parse(generation);
-    if(!Number.isInteger(task.checkpoint)||task.checkpoint<0||task.checkpoint>5||settings?.generation_enabled!==true||Date.parse(generation)>now.getTime()||Date.parse(review)<now.getTime()||Date.parse(post)<=now.getTime()||lead<120*3_600_000||lead>336*3_600_000)return undefined;
+    if(!Number.isInteger(task.checkpoint)||task.checkpoint<0||task.checkpoint>(completion?6:5)||settings?.generation_enabled!==true||Date.parse(generation)>now.getTime()||Date.parse(review)<now.getTime()||Date.parse(post)<=now.getTime()||lead<120*3_600_000||lead>336*3_600_000)return undefined;
   }
   return {task,root,source,proof,entry,job};
 }
@@ -56,7 +56,7 @@ export type ScopedCalendarContext=NonNullable<Awaited<ReturnType<typeof scopedCa
 export function revisionReceipt(context:ScopedCalendarContext,child:Task){
   return {version:1,child_id:child.id,parent_id:context.root.id,root_id:context.root.id,base_token:child.revision_base_token,feedback_hash:hash(child.revision_note||""),source_id:context.source.id,source_hash:context.source.hash,grant_id:context.proof.grant_id,policy_id:context.proof.policy_id,policy_hash:context.proof.policy_hash,runtime_binding:context.proof.runtime_binding,entry_id:context.entry.id,job_id:context.job.id,brief_hash:hash(stableJson(context.root.content_brief))};
 }
-async function validRevision(tx:Connection,c:ScopedCalendarContext){
+export async function validScopedCalendarRevision(tx:Connection,c:ScopedCalendarContext){
   const {task,root,source}=c;
   if(task.id===root.id)return !task.revision_base_token&&!task.revision_note;
   if(!["review","approved"].includes(root.status)||typeof task.revision_note!=="string"||!task.revision_note.trim()||task.revision_note!==task.revision_note.trim()||task.origin_key!=="revision:"+hash(root.id+"|"+task.revision_base_token))return false;
@@ -73,7 +73,7 @@ async function validRevision(tx:Connection,c:ScopedCalendarContext){
 export async function admittedHostedTask(tx:Connection,id:string,config:RuntimeConfig,now=new Date()){
   const guard=await calendarGuard(tx,id);if(!guard)return undefined;
   const c=await scopedCalendarContext(tx,id,config,guard,now);
-  if(!c||!await validRevision(tx,c)||(await tx.query("SELECT id FROM events WHERE task_id=$1 AND kind='owner_draft_started'",[id])).length)return undefined;
+  if(!c||!await validScopedCalendarRevision(tx,c)||(await tx.query("SELECT id FROM events WHERE task_id=$1 AND kind IN ('owner_draft_started','owner_calendar_started')",[id])).length)return undefined;
   return c.task;
 }
 
@@ -89,6 +89,6 @@ export async function hostedCandidates(tx:Connection){
       AND (t.status='queued' OR (t.status='running' AND t.lease_until<now()))
       AND t.checkpoint BETWEEN 0 AND 5
       AND e.generation_due<=now() AND e.review_due>=now() AND e.intended_post>now()
-      AND NOT EXISTS (SELECT 1 FROM events WHERE task_id=t.id AND kind='owner_draft_started')
+      AND NOT EXISTS (SELECT 1 FROM events WHERE task_id=t.id AND kind IN ('owner_draft_started','owner_calendar_started'))
     ORDER BY t.updated,t.id LIMIT ${HOSTED_CANDIDATE_LIMIT+1}`);
 }

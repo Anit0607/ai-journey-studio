@@ -1,3 +1,4 @@
+import {scheduledPolicyBinding} from './scheduler-window-policy';
 import {randomUUID} from "node:crypto";
 import type {Connection,Database} from "./db";
 import {hash} from "./domain";
@@ -28,6 +29,8 @@ export async function previewApprovalPlan(db:Database,runtime:PublishingRuntime,
     if(entry.source_id!==context.source.id)fail("Calendar source linkage changed");
     const slot=entry.platform_schedule?.LinkedIn?.intended_post,at=new Date(slot),now=(runtime.now||(()=>new Date()))();
     if(typeof slot!=="string"||!Number.isFinite(at.getTime())||at.getTime()!==new Date(entry.intended_post).getTime()||at<=now)fail("Existing LinkedIn calendar posting time must be valid and in the future");
+    let scheduler_policy_hash:string|null;
+    try{scheduler_policy_hash=scheduledPolicyBinding(runtime.scheduler_window_policy,at);}catch(error){fail((error as Error).message);}
     const accounts=(runtime.accounts||[]).filter(a=>a.platform==="LinkedIn"&&a.enabled===true&&a.verified===true);
     if(accounts.length!==1)fail("Exactly one enabled verified LinkedIn destination is required");
     const account=accounts[0];
@@ -36,7 +39,7 @@ export async function previewApprovalPlan(db:Database,runtime:PublishingRuntime,
     if(quality.flags.length)fail("Resolve source-grounding flags before approval");
     const variants=platformVariants(context.bundle.find(a=>a.role==="Platform Adapter"),policy),variant=variants.variants.find(v=>v.platform==="LinkedIn");
     if(!variants.complete||!variant?.hash||variant.text===null)fail("Exact LinkedIn draft is incomplete");
-    const values={task_id:taskId,review_token:token,entry_id:entry.id,calendar_binding:calendarPublicationBinding(entry),source_hash:context.source.hash,clearance_id:context.source.clearance_id||null,quality_binding:quality.binding,evidence_version:quality.evidence_version,account_id:account.id,account_version:account.authorization_version,account_label:account.label,remote_id:account.remote_id,scheduled_at:at.toISOString(),timezone:"UTC" as const,delivery_mode:"scheduled" as const,text:variant.text,variant_hash:variant.hash};
+    const values={task_id:taskId,review_token:token,entry_id:entry.id,calendar_binding:calendarPublicationBinding(entry),source_hash:context.source.hash,clearance_id:context.source.clearance_id||null,quality_binding:quality.binding,evidence_version:quality.evidence_version,account_id:account.id,account_version:account.authorization_version,account_label:account.label,remote_id:account.remote_id,scheduled_at:at.toISOString(),scheduler_policy_hash,timezone:"UTC" as const,delivery_mode:"scheduled" as const,text:variant.text,variant_hash:variant.hash};
     return {...values,version:hash(JSON.stringify(values))};
   });
 }
@@ -71,7 +74,7 @@ export async function approveApprovalPlan(db:Database,runtime:PublishingRuntime,
     // Replace only unattempted older plans; never create a second eligible delivery.
     for(const previous of existing)if(previous.id!==row.id&&["staged","approved","invalidated","missed"].includes(previous.status))await publisher.cancel(previous.id,previous.version);
     const receipts=await tx.query<{detail:string}>("SELECT detail FROM events WHERE task_id=$1 AND kind=$2",[plan.task_id,APPROVAL_PLAN_EVENT]);
-    if(!receipts.some(event=>JSON.parse(event.detail).plan_version===plan.version))await tx.query("INSERT INTO events(id,task_id,kind,detail) VALUES($1,$2,$3,$4)",[randomUUID(),plan.task_id,APPROVAL_PLAN_EVENT,JSON.stringify({outbox_id:row.id,entry_id:plan.entry_id,calendar_binding:plan.calendar_binding,plan_version:plan.version,acknowledgement:APPROVAL_PLAN_ACK})]);
+    if(!receipts.some(event=>JSON.parse(event.detail).plan_version===plan.version))await tx.query("INSERT INTO events(id,task_id,kind,detail) VALUES($1,$2,$3,$4)",[randomUUID(),plan.task_id,APPROVAL_PLAN_EVENT,JSON.stringify({outbox_id:row.id,entry_id:plan.entry_id,calendar_binding:plan.calendar_binding,plan_version:plan.version,scheduler_policy_hash:plan.scheduler_policy_hash,acknowledgement:APPROVAL_PLAN_ACK})]);
     return publisher.approve(row.id,row.version,true);
   });
 }
