@@ -7,10 +7,12 @@ import {allowedOrigin,response} from '../lib/auth';
 import {comparisonProvider} from '../lib/private-comparison-provider';
 import {COMPARISON_PRICING,COMPARISON_SCOPE_HASH,validComparisonRequest} from '../lib/private-comparison-policy';
 
+import * as scopes from '../lib/private-comparison-scopes';
+
 const origin='https://comparison.example.test';
 function harness(){
  const flags={authenticated:true,release:COMPARISON_SCOPE_HASH,status:'completed_requires_review',live:true},calls={auth:0,db:0,run:0,read:0};
- const env={get STUDIO_PRIVATE_COMPARISON_SCOPE(){return flags.release;}};
+ const env={get STUDIO_PRIVATE_COMPARISON_SCOPE(){return flags.release;},get STUDIO_PRIVATE_CORRECTED_COMPARISON_SCOPE(){return scopes.CORRECTED_COMPARISON_SCOPE_HASH;}};
  const modules:Record<string,unknown>={
   '../../../lib/auth':{allowedOrigin:(r:Request)=>allowedOrigin(r,origin),response},
   '../../../lib/owner-password':{passwordOwnerAuthenticated:async()=>{calls.auth++;return flags.authenticated;}},
@@ -19,11 +21,12 @@ function harness(){
   '../../../lib/providers':{liveReady:()=>flags.live},
   '../../../lib/hosted':{hostedEnvironment:()=>true,hostedOwnerDraftReady:()=>flags.live},
   '../../../lib/private-comparison-policy':{COMPARISON_SCOPE_HASH,validComparisonRequest},
+  '../../../lib/private-comparison-scopes':scopes,
   '../../../lib/private-comparison':{comparisonSnapshot:async()=>{calls.read++;return {history:[]};},runPrivateComparison:async(_db:unknown,_input:unknown,options:any)=>{calls.run++;assert.equal(options.ready(),true);return {status:flags.status,steps:6};}}
  };
  const exports:Record<string,any>={};
  const code=ts.transpileModule(readFileSync(new URL('../app/api/private-comparison/route.ts',import.meta.url),'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText;
- runInNewContext(code,{exports,require:(id:string)=>modules[id],Buffer,process:{env}});
+ runInNewContext(code,{exports,require:(id:string)=>modules[id],Buffer,URL,process:{env}});
  const input={expected_state_hash:'a'.repeat(64),scope_hash:COMPARISON_SCOPE_HASH,acknowledged:true};
  const post=(body:unknown=input,from=origin)=>exports.POST(new Request(origin+'/api/private-comparison',{method:'POST',headers:{Origin:from,Authorization:'Bearer machine-token'},body:typeof body==='string'?body:JSON.stringify(body)}));
  return {flags,calls,post,exports};
@@ -32,7 +35,7 @@ test('private route rejects a machine bearer without owner session before openin
  const h=harness();h.flags.authenticated=false;assert.equal((await h.post()).status,401);assert.equal(h.calls.db,0);assert.equal(h.calls.run,0);
  assert.equal((await h.exports.GET(new Request(origin+'/api/private-comparison'))).status,401);
 });
-test('same-origin and exact default-closed release gate precede parsing and execution',async()=>{
+test('same-origin and exact default-closed release gate precede database and execution',async()=>{
  const h=harness();assert.equal((await h.post({},'https://other.example.test')).status,403);h.flags.release='';assert.equal((await h.post()).status,403);assert.equal(h.calls.db,0);assert.equal(h.calls.run,0);
 });
 test('bounded request rejects malformed, extra and oversized input without execution',async()=>{
@@ -64,6 +67,12 @@ test('review branch is explicitly excluded from Vercel auto-deployment while mai
 });
 
 test('read-only execution readiness reflects the existing exact release and runtime gates',async()=>{
- const h=harness(),get=()=>h.exports.GET(new Request(origin+'/api/private-comparison'));
+ const h=harness(),get=()=>h.exports.GET(new Request(origin+'/api/private-comparison?scope_hash='+COMPARISON_SCOPE_HASH));
  assert.equal((await (await get()).json()).execution_ready,true);h.flags.release='';assert.equal((await (await get()).json()).execution_ready,false);h.flags.release=COMPARISON_SCOPE_HASH;h.flags.live=false;assert.equal((await (await get()).json()).execution_ready,false);assert.equal(h.calls.run,0);
+});
+
+test('pending corrective scope is unexecutable even if its distinct gate accidentally matches',async()=>{
+ const h=harness();const response=await h.post({expected_state_hash:'a'.repeat(64),scope_hash:scopes.CORRECTED_COMPARISON_SCOPE_HASH,acknowledged:true});assert.equal(response.status,403);assert.equal(h.calls.run,0);assert.equal(h.calls.db,0);
+ const snapshot=await h.exports.GET(new Request(origin+'/api/private-comparison'));assert.equal((await snapshot.json()).execution_ready,false);assert.equal(h.calls.run,0);
+ const unknown=await h.exports.GET(new Request(origin+'/api/private-comparison?scope_hash='+'f'.repeat(64)));assert.equal(unknown.status,400);
 });

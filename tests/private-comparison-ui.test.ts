@@ -6,6 +6,7 @@ import {createRequire} from 'node:module';
 import ts from 'typescript';
 import {hash,ROLES} from '../lib/domain';
 import {COMPARISON_SCOPE,COMPARISON_SCOPE_HASH} from '../lib/private-comparison-policy';
+import {CORRECTED_COMPARISON_SCOPE,CORRECTED_COMPARISON_SCOPE_HASH} from '../lib/private-comparison-scopes';
 const require=createRequire(import.meta.url),run='11111111-1111-1111-1111-111111111111';
 function fixture(completed=false){
  const target=COMPARISON_SCOPE.target,history:any[]=completed?[{id:run,kind:'private_comparison_started',detail:{run_id:run,scope_hash:COMPARISON_SCOPE_HASH}},...ROLES.map((role,checkpoint)=>({id:'stage-'+checkpoint,kind:'private_comparison_stage',detail:{run_id:run,role,checkpoint,text:'Exact '+role,hash:hash('Exact '+role),report:{model:'gpt-6.1-sol',tier:'default',finish_reason:'stop'},raw:{choices:[{finish_reason:'stop',message:{content:'Exact '+role}}]}}})),{id:'end',kind:'private_comparison_finished',detail:{run_id:run,status:'completed_requires_review',steps:6,reservation_retained:false}}]:[];
@@ -62,4 +63,10 @@ test('closed release readiness has no run control and successful run requires fr
 test('lost review-preparation response remains locked after remount with no automatic replay',async()=>{
  const h=harness(fixture(true));await h.mount();h.setPost(async()=>{throw Error('lost response');});button(confirm(h),'Prepare for final').props.onClick();await h.flush();assert.equal(posts(h).length,1);assert(text(h.render()).includes('Outcome unconfirmed'));assert.equal(button(h.render(),'Prepare for final'),undefined);
  const reloaded=harness(fixture(true),h.storage);assert.equal(button(await reloaded.mount(),'Prepare for final'),undefined);assert.equal(posts(reloaded).length,0);
+});
+
+test('pending successor displays exact remaining cap and immutable prior history without paid controls',async()=>{
+ const f:any=fixture();f.comparison.scope=CORRECTED_COMPARISON_SCOPE;f.comparison.scope_hash=CORRECTED_COMPARISON_SCOPE_HASH;f.comparison.execution_ready=false;f.comparison.prior_history=fixture(true).comparison.history;f.comparison.selected_run_id=null;
+ const h=harness(f),tree=await h.mount();assert(text(tree).includes('0.764676'));assert(text(tree).includes('pending; execution remains disabled'));assert(text(tree).includes('Earlier immutable comparison'));assert(text(tree).includes(CORRECTED_COMPARISON_SCOPE_HASH));assert.equal(button(tree,'Run private'),undefined);assert.equal(button(tree,'Prepare for final'),undefined);assert.equal(posts(h).length,0);
+ button(tree,'Refresh saved').props.onClick();await h.flush();assert.equal(posts(h).length,0);
 });

@@ -1,0 +1,152 @@
+{
+  "capture_provenance": "Read-only authenticated browser GET /api/studio/state, rendered DOM captured before the first comparison; raw-context reconstruction strips only documented snapshot presentation fields.",
+  "captured_at": "2026-10-25T18:38:15.565Z",
+  "context": {
+    "task": {
+      "id": "96737ed0-a683-4a3d-9b2e-89aea38a214e",
+      "source_id": "f68ae274-ae09-4987-9d61-b8704bb1bb91",
+      "source_hash": "b9207df4d35f15bd9a9d770891e482e9cdd000bdb9da5ef1439dc8b8d07ae603",
+      "status": "review",
+      "checkpoint": 6,
+      "lease_token": null,
+      "lease_until": null,
+      "updated": "2026-10-25T12:48:48.561Z",
+      "block_reason": null,
+      "origin_key": "calendar:bf3f4f29-572b-4469-bd56-b9cfa41db191",
+      "content_brief": {
+        "kind": "longform",
+        "platforms": [
+          "LinkedIn"
+        ],
+        "review_due": "2026-10-30T16:30:00.000Z",
+        "planned_date": "2026-11-01",
+        "intended_post": "2026-11-01T16:30:00.000Z",
+        "source_policy": {
+          "id": "323803fa-9bae-4443-865f-6b50090afbb4",
+          "hash": "1b43fe9fc619eb4fcf21646560fbcad3ee7e0616b17a17e5a093e7209e0f0572",
+          "grant_id": "09ebe4ee-e66c-40ae-8711-2c38b37d85b7",
+          "provenance_id": "b0dd8064-88f6-4af2-8d5f-6174fc29b039"
+        },
+        "generation_due": "2026-10-25T12:46:01.043Z",
+        "platform_policy": {
+          "version": 1,
+          "platforms": [
+            "LinkedIn"
+          ]
+        }
+      },
+      "revision_parent_task_id": null,
+      "revision_base_token": null,
+      "revision_note": null
+    },
+    "source": {
+      "id": "f68ae274-ae09-4987-9d61-b8704bb1bb91",
+      "text": "Attributed GitHub evidence; this record does not establish the owner’s experience.\nRepository: anit0607/ai-journey-studio\nCommit: d214eb1cac3042e5f1533a74c42ae9db1aed9dd5\nNote: docs/build-notes/studio-progress.md\n\n## Verified progress\n- Documented the repository's stated purpose for AI Journey Studio as an app for the owner's AI learning journey, intended to support drafting for LinkedIn with separate owner approval before publication; this describes project purpose, not verified autonomous operation.\n- Documented assistant-observed database configuration, scheduler behavior and provider status on 25 October 2026; these are system observations, not the owner's personal experiences or feelings.\n- Verified that the existing Neon Free account had a monthly allowance of 100 compute-unit hours per project.\n- Verified that the production endpoint was configured with both minimum and maximum compute at 0.25 compute units and a five-minute autosuspend delay.\n- Documented two sources of database reads in the previous setup: two-minute integration requests and five-second signed-in dashboard polling.\n- Updated signed integration-request handling to validate the request and return before database access when outside the configured source-intake and publishing windows.\n- Updated source intake to use hourly windows and publication handling to use exact configured windows.\n- Updated background dashboard polling to pause when the page is hidden or unfocused, or after 60 seconds without activity; polling remains available when the page is active and recently used.\n- Verified that fresh Neon provider observations reported at 04:10:55 UTC and 04:12:20 UTC on 25 October 2026 showed the production endpoint as SUSPENDED; these are reported observation times, not suspension event timestamps.\n- Verified that a fresh Neon observation reported at 04:14:50 UTC again showed SUSPENDED; a separate Upstash metadata observation recorded the scheduled 04:12 integration wake as SUCCESS, without establishing a response body, HTTP status code or request-level SQL trace.\n- Documented that the observation used provider status reads without SQL queries, manual resume or settings changes during the observation window.\n- Documented that the verification used the existing connected account and Free plan, without a paid-plan upgrade.\n- Documented the limits of this result: the checks establish endpoint state at the observed times, not uninterrupted sleep, measured monthly compute savings, guaranteed use within the Free allowance or successful LinkedIn publication.\n- Documented that the commit linked below identifies the implementation change; the endpoint settings and runtime observations above come from separately inspected provider receipts, not from treating a commit link as runtime proof.\n\n## Evidence\n- https://github.com/anit0607/ai-journey-studio/commit/a243a67eb1259b3f881e4e55d9329cf523fe093a\n- https://github.com/anit0607/ai-journey-studio/commit/e2a608b9f7a9e1dfde4f96709e8cb47a182819ff",
+      "category": "project-note",
+      "reported_date": "2026-10-25",
+      "cleared": true,
+      "hash": "b9207df4d35f15bd9a9d770891e482e9cdd000bdb9da5ef1439dc8b8d07ae603",
+      "created": "2026-10-25T12:43:34.879Z",
+      "clearance_id": "09ebe4ee-e66c-40ae-8711-2c38b37d85b7",
+      "clearance_hash": null,
+      "clearance_provider": null,
+      "clearance_purpose": null,
+      "clearance_owner_acknowledged": false,
+      "clearance_acknowledgement": null,
+      "cleared_at": "2026-10-25T12:46:17.517Z",
+      "revoked_at": null,
+      "scoped_authorization": {
+        "grant_id": "09ebe4ee-e66c-40ae-8711-2c38b37d85b7",
+        "policy_id": "323803fa-9bae-4443-865f-6b50090afbb4",
+        "policy_hash": "1b43fe9fc619eb4fcf21646560fbcad3ee7e0616b17a17e5a093e7209e0f0572",
+        "runtime_binding": "36a77afff4f61a3a5572331f98062f140657a3598b4daba4e665aed580b3b5b4",
+        "provenance_id": "b0dd8064-88f6-4af2-8d5f-6174fc29b039",
+        "source_hash": "b9207df4d35f15bd9a9d770891e482e9cdd000bdb9da5ef1439dc8b8d07ae603",
+        "evidence_key": "36db0c2f4168e685a4d8d92d6c6c3fe6e9b663cbc9e55f6d1c3bbc6aae5ea48f",
+        "entry_id": "bf3f4f29-572b-4469-bd56-b9cfa41db191",
+        "task_id": "96737ed0-a683-4a3d-9b2e-89aea38a214e"
+      }
+    },
+    "calendar": {
+      "id": "bf3f4f29-572b-4469-bd56-b9cfa41db191",
+      "planned_date": "2026-11-01",
+      "kind": "longform",
+      "intended_post": "2026-11-01T16:30:00.000Z",
+      "draft_due": "2026-10-30T16:30:00.000Z",
+      "review_due": "2026-10-30T16:30:00.000Z",
+      "generation_due": "2026-10-25T12:46:01.043Z",
+      "source_id": "f68ae274-ae09-4987-9d61-b8704bb1bb91",
+      "task_id": "96737ed0-a683-4a3d-9b2e-89aea38a214e",
+      "updated": "2026-10-25T12:46:17.516Z",
+      "platform_schedule": {
+        "LinkedIn": {
+          "draft_due": "2026-10-30T16:30:00.000Z",
+          "review_due": "2026-10-30T16:30:00.000Z",
+          "intended_post": "2026-11-01T16:30:00.000Z"
+        },
+        "platform_policy": {
+          "version": 1,
+          "platforms": [
+            "LinkedIn"
+          ]
+        }
+      }
+    },
+    "original": [
+      {
+        "id": "1027f5a2-1b99-4803-9478-c92291cc3e55",
+        "task_id": "96737ed0-a683-4a3d-9b2e-89aea38a214e",
+        "role": "Harvester",
+        "text": "{\"contract\":\"canonical_note_harvest\",\"source_binding\":\"SOURCE HASH: b9207df4d35f15bd9a9d770891e482e9cdd000bdb9da5ef1439dc8b8d07ae603\",\"source_ids\":[\"fact_a\",\"fact_b\",\"fact_c\",\"fact_d\",\"fact_e\",\"fact_f\",\"fact_g\",\"fact_h\",\"fact_i\",\"fact_j\",\"fact_k\",\"fact_l\",\"fact_m\",\"fact_n\"]}",
+        "hash": "c08a7d7c259963eab09b6ed0b8f3b1dd2161dc522ee4afa807fa7794348320e0",
+        "created": "2026-10-25T12:48:31.004Z"
+      },
+      {
+        "id": "74255139-cdf0-4ee0-ac71-57e45a4c9007",
+        "task_id": "96737ed0-a683-4a3d-9b2e-89aea38a214e",
+        "role": "Story Miner",
+        "text": "{\"contract\":\"canonical_note_selection\",\"source_binding\":\"SOURCE HASH: b9207df4d35f15bd9a9d770891e482e9cdd000bdb9da5ef1439dc8b8d07ae603\",\"source_ids\":[\"fact_e\",\"fact_f\",\"fact_g\",\"fact_h\",\"fact_i\",\"fact_j\"],\"decision\":\"selected\"}",
+        "hash": "c18a38c1bdd81f9d98596ba5cbdadbc2ec2017657de07c9f7ecfdae947383894",
+        "created": "2026-10-25T12:48:33.035Z"
+      },
+      {
+        "id": "a1f37ae6-f166-457a-ad17-35626bbb3441",
+        "task_id": "96737ed0-a683-4a3d-9b2e-89aea38a214e",
+        "role": "Strategist",
+        "text": "{\"contract\":\"canonical_note_plan\",\"source_binding\":\"SOURCE HASH: b9207df4d35f15bd9a9d770891e482e9cdd000bdb9da5ef1439dc8b8d07ae603\",\"source_ids\":[\"fact_e\",\"fact_f\",\"fact_g\",\"fact_h\",\"fact_i\",\"fact_j\"],\"decision\":\"selected\",\"opening\":\"concrete_detail\",\"reader_action\":\"inspect_steps\"}",
+        "hash": "b7cc9938f67bf5c252360c25dae8a0aa9b405facd86f394e295a1b1f9737613b",
+        "created": "2026-10-25T12:48:34.854Z"
+      },
+      {
+        "id": "953311a1-1d98-4bb5-ad52-c8974b8423a0",
+        "task_id": "96737ed0-a683-4a3d-9b2e-89aea38a214e",
+        "role": "Writer",
+        "text": "Sometimes building a practical AI system means carefully limiting when and how it talks to its database to reduce overhead and keep costs manageable. That challenge shows up clearly in the AI Journey Studio project, where the system’s creators updated how database queries occur around integration requests and dashboard polling.\n\nThe project started with two main sources making database reads: one polling every two minutes via integration requests, and another dashboard polling happening every five seconds for signed-in users. This was a lot, especially for a free-tier Neon database with a 100 compute-unit hours monthly limit per project. So the team made a targeted change: integration request handling now validates the request and explicitly returns early without touching the database if the request falls outside designated intake and publishing windows. Those windows were also tightened — source intake moved to hourly periods and publication handling shifted to exact configured times.\n\nOn the dashboard side, polling was optimized too. Instead of constant five-second polling that keeps running no matter what, it now pauses when the page is hidden or unfocused, and after 60 seconds of inactivity. Polling still resumes when the page is active again, but this reduces wasted database hits during idle periods.\n\nPractical checks confirmed the effectiveness of these changes. Snapshot observations around 04:10 to 04:15 UTC showed the production endpoint repeatedly going into a suspended state, with no SQL queries detected during this time. An integration scheduled at 04:12 was marked successful by metadata logs, but without triggering new query loads. All of this happened on the free Neon plan, without any paid upgrades or manual endpoint resumes.\n\nThis episode explicitly highlights a method: gate database queries by validating requests against configured active windows, and dynamically pause background data polling when user interaction wanes. It’s a straightforward response to stay within free resource limits and avoid unnecessary server load.\n\nIf you’re directing or building AI tools with expensive or limited backend resources, consider setting strict timing windows for when requests get to query your database — and monitor frontend polling to pause during user inactivity. How would you define these intake and publish windows to balance freshness and cost in your scenario?",
+        "hash": "1c43a34a7cec9f3e66e5b5c5f579273bf1d77d8e28b689a8bb63dfd927fcf5b1",
+        "created": "2026-10-25T12:48:39.052Z"
+      },
+      {
+        "id": "c47e8781-b420-487b-894b-adb3ad424d0c",
+        "task_id": "96737ed0-a683-4a3d-9b2e-89aea38a214e",
+        "role": "Platform Adapter",
+        "text": "### LinkedIn\n\nManaging database load and cost is a key challenge when building AI tools—especially on tight free-tier plans. The AI Journey Studio project provides a clear example of a practical approach to this problem.\n\nOriginally, the system had two main database access points: integration requests every two minutes and dashboard polling every five seconds for signed-in users. This frequent querying risked exceeding a free Neon database’s limit of 100 compute-unit hours per month.\n\nTo reduce this overhead, the team tightened control over when database queries actually happen. For integration requests, the handler now validates each request and returns early without querying the database if the request falls outside designated \"intake\" and \"publication\" time windows. These windows were adjusted to hourly intervals for intake and exact configured times for publication, cutting down unnecessary queries.\n\nDashboard polling was also optimized: instead of polling every five seconds continuously, the system pauses polling when the page is hidden or unfocused and after 60 seconds of inactivity. Polling resumes only when user interaction returns. This simple change reduces wasted requests during idle moments.\n\nSupporting observations recorded the production endpoint entering suspended states several times, with no SQL queries issued during those periods—confirming the endpoint was idle and saving compute resources. All this happened on a free plan without upgrading or manually managing endpoints.\n\nThis episode highlights a straightforward method: gate database queries by actively validating requests within strict timing windows and pause background polling during user inactivity. These steps can meaningfully reduce backend load and keep usage within free or limited tiers.\n\nIf you’re building AI systems with costly or limited backend resources, consider specifying exact time windows for when queries can execute, and monitor frontend activity to pause polling when possible. How would you define those windows to balance data freshness with cost savings in your projects?",
+        "hash": "adf3e03f60db36dcbe461edb5cc0c52a6e295e86a9b712898d8308eb483ca8f8",
+        "created": "2026-10-25T12:48:42.508Z"
+      },
+      {
+        "id": "51bd23b7-14da-4cb8-9a5e-71e40beea89e",
+        "task_id": "96737ed0-a683-4a3d-9b2e-89aea38a214e",
+        "role": "Critic",
+        "text": "{\"schema\":2,\"source_hash\":\"b9207df4d35f15bd9a9d770891e482e9cdd000bdb9da5ef1439dc8b8d07ae603\",\"index_hash\":\"054b2dd225ee14dfa773e83bf4675e514dbbc06f2d5125dd112406254c766a94\",\"Unsupported claims:\":\"The texts do not support the owner's direct personal experience, autonomous system operation, or continuous performance guarantees; these distinctions must be maintained. Also, claims implying measured cost savings, uninterrupted idle state, or definite successful LinkedIn publication lack direct evidence.\",\"Evidence needed:\":\"Clear owner-authored statements about personal experience, continuous endpoint suspension outside observed snapshots, monthly compute usage data, and post-publication confirmation.\",\"Proposed advice:\":\"Focus public writing on observations and configuration documented in the source; avoid implying owner achievements or continuous monitored outcomes without explicit evidence; request separate owner-written sources for personal experience or success confirmation.\",\"evidence\":[{\"claim_id\":\"writer:4\",\"source_ids\":[\"source:10\",\"source:11\"],\"verdict\":\"wording_review\",\"reason\":\"The description of integrating request handling with validation against intake and publishing windows is supported by commit-linked documentation indicating this implementation change (source:10 and source:11).\"},{\"claim_id\":\"writer:10\",\"source_ids\":[\"source:13\",\"source:14\",\"source:15\"],\"verdict\":\"wording_review\",\"reason\":\"The reported observations at specific UTC timestamps showing the endpoint in SUSPENDED state with no SQL queries during those moments are documented (source:13,14,15), confirming snapshot endpoint suspension evidence rather than continuous operational state.\"},{\"claim_id\":\"writer:12\",\"source_ids\":[\"source:16\"],\"verdict\":\"wording_review\",\"reason\":\"The statement that all events occurred on a free Neon plan without paid upgrades or manual resumes aligns with documented verification of account and plan usage (source:16).\"},{\"claim_id\":\"writer:15\",\"source_ids\":[\"source:10\",\"source:11\",\"source:12\"],\"verdict\":\"wording_review\",\"reason\":\"The advice to gate queries by timing windows and pause polling during inactivity is consistent with the recorded updates to request handling and background polling behavior (source:10,11,12).\"},{\"claim_id\":\"writer:3\",\"source_ids\":[\"source:7\"],\"verdict\":\"wording_review\",\"reason\":\"The claim about the free-tier Neon database monthly allowance of 100 compute-unit hours is verified by documented account capabilities (source:7).\"},{\"claim_id\":\"writer:13\",\"source_ids\":[\"source:10\",\"source:11\",\"source:12\"],\"verdict\":\"wording_review\",\"reason\":\"Highlighting the method of validating requests within windows and pausing polling aligns with updated behavioral documentation (source:10,11,12) and observed endpoint status (source:13,14).\"},{\"claim_id\":\"writer:16\",\"source_ids\":[\"source:5\"],\"verdict\":\"wording_review\",\"reason\":\"The opening question asking how to define intake and publish windows is a rhetorical engagement supported indirectly by the project's described approach to window definition (source:5).\"}]}",
+        "hash": "5f5227690db3bde068f4221dafefc80c8c03214cd563f22b60f365f177cdaa1a",
+        "created": "2026-10-25T12:48:48.526Z"
+      }
+    ],
+    "config_hash": "25cf1f9326e6b3a93ec7747f6072c7bf0851fef0da02e654b8dffc053fed5ea7",
+    "style_hash": "36165a6c0ae473845162c7ee76382aa07da8c3419ae654c9277fa9f29282c6f4",
+    "scope_hash": "ed2bf1903a48644cccff06e8c4ae24cd1716c30a969229cdf5a16723be27a0ce"
+  },
+  "recorded_state_hash": "0f112a9dc532fe253f1ebe9bf238ac85cbf236476b803a8396a81dfe9a7127e9",
+  "reconstructed_state_hash": "0f112a9dc532fe253f1ebe9bf238ac85cbf236476b803a8396a81dfe9a7127e9",
+  "validation": "Exact complete context JSON reproduces predecessor state hash. Historical fixture only; not proof of current live authorization."
+}

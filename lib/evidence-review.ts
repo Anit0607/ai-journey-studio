@@ -1,3 +1,4 @@
+import {ownerProjectWording} from './owner-project-context';
 import {editorialReview,assertNoEditorialHold} from './editorial-review';
 import {taskPlatformPolicy,type PlatformPolicy} from "./platform-policy";
 import {randomUUID} from "node:crypto";
@@ -9,9 +10,10 @@ import {assertArtifactPrivacy} from "./artifact-privacy";
 import type {Connection} from "./db";
 
 export const EVIDENCE_POLICY="evidence-review-v3-lossless-spans";
+export const ASSISTANT_EVIDENCE_POLICY="assistant-wording-comparison-v1";
 export type Span={start:number;end:number};
 export type Finding={category?:'structure';id:string;kind:"wording_review"|"hard";role:string;claim:string;reason:string;artifact_hash:string;span:Span};
-export type Decision={id:string;binding:string;finding_id:string;decision:"accept"|"withdraw";policy_version:string;actor:string;reason:string;evidence:{source_span:Span;source_quote:string};context:{source_hash:string;artifact_hash:string;bundle_hash:string;claim_span:Span;claim_text:string;reported_date?:string|null};created?:string};
+export type Decision={id:string;binding:string;finding_id:string;decision:"accept"|"withdraw";policy_version:string;actor:string;reason:string;evidence:{source_span:Span;source_quote:string};context:{source_hash:string;artifact_hash:string;bundle_hash:string;claim_span:Span;claim_text:string;reported_date?:string|null;review_token?:string;review_token_hash?:string;source_quote_hash?:string;source_span_hash?:string};created?:string};
 type EvidenceSource={text:string;hash:string;cleared?:boolean;clearance_id?:string|null;cleared_at?:unknown;revoked_at?:unknown;reported_date?:string};
 const plain=(text:string)=>text.trim().replace(/^(?:[-*+>]\s+|#{1,3}\s+)/,'').replace(/\*\*/g,'').replace(/^["“]|["”,]$/g,'').replace(/[.!]$/,'').replace(/\s+/g,' ').toLowerCase();
 function spans(text:string):Array<Span&{text:string}>{
@@ -98,8 +100,10 @@ function hardReason(claim:string,source:string,role?:string):string|null{
  const entityText=role==='Strategist'?claim.replace(/^(?:\*\*)?(?:Audience Need|Reader Takeaway):(?:\*\*)?[ \t]*/,''):claim;
  const names=entityText.match(/\b[A-Z][a-z]+(?:\s+[A-Z][a-z]+)+\b/g)||[];
  const singleNames=[...entityText.matchAll(/\b(?:[A-Z][a-z]+|[A-Z][a-z]+[A-Z][A-Za-z]+)\b/g)];
+ // Only these sentence-initial grammatical/discourse words are exempt from
+ // the single-term entity check; later occurrences and multiword names are not.
  const firstWord=entityText.search(/[A-Za-z]/);
- if(singleNames.some(match=>{const x=match[0];const connective=match.index===firstWord&&['Following','Subsequently','Upon','If','Is','For'].includes(x);return !connective&&!source.includes(x)&&!['The','This','That','It','As','However','Currently','Proposed','Evidence','Unsupported','Review','Owner','Content','Audience','Approach','Human','Keep','Use','Only','No','All','Source','LinkedIn','Instagram','Writer','Platform','Adapter','Check','My','We','Our','They','He','She'].includes(x);}))return 'New named entity or unsupported capitalized term requires correction';
+ if(singleNames.some(match=>{const x=match[0];const connective=match.index===firstWord&&['Following','Subsequently','Upon','If','Is','For','So','How','Those','Separately'].includes(x);return !connective&&!source.includes(x)&&!['The','This','That','It','As','However','Currently','Proposed','Evidence','Unsupported','Review','Owner','Content','Audience','Approach','Human','Keep','Use','Only','No','All','Source','LinkedIn','Instagram','Writer','Platform','Adapter','Check','My','We','Our','They','He','She'].includes(x);}))return 'New named entity or unsupported capitalized term requires correction';
  if(names.some(x=>!source.includes(x)&&!['Proposed approach','Evidence needed','Unsupported claims','Proposed advice'].includes(x)))return "New named entity requires new cleared evidence";
  // An observed removal does not establish that Studio performed it. This narrow
  // product-action guard is not general actor/semantic verification.
@@ -128,7 +132,7 @@ export function evidenceFindings(bundle:Artifact[],source:string,reportedDate?:s
   const atom=artifact&&start>=0?artifactSpans(artifact.text,artifact.role,source,reportedDate).find(x=>x.start<=start&&x.end>=start+flag.claim.length):undefined;
   if(atom&&verifiedSourceEnvelope(atom.text,artifact!.role,source,reportedDate))continue;
   const claim=atom?(atom.raw||atom.text):flag.claim,span=atom?{start:atom.start,end:atom.end}:{start,end:start+flag.claim.length};
-  const wording=/Personal claim needs/.test(flag.reason)&&source!==CAPSULE&&!/^Attributed (?:GitHub|YouTube) evidence;/.test(source);
+  const wording=(/Personal claim needs/.test(flag.reason)&&source!==CAPSULE&&!/^Attributed (?:GitHub|YouTube) evidence;/.test(source))||(/Owner-project wording needs/.test(flag.reason)&&ownerProjectWording(claim,source)!==null);
   const hard=hardReason(claim,source,artifact?.role);
   out.push(finding(flag.role,claim,hard||flag.reason,wording&&!hard&&span.start>=0?"wording_review":"hard",artifact?.hash||"",span));
  }
@@ -160,20 +164,35 @@ export function validateEvidence(finding:Finding,source:string,sourceSpan:Span,q
  const words=finding.claim.toLowerCase().match(/[a-z]{4,}/g)||[];
  if(!words.some(x=>quote.toLowerCase().includes(x)))throw Error("Select relevant source evidence");
 }
-export function evidenceQuality(bundle:Artifact[],source:EvidenceSource,decisions:Decision[]=[],policy?:PlatformPolicy){
+const spanHash=(span:Span)=>hash(JSON.stringify({start:span.start,end:span.end}));
+function assistantContextCurrent(row:Decision,source:EvidenceSource,token?:string){
+ try{
+  if(!token||!row.reason.trim()||row.reason.length>600||typeof row.evidence?.source_quote!=='string'||!row.evidence.source_span)return false;
+  assertSourcePrivacy(row.reason);
+  return row.context.review_token===token&&row.context.review_token_hash===hash(token)&&row.context.source_quote_hash===hash(row.evidence.source_quote)&&row.context.source_span_hash===spanHash(row.evidence.source_span)&&row.context.reported_date===(source.reported_date||null);
+ }catch{return false;}
+}
+export function evidenceQuality(bundle:Artifact[],source:EvidenceSource,decisions:Decision[]=[],policy?:PlatformPolicy,reviewToken?:string){
  let integrity=true;try{assertBundle(bundle);assertSourcePrivacy(source.text);if(hash(source.text)!==source.hash||source.cleared===false||source.revoked_at)throw Error();for(const x of bundle)assertArtifactPrivacy(x.text);}catch{integrity=false;}
  const binding=evidenceBinding(bundle,source,policy),findings=evidenceFindings(bundle,source.text,source.reported_date,policy),latest=new Map<string,Decision>();
- for(const row of decisions)if(row.binding===binding&&row.policy_version===EVIDENCE_POLICY&&row.actor==='owner')latest.set(row.finding_id,row);
+ const assistants=new Map<string,Decision>();
+ for(const row of decisions)if(row.binding===binding){
+  if(row.actor==='owner'&&row.policy_version===EVIDENCE_POLICY)latest.set(row.finding_id,row);
+  else if(row.actor==='assistant'&&row.policy_version===ASSISTANT_EVIDENCE_POLICY)assistants.set(row.finding_id,row);
+ }
+ // Any current owner decision has precedence, including withdrawal. An assistant
+ // can never silently reinstate wording the owner withdrew. Owner policy is unchanged.
+ for(const [id,row] of assistants)if(!latest.has(id))latest.set(id,row);
  const accepted:Decision[]=[];
  const resolved=findings.map(item=>{const row=latest.get(item.id);let resolution:Decision|null=null;
-  if(integrity&&row?.decision==='accept'&&item.kind==='wording_review'&&row.context?.source_hash===source.hash&&row.context.artifact_hash===item.artifact_hash&&row.context.bundle_hash===bundleVersion(bundle,source.hash)&&row.context.claim_span.start===item.span.start&&row.context.claim_span.end===item.span.end&&row.context.claim_text===item.claim)try{validateEvidence(item,source.text,row.evidence.source_span,row.evidence.source_quote);resolution=row;accepted.push(row);}catch{}
+  if(integrity&&row?.decision==='accept'&&item.kind==='wording_review'&&row.context?.source_hash===source.hash&&row.context.artifact_hash===item.artifact_hash&&row.context.bundle_hash===bundleVersion(bundle,source.hash)&&row.context.claim_span?.start===item.span.start&&row.context.claim_span?.end===item.span.end&&row.context.claim_text===item.claim&&(row.actor==='owner'||assistantContextCurrent(row,source,reviewToken)))try{validateEvidence(item,source.text,row.evidence.source_span,row.evidence.source_quote);resolution=row;accepted.push(row);}catch{}
   return {...item,resolution};});
  const flags=resolved.filter(x=>!x.resolution);
  const critic=criticSuggestions(bundle,source);for(const suggestion of critic.suggestions as Array<{verdict:string;role:string;claim:string;artifact_hash:string;start:number;end:number}>){if(suggestion.verdict==='unsupported')flags.push({...finding(suggestion.role,suggestion.claim,'Critic identifies unsupported content; correct it before approval','hard',suggestion.artifact_hash,{start:suggestion.start,end:suggestion.end}),resolution:null});}if(!critic.valid)flags.push({...finding('Critic','Invalid structured evidence review','Structured Critic links or source binding are invalid; correct the Critic artifact','hard',bundle.find(x=>x.role==='Critic')?.hash||'',{start:-1,end:-1}),resolution:null});
  if(!integrity)flags.push({...finding('Source','Integrity or privacy check failed','Current cleared source and intact six-artifact bundle required','hard','',{start:-1,end:-1}),resolution:null});
- return {status:flags.length?'needs_revision':'needs_human_review',editorial:editorialReview(bundle),flags,findings:resolved,binding,policy_version:EVIDENCE_POLICY,critic,source_text:source.text,source_hash:source.hash,bundle_hash:bundleVersion(bundle,source.hash),evidence_version:accepted.length?hash(accepted.map(x=>x.id).sort().join('|')):null,notice:'Evidence links and owner review are not independent factual verification. Review every claim; publication needs separate approval.'};
+ return {status:flags.length?'needs_revision':'needs_human_review',editorial:editorialReview(bundle),flags,findings:resolved,binding,policy_version:EVIDENCE_POLICY,critic,source_text:source.text,source_sentences:sourceEvidenceSpans(source.text),source_hash:source.hash,bundle_hash:bundleVersion(bundle,source.hash),evidence_version:accepted.length?hash(accepted.map(x=>x.id).sort().join('|')):null,notice:'Evidence links and owner review are not independent factual verification. Review every claim; publication needs separate approval.'};
 }
-export async function reviewReadiness(tx:Connection,task:string,bundle:Artifact[],source:EvidenceSource){const rows=await tx.query<Decision>('SELECT * FROM evidence_decisions WHERE task_id=$1 ORDER BY sequence',[task]);const persisted=(await tx.query<{content_brief:Record<string,unknown>}>('SELECT content_brief FROM tasks WHERE id=$1',[task]))[0];if(!persisted)throw Error('Unknown task');return evidenceQuality(bundle,source,rows,taskPlatformPolicy(persisted));}
+export async function reviewReadiness(tx:Connection,task:string,bundle:Artifact[],source:EvidenceSource,reviewToken?:string){const rows=await tx.query<Decision>('SELECT * FROM evidence_decisions WHERE task_id=$1 ORDER BY sequence',[task]);const persisted=(await tx.query<{content_brief:Record<string,unknown>}>('SELECT content_brief FROM tasks WHERE id=$1',[task]))[0];if(!persisted)throw Error('Unknown task');const latest=(await tx.query<{id:string;version:string}>('SELECT id,version FROM content_revisions WHERE task_id=$1 ORDER BY sequence DESC LIMIT 1',[task]))[0];const token=latest?'revision:'+latest.id+':'+latest.version:'original:'+hash(bundle.map(item=>item.hash).join('|'));return evidenceQuality(bundle,source,rows,taskPlatformPolicy(persisted),reviewToken||token);}
 export async function saveEvidenceDecision(tx:Connection,task:string,bundle:Artifact[],source:EvidenceSource,input:{binding:string;finding_id:string;decision:string;reason:string;source_span:Span;source_quote:string;acknowledged:boolean}){
  const quality=await reviewReadiness(tx,task,bundle,source);
  if(!input||input.binding!==quality.binding)throw Error('Stale evidence review; refresh before saving');
@@ -186,6 +205,39 @@ export async function saveEvidenceDecision(tx:Connection,task:string,bundle:Arti
  await tx.query("INSERT INTO evidence_decisions(id,task_id,binding,finding_id,decision,policy_version,actor,reason,evidence,context) VALUES($1,$2,$3,$4,$5,$6,'owner',$7,$8,$9)",[id,task,quality.binding,item.id,input.decision,EVIDENCE_POLICY,input.reason.trim(),JSON.stringify(evidence),JSON.stringify({source_hash:source.hash,artifact_hash:item.artifact_hash,bundle_hash:quality.bundle_hash,claim_span:item.span,claim_text:item.claim,reported_date:source.reported_date||null})]);
  if(input.decision==='withdraw')await tx.query("UPDATE tasks SET status='review',updated=now() WHERE id=$1 AND status='approved'",[task]);
  await tx.query("INSERT INTO events(id,task_id,kind,detail) VALUES($1,$2,'evidence_review_saved',$3)",[randomUUID(),task,'Individual '+input.decision+' decision '+id+' for '+item.id+'; policy '+EVIDENCE_POLICY+'; content approval remains separate']);return {id};
+}
+
+
+export type AssistantEvidenceInput={task:string;expected:string;binding:string;finding_id:string;decision:'accept'|'withdraw';reason:string;source_span:Span|null;source_quote:string;acknowledged:true};
+export function validAssistantEvidenceInput(value:unknown):value is AssistantEvidenceInput{
+ if(!value||typeof value!=='object'||Array.isArray(value))return false;
+ const v=value as AssistantEvidenceInput;
+ const span=v.source_span;const exactSpan=!!span&&typeof span==='object'&&!Array.isArray(span)&&Object.keys(span).sort().join('|')==='end|start'&&Number.isSafeInteger(span.start)&&Number.isSafeInteger(span.end);
+ return (v.decision==='accept'?exactSpan:span===null&&v.source_quote==='')&&Object.keys(v).sort().join('|')==='acknowledged|binding|decision|expected|finding_id|reason|source_quote|source_span|task'&&v.acknowledged===true&&['accept','withdraw'].includes(v.decision)&&[v.task,v.expected,v.binding,v.finding_id,v.reason,v.source_quote].every(x=>typeof x==='string')&&/^[a-f0-9-]{36}$/.test(v.task)&&/^(?:original:[a-f0-9]{64}|revision:[a-f0-9-]{36}:[a-f0-9]{64})$/.test(v.expected)&&/^[a-f0-9]{64}$/.test(v.binding)&&/^[a-f0-9]{64}$/.test(v.finding_id);
+}
+/** Called under the parent task/source locks. Actor and policy are SERVER-selected. */
+export async function saveAssistantEvidenceDecision(tx:Connection,task:string,token:string,bundle:Artifact[],source:EvidenceSource,input:AssistantEvidenceInput){
+ if(!validAssistantEvidenceInput(input)||input.task!==task||input.expected!==token)throw Error('Exact assistant wording comparison required');
+ if(!(await tx.query('SELECT version FROM schema_versions WHERE version=23')).length)throw Error('Assistant comparison schema unavailable');
+ const quality=await reviewReadiness(tx,task,bundle,source);
+ if(input.binding!==quality.binding)throw Error('Stale evidence review; refresh before comparing');
+ const item=quality.findings.find(x=>x.id===input.finding_id);
+ if(!item||item.kind!=='wording_review'||item.category||item.span.start<0||bundle.find(x=>x.role===item.role)?.text.slice(item.span.start,item.span.end)!==item.claim)throw Error('Only an individual wording finding may be compared');
+ if(!input.reason.trim()||input.reason.length>600)throw Error('Comparison reason required (maximum 600 characters)');assertSourcePrivacy(input.reason);
+ const owners=await tx.query("SELECT id FROM evidence_decisions WHERE task_id=$1 AND binding=$2 AND finding_id=$3 AND actor='owner' AND policy_version=$4 LIMIT 1",[task,quality.binding,item.id,EVIDENCE_POLICY]);
+ if(owners.length)throw Error('An owner decision takes precedence; an assistant cannot replace or reinstate it');
+ if(input.decision==='accept'){
+  assertNoEditorialHold(quality.editorial);if(!quality.critic.valid)throw Error('Invalid Critic evidence cannot be waived');
+  for(const artifact of bundle)assertArtifactPrivacy(artifact.text);
+  if(item.resolution)throw Error('This wording already has a current comparison');
+  validateEvidence(item,source.text,input.source_span as Span,input.source_quote);
+ }else if(item.resolution?.actor!=='assistant')throw Error('No current assistant comparison to withdraw');
+ const evidence=input.decision==='accept'?{source_span:input.source_span as Span,source_quote:input.source_quote}:item.resolution!.evidence;
+ const id=randomUUID(),context={source_hash:source.hash,artifact_hash:item.artifact_hash,bundle_hash:quality.bundle_hash,claim_span:item.span,claim_text:item.claim,reported_date:source.reported_date||null,review_token:token,review_token_hash:hash(token),source_quote_hash:hash(evidence.source_quote),source_span_hash:spanHash(evidence.source_span)};
+ await tx.query("INSERT INTO evidence_decisions(id,task_id,binding,finding_id,decision,policy_version,actor,reason,evidence,context) VALUES($1,$2,$3,$4,$5,$6,'assistant',$7,$8,$9)",[id,task,quality.binding,item.id,input.decision,ASSISTANT_EVIDENCE_POLICY,input.reason.trim(),JSON.stringify(evidence),JSON.stringify(context)]);
+ await tx.query("INSERT INTO events(id,task_id,kind,detail) VALUES($1,$2,'assistant_wording_compared',$3)",[randomUUID(),task,JSON.stringify({decision_id:id,decision:input.decision,actor:'assistant',policy_version:ASSISTANT_EVIDENCE_POLICY,binding:quality.binding,finding_id:item.id,review_token_hash:hash(token),notice:'Assistant compared wording against cited source; not owner review or independent verification. No content approval or publication.'})]);
+ if(input.decision==='withdraw')await tx.query("UPDATE tasks SET status='review',updated=now() WHERE id=$1 AND status='approved'",[task]);
+ return {id,actor:'assistant',policy_version:ASSISTANT_EVIDENCE_POLICY};
 }
 
 export const CRITIC_CONTRACT=' Return JSON only, without Markdown fences or surrounding prose: {"schema":2,"source_hash":"copy current source_hash","index_hash":"copy current index_hash","Unsupported claims:":"short assessment, never factual certification","Evidence needed:":"short gaps","Proposed advice:":"short proposed approach","evidence":[{"claim_id":"writer:0 or platform:0 from the current index","source_ids":["source:0"],"verdict":"wording_review","reason":"why owner comparison is needed"}]}. Preserve these exact key names, including their trailing colons; do not rename or add fields. Select only server-issued sentence IDs from CURRENT CRITIC EVIDENCE INDEX. Never calculate offsets, invent IDs, copy draft text as source evidence, or reuse a previous revision index. For unsupported claims use verdict="unsupported", source_ids=[], and a concise reason; nonexistent support must not be invented. Never attach source IDs to an unsupported verdict. Reporting that an earlier draft made unsupported claims is not asserting those claims: compare the complete current sentence, attribution and negation against SOURCE. Reasons are critique, never factual evidence. For wording_review select one or more consecutive complete source sentences whose text actually supports the wording; a repository/account metadata line cannot support implementation, results or benefits. At most 8 entries and 600 characters per reason; prioritize uncertain public claims and action attribution. Missing coverage still requires owner review; an empty list is not verification. Do not contradict an unsupported verdict by declaring all claims supported. Fit within the existing 1200 output-token cap; no extra call.';

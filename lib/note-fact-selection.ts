@@ -1,6 +1,7 @@
 import {hash,type Source} from './domain';
 import type {Artifact} from './grounding';
 import {attributedProgressNote} from './drafting-contract';
+import {ownerProjectContext} from './owner-project-context';
 import {sourceEvidenceSpans} from './evidence-review';
 
 export const NOTE_SELECTION_VERSION='canonical-note-v1';
@@ -50,9 +51,17 @@ export function assertNotePredecessors(checkpoint:number,source:NoteSource,previ
   if(!artifact||hash(artifact.text)!==artifact.hash||noteStageIssue(n,artifact.text,source,previous))throw Error('Canonical note predecessor invalid');
  }
 }
+/** Minimal reader context is available independently of the six selected episode IDs.
+ * Exact evidence only; not six more mandatory public details or invented brief prose.
+ */
+export function noteReaderContext(source:NoteSource){
+ if(hash(source.text)!==source.hash||!ownerProjectContext(source.text))return null;
+ const index=canonicalNoteFacts(source),ids=['fact_a','fact_c','fact_d','fact_m'];
+ return {version:'studio-reader-context-v1',source_hash:source.hash,facts:ids.map(id=>index.find(f=>f.id===id)!),notice:'Available reader context, not mandatory verbatim public copy: project purpose, limited free compute, configured autosuspend and observation limits. Include only what makes the selected episode understandable. Do not turn configuration or allowance into measured savings, uninterrupted activity/sleep or proven autonomous operation.'};
+}
 export function canonicalFactPacket(source:NoteSource,selection:FactSelection,artifactHash:string){
  const index=canonicalNoteFacts(source);
- return {contract:NOTE_SELECTION_VERSION,source_hash:source.hash,selection_artifact_hash:artifactHash,facts:selection.source_ids.map(id=>index.find(f=>f.id===id)!),...(selection.opening?{opening:selection.opening,reader_action:selection.reader_action}:{}),notice:'Facts are exact server-sliced SOURCE sentences. Selection/order and finite editorial choices are not factual claims. Full SOURCE and its limitations remain authoritative.'};
+ return {contract:NOTE_SELECTION_VERSION,...(noteReaderContext(source)?{reader_context:noteReaderContext(source)}:{}),source_hash:source.hash,selection_artifact_hash:artifactHash,facts:selection.source_ids.map(id=>index.find(f=>f.id===id)!),...(selection.opening?{opening:selection.opening,reader_action:selection.reader_action}:{}),notice:'Facts are exact server-sliced SOURCE sentences. Selection/order and finite editorial choices are not factual claims. Full SOURCE and its limitations remain authoritative.'};
 }
 export function notePriorPayload(checkpoint:number,source:NoteSource,previous:Artifact[]){
  assertNotePredecessors(checkpoint,source,previous);

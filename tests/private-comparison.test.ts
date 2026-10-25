@@ -142,3 +142,29 @@ test('uncleared private format-context material cannot enter the comparison prom
  const f=await seed();await db.query("UPDATE tasks SET content_brief=content_brief||$1::jsonb WHERE id=$2",[JSON.stringify({editorial_note:'Bandhan Bank material is excluded'}),f.task.id]);
  assert.equal((await f.exports.comparisonSnapshot(db,f.c)).preview,null);assert.equal((await f.exports.runPrivateComparison(db,f.input,f.options)).status,'blocked');assert.equal(f.calls(),0);assert.equal((await db.query('SELECT * FROM ledger')).length,0);
 });
+
+
+test('privacy rejection retains a fixed diagnosis and simultaneous Critic editorial hold without clearing either',async()=>{
+ const f=await seed(),before=await originalState(),critic=JSON.parse(f.artifacts[5].text);
+ critic['Proposed advice:']='EDITORIAL HOLD: needs_revision. No bank/client material or invented personal experience is apparent.';
+ const criticText=JSON.stringify(critic);let count=0;
+ const result=await f.exports.runPrivateComparison(db,f.input,{...f.options,provider:async()=>{const n=count++;return completion(n===5?criticText:f.artifacts[n].text);}});
+ assert.equal(result.status,'privacy_hold');assert.equal(result.steps,6);assert.equal(count,6);assert.equal(await originalState(),before);
+ const snapshot=await f.exports.comparisonSnapshot(db,f.c),end=snapshot.history.find(e=>e.kind==='private_comparison_finished')!.detail;
+ assert.equal(end.assessment.issue,'artifact_privacy_blocked');assert.equal(end.assessment.checkpoint,5);assert.equal(end.assessment.role,'Critic');assert.equal(end.assessment.editorial.blocking,true);assert.equal(end.assessment.editorial.status,'needs_editorial_revision');
+ assert.equal(end.reservation_retained,false);assert.equal(end.known_microdollars,7500);
+ const saved=snapshot.history.find(e=>e.kind==='private_comparison_stage'&&e.detail.checkpoint===5)!.detail;assert.equal(saved.text,criticText);assert.equal(saved.hash,hash(criticText));assert.equal(saved.raw.text,criticText);
+ assert(!JSON.stringify(end.assessment).includes('bank/client'));assert.equal((await db.query('SELECT status FROM ledger'))[0].status,'settled');
+ assert.equal((await f.exports.runPrivateComparison(db,f.input,f.options)).status,'duplicate');assert.equal(count,6);
+ const {verifiedComparisonRun}=await import('../lib/private-comparison-record'),eventRows=await db.query('SELECT * FROM events'),ledger=await db.query('SELECT * FROM ledger');assert.throws(()=>verifiedComparisonRun(eventRows,ledger,result.run_id!));
+});
+
+test('genuine credential-shaped generated material still stops the chain without exposing it in diagnostics',async()=>{
+ const f=await seed(),before=await originalState(),unsafe='password=synthetic-fixture-value';let count=0;
+ const result=await f.exports.runPrivateComparison(db,f.input,{...f.options,provider:async()=>{const n=count++;return completion(n===3?unsafe:f.artifacts[n].text);}});
+ assert.equal(result.status,'privacy_hold');assert.equal(count,4);assert.equal(await originalState(),before);
+ const snapshot=await f.exports.comparisonSnapshot(db,f.c),end=snapshot.history.find(e=>e.kind==='private_comparison_finished')!.detail;
+ assert.equal(end.assessment.issue,'artifact_privacy_blocked');assert.equal(end.assessment.checkpoint,3);assert.equal(end.assessment.editorial.blocking,false);assert(!JSON.stringify(end.assessment).includes(unsafe));
+ const saved=snapshot.history.find(e=>e.kind==='private_comparison_stage'&&e.detail.checkpoint===3)!.detail;assert.equal(saved.text,unsafe);assert.equal(saved.hash,hash(unsafe));
+ assert.equal((await f.exports.runPrivateComparison(db,f.input,f.options)).status,'duplicate');assert.equal(count,4);
+});

@@ -9,7 +9,7 @@ import {resolveScopedSource} from "./github-source-policy";
 import {scopedSourceProof,scopedTaskMatches} from "./scoped-source-proof";
 import {taskPlatformPolicyHash} from "./platform-policy-binding";
 import {newTaskPlatformBrief,taskPlatformPolicy} from "./platform-policy";
-import {evidenceQuality,reviewReadiness,saveEvidenceDecision,saveEvidenceApproval,type Decision} from "./evidence-review";
+import {evidenceQuality,reviewReadiness,saveEvidenceDecision,saveAssistantEvidenceDecision,saveEvidenceApproval,type Decision,type AssistantEvidenceInput} from "./evidence-review";
 import {usageSummary} from "./usage";
 import {OwnerReports} from "./owner-reports";
 import {platformVariants} from "./platform-variants";
@@ -61,8 +61,8 @@ export class Store{
       const history=revisions.filter((revision:any)=>revision.task_id===task.id),latest:any=history.at(-1);
       const bundle=latest?.bundle||data.outputs.filter((output:Output)=>output.task_id===task.id);
       const source=data.sources.find((item:Source)=>item.id===task.source_id);
-      const quality=evidenceQuality(bundle,source||{text:"",hash:"",cleared:false},evidenceRows.filter(row=>row.task_id===task.id),taskPlatformPolicy(task));
       const token=latest?"revision:"+latest.id+":"+latest.version:"original:"+hash(bundle.map((item:Artifact)=>item.hash).join("|"));
+      const quality=evidenceQuality(bundle,source||{text:"",hash:"",cleared:false},evidenceRows.filter(row=>row.task_id===task.id),taskPlatformPolicy(task),token);
       const receipts=evidenceReceipts.filter((row:any)=>row.task_id===task.id);
       const approvalCurrent=!quality.editorial.blocking&&!quality.flags.length&&receipts.some((row:any)=>row.binding===quality.binding&&row.review_token===token&&row.evidence_version===(quality.evidence_version||""));
       return {contributions:agentContributions(task,data.tasks,data.outputs,data.ledger,data.events,history,bundle,source),variants:platformVariants(bundle.find((item:Artifact)=>item.role==="Platform Adapter"),taskPlatformPolicy(task)),platform_policy:taskPlatformPolicy(task)||null,task_id:task.id,is_agent_revision:false,pending_agent_revision:data.tasks.find((child:Task)=>child.revision_parent_task_id===task.id&&["queued","running","blocked"].includes(child.status))||null,agent_revision_jobs:data.tasks.filter((child:Task)=>child.revision_parent_task_id===task.id),token:latest?"revision:"+latest.id+":"+latest.version:"original:"+hash(bundle.map((item:Artifact)=>item.hash).join("|")),latest_revision:latest?.id||null,original_bundle:data.outputs.filter((output:Output)=>output.task_id===task.id),original_approval:data.approvals.find((item:any)=>item.task_id===task.id)||null,bundle,quality,approval:(latest?revisionApprovals.find((item:any)=>item.revision_id===latest.id):data.approvals.find((item:any)=>item.task_id===task.id))&&approvalCurrent?(latest?revisionApprovals.find((item:any)=>item.revision_id===latest.id):data.approvals.find((item:any)=>item.task_id===task.id))||null:null,history:history.map((item:any)=>({...item,approval:revisionApprovals.find((approval:any)=>approval.revision_id===item.id)||null}))};
@@ -304,6 +304,13 @@ export class Store{
       const context=await this.revisionContext(tx,id,expected);
       await assertNoPendingAgentRevision(tx,id);
       return saveEvidenceDecision(tx,id,context.bundle,context.source,input);
+    });
+  }
+  async reviewAssistantEvidence(input:AssistantEvidenceInput){
+    return this.db.transaction(async tx=>{
+      const context=await this.revisionContext(tx,input.task,input.expected);
+      await assertNoPendingAgentRevision(tx,input.task);
+      return saveAssistantEvidenceDecision(tx,input.task,context.token,context.bundle,context.source,input);
     });
   }
   async approveRevision(id:string,expected:string,acknowledged:boolean,approvalScope:"artifacts"|"final-post"="artifacts"){

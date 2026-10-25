@@ -8,7 +8,7 @@ const detail=(event:Row)=>{try{return JSON.parse(event.detail);}catch{return nul
 /** Client eligibility is presentation only; the adoption endpoint re-verifies every saved byte. */
 export function comparisonPreparation(view:View){
  const {comparison:c,studio:s}=view,target=c.scope.target,model=c.scope.pricing.model;
- const starts=c.history.filter(e=>e.kind==='private_comparison_started'),ends=c.history.filter(e=>e.kind==='private_comparison_finished');
+ const starts=c.history.filter(e=>e.kind==='private_comparison_started'&&e.detail.scope_hash===c.scope_hash),ends=c.history.filter(e=>e.kind==='private_comparison_finished');
  if(!view.outputHashesValid||starts.length!==1||ends.length!==1)return null;
  const run=starts[0].detail.run_id,end=ends[0].detail,stages=c.history.filter(e=>e.kind==='private_comparison_stage'&&e.detail.run_id===run);
  const ledger=s.ledger.filter(r=>r.id===run),task=s.tasks.find(t=>t.id===target.task_id),review=s.reviews.find(r=>r.task_id===target.task_id);
@@ -19,9 +19,9 @@ export function comparisonPreparation(view:View){
 async function readView():Promise<View>{
  const [comparison,studio]=await Promise.all([fetch('/api/private-comparison',{cache:'no-store',credentials:'same-origin'}),fetch('/api/studio/state',{cache:'no-store',credentials:'same-origin'})]);
  if(!comparison.ok||!studio.ok)throw Error('Private preview unavailable');
- const saved:Snapshot=await comparison.json(),state=await studio.json(),stages=saved.history.filter(e=>e.kind==='private_comparison_stage');
+ const saved:Snapshot=await comparison.json(),state=await studio.json(),starts=saved.history.filter(e=>e.kind==='private_comparison_started'&&e.detail.scope_hash===saved.scope_hash),run=starts.length===1?starts[0].detail.run_id:null,stages=saved.history.filter(e=>e.kind==='private_comparison_stage'&&e.detail.run_id===run);
  let outputHashesValid=false;
- if(stages.length===6)try{outputHashesValid=(await Promise.all(stages.map(async e=>{if(typeof e.detail.text!=='string')return false;const bytes=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(e.detail.text));return Array.from(new Uint8Array(bytes),b=>b.toString(16).padStart(2,'0')).join('')===e.detail.hash;}))).every(Boolean);}catch{}
+ if(run&&stages.length===6)try{outputHashesValid=(await Promise.all(stages.map(async e=>{if(typeof e.detail.text!=='string')return false;const bytes=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(e.detail.text));return Array.from(new Uint8Array(bytes),b=>b.toString(16).padStart(2,'0')).join('')===e.detail.hash;}))).every(Boolean);}catch{}
  return {comparison:saved,studio:state,outputHashesValid};
 }
 /** Only deliberate clicks can POST. Refresh/mount/status recovery are read-only. */
@@ -64,12 +64,16 @@ export default function PrivateComparisonPanel({refreshKey}:{refreshKey:string})
   finally{inFlight.current=false;setBusy(null);if(sent)await refresh();}
  }
  if(!view)return <section aria-label="Private model comparison"><p role="status">{message||'Reading private comparison status…'}</p><button onClick={()=>void refresh()}>Refresh saved status</button></section>;
- const c=view.comparison,target=c.scope.target,source=view.studio.sources.find(s=>s.id===target.source_id),maximum=(c.scope.maximum_microdollars/1_000_000).toFixed(2);
+ const c=view.comparison,target=c.scope.target,source=view.studio.sources.find(s=>s.id===target.source_id),maximum=(c.scope.maximum_microdollars/1_000_000).toFixed(6);
  return <section aria-label="Private model comparison"><h2>Private model comparison</h2>
+  <p>Selected exact scope <code>{c.scope_hash}</code>{c.selected_run_id&&<> · Run <code>{c.selected_run_id}</code></>}</p>
+  {'predecessor' in c.scope&&<p>This is a separately bounded second experiment, not a restart of the original. Both attempts combined remain capped at $0.850000; prior recorded spending is $0.085324. {'permission_status' in c.scope&&c.scope.permission_status!=='approved'?'New permission and final prompt-policy binding are pending; execution remains disabled.':''}</p>}
   <p>One private six-stage attempt · {c.scope.pricing.model} · maximum ${maximum}. No fallback or retry. This does not approve, schedule or publish a post.</p>
   <p>Task {target.task_id} · Source {target.source_id}</p><small>Source SHA-256 {target.source_hash}</small>
   {source?.hash===target.source_hash&&<details><summary>Exact cleared source for this comparison</summary><pre>{source.text}</pre></details>}
+  {'predecessor' in c.scope&&<p>Read-only admission preflight: {c.admission_preflight?.eligible===true?'predecessor, unchanged state and budget verified at this read; this is not execution permission':'not verified or unavailable; no paid attempt can start'}. The server rechecks atomically before any paid call.</p>}
   <ComparisonResult state={c}/>
+  {!!c.prior_history?.length&&<details><summary>Earlier immutable comparison — separate history, not this experiment</summary><p>Prior outputs and findings are retained unchanged. A failed run is not eligible for adoption and is never retried here.</p><pre>{JSON.stringify(c.prior_history,null,2)}</pre></details>}
   {!c.history.length&&c.execution_ready!==true&&<p>The private comparison release gate or runtime is not ready. No attempt can be submitted; refresh after setup is ready.</p>}
   {busy&&<p role="status">{busy==='run'?'Comparison in progress. This may take several minutes; do not submit again.':'Preparing the unchanged comparison for final review…'}</p>}
   {message&&<p role="status">{message}</p>}
@@ -84,7 +88,7 @@ export default function PrivateComparisonPanel({refreshKey}:{refreshKey:string})
 }
 export function ComparisonResult({state}:{state:Snapshot}){
  if(!state.history.length)return null;
- const stages=state.history.filter(e=>e.kind==='private_comparison_stage'),end=state.history.find(e=>e.kind==='private_comparison_finished'),post=stages.find(e=>e.detail.role==='Platform Adapter');
+ const starts=state.history.filter(e=>e.kind==='private_comparison_started'&&e.detail.scope_hash===state.scope_hash),run=starts.length===1?starts[0].detail.run_id:null,stages=state.history.filter(e=>e.kind==='private_comparison_stage'&&e.detail.run_id===run),end=state.history.find(e=>e.kind==='private_comparison_finished'&&e.detail.run_id===run),post=stages.find(e=>e.detail.role==='Platform Adapter');
  const status=end?.detail.status==='completed_requires_review'?'Comparison saved — factual and editorial review required.':end?'Comparison stopped — review the saved findings before any further action.':'Running or outcome unconfirmed — inspect history; do not retry.';
  return <section><p>{status}</p><p>{state.notice}</p>{post&&<article><h3>Unchanged LinkedIn candidate</h3><pre style={{whiteSpace:'pre-wrap'}}>{post.detail.text}</pre><small>SHA-256 {post.detail.hash}</small></article>}<details><summary>Six stages, raw outputs and review findings</summary><pre>{JSON.stringify(state.history,null,2)}</pre></details></section>;
 }
