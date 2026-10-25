@@ -119,7 +119,8 @@ test('revision Critic index binds current child outputs, never the historical pa
    if(n!==5)return complete(n===4?variants(text):n===3?'  '+text:text);
    const index=JSON.parse(prompt.slice(prompt.lastIndexOf(marker)+marker.length));
    const current=(await store.db.query<Artifact>("SELECT role,text,hash FROM outputs WHERE task_id=$1 AND role='Writer'",[child.id]))[0];
-   assert.ok(prompt.includes(baseWriter.hash));assert.notEqual(current.hash,baseWriter.hash);
+   const revisionData=JSON.parse(prompt.split('\nUNTRUSTED REVISION DATA: ')[1].split('\nGROUNDING CONTRACT: ')[0]);
+   assert.equal(revisionData.prior_artifacts,undefined);assert.equal(revisionData.owner_feedback,undefined);assert.notEqual(current.hash,baseWriter.hash);
    assert.equal(index.artifacts[0].artifact_hash,current.hash);assert.notEqual(index.artifacts[0].artifact_hash,baseWriter.hash);
    const [start,end]=index.artifacts[0].spans[0],[source_start,source_end]=index.source.spans[0];
    return complete(critic([{role:'Writer',artifact_hash:current.hash,start,end,source_start,source_end,source_quote:text.slice(source_start,source_end),verdict:'wording_review'}]));
