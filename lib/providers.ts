@@ -1,5 +1,6 @@
 import {configReady,type RuntimeConfig,type Pricing,tokenCost} from "./domain";
 import {hostedEnvironment,hostedReady,type HostedEnvironment} from "./hosted";
+import {providerResponseFormat,type ProviderArtifactContract} from './critic-response-format';
 export type ProviderName="openai"|"gemini";
 export class ProviderFailure extends Error{constructor(readonly status:number){super("Provider HTTP "+status);}}
 export type Report={serviceTier:string|null;model:string|null;requestId:string|null;finishReason:string|null};
@@ -12,13 +13,14 @@ export function liveReady(c:RuntimeConfig,env:HostedEnvironment=process.env){
 }
 const safeId=(value:unknown)=>typeof value==="string"&&value.length<=150&&/^[A-Za-z0-9_.:-]+$/.test(value)?value:null;
 const tiers=["auto","default","flex","scale","priority","fast"];
-export async function providerCall(provider:ProviderName,prompt:string,p:Pricing,transport:typeof fetch=fetch,credential:(name:ProviderName)=>string|undefined=name=>process.env[name==="openai"?"OPENAI_API_KEY":"GEMINI_API_KEY"]):Promise<Completion>{
+export async function providerCall(provider:ProviderName,prompt:string,p:Pricing,transport:typeof fetch=fetch,credential:(name:ProviderName)=>string|undefined=name=>process.env[name==="openai"?"OPENAI_API_KEY":"GEMINI_API_KEY"],contract?:ProviderArtifactContract):Promise<Completion>{
   if(p.pricing_tier!=="standard")throw Error("Only reviewed standard pricing is supported");
   const key=credential(provider);
   if(!key)throw Error("Provider credential absent");
   const url=provider==="openai"?"https://api.openai.com/v1/chat/completions":"https://generativelanguage.googleapis.com/v1beta/models/"+encodeURIComponent(p.model)+":generateContent";
   // Chat Completions explicitly supports default; never inherit project Fast/Priority settings.
-  const body=provider==="openai"?{model:p.model,messages:[{role:"user",content:prompt}],max_completion_tokens:1200,store:false,service_tier:"default"}:{contents:[{parts:[{text:prompt}]}],generationConfig:{maxOutputTokens:1200}};
+  const responseFormat=providerResponseFormat(provider,contract);
+  const body=provider==="openai"?{model:p.model,messages:[{role:"user",content:prompt}],max_completion_tokens:1200,store:false,service_tier:"default",...(responseFormat?{response_format:responseFormat}:{})}:{contents:[{parts:[{text:prompt}]}],generationConfig:{maxOutputTokens:1200}};
   const headers:Record<string,string>={"Content-Type":"application/json"};
   if(provider==="openai")headers.Authorization="Bearer "+key;else headers["x-goog-api-key"]=key;
   const result=await transport(url,{method:"POST",headers,body:JSON.stringify(body),signal:AbortSignal.timeout(60_000)});

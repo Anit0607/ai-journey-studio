@@ -1,3 +1,4 @@
+import {providerResponseFormatBytes} from '../lib/critic-response-format';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
@@ -34,7 +35,7 @@ for(const malformed of [false,true])test('six mocked checkpoints use server cita
   const state=await store.snapshot(),review=state.reviews.find((r:{task_id:string})=>r.task_id===task.id);
   assert.equal(state.tasks[0].status,'review');assert.equal(state.outputs.length,6);assert.deepEqual(state.outputs.map((x:{role:string})=>x.role),[...ROLES]);assert.equal(state.approvals.length,0);assert.equal(review.approval,null);assert.equal(review.quality.evidence_version,null);
   assert.equal(review.quality.critic.valid,!malformed);assert.equal(review.quality.status,malformed?'needs_revision':'needs_human_review');
-  for(const row of state.ledger){assert.equal(row.status,'settled');assert.equal(Number(row.reserved),tokenCost(pricing,Buffer.byteLength(prompts[row.checkpoint])+256,1200));}
+  for(const row of state.ledger){assert.equal(row.status,'settled');assert.equal(Number(row.reserved),tokenCost(pricing,Buffer.byteLength(prompts[row.checkpoint])+providerResponseFormatBytes('openai',row.checkpoint===5?{artifact:'critic'}:undefined)+256,1200));}
   assert.equal(state.ledger.length,6);assert.equal((await db.query('SELECT id FROM publishing_outbox')).length,0);
  }finally{await db.close();}
 });

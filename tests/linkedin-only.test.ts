@@ -8,7 +8,7 @@ import {Calendar} from "../lib/calendar";
 import {CAPSULE,ROLES,hash,type Task,type RuntimeConfig} from "../lib/domain";
 import {NEW_PLATFORM_POLICY,activePlatforms,calendarPlatformPolicy,taskPlatformPolicy,readPlatformPolicy} from "../lib/platform-policy";
 import {platformVariants,PLATFORM_FORMAT,platformFormat} from "../lib/platform-variants";
-import {evidenceBinding,evidenceQuality} from "../lib/evidence-review";
+import {evidenceBinding,evidenceQuality,EVIDENCE_POLICY} from "../lib/evidence-review";
 import {bundleVersion,type Artifact} from "../lib/grounding";
 import {Publishing,type PublishingRuntime,type PublishInput,type PublishingAccount} from "../lib/publishing";
 import {renderApprovedInstagram} from "../lib/publication-media";
@@ -54,7 +54,7 @@ test("new manual tasks persist LinkedIn scope; duplicate enqueue never converts 
 }));
 test("historical artifacts, approval rows, evidence bindings and all three variant hashes survive new-work creation and snapshots",()=>fixture(async(db,store)=>{
  const source=await store.source(CAPSULE,"user-reported-notes","2026-10-09",true),old=await enqueueLegacy(store,source.id),done=await complete(db,old,variantFixture(prose));
- const originalBinding=hash(JSON.stringify({policy:"evidence-review-v2",source_hash:source.hash,reported_date:source.reported_date,clearance:"legacy",cleared_at:null,bundle:bundleVersion(done.bundle,source.hash)}));
+ const originalBinding=hash(JSON.stringify({policy:EVIDENCE_POLICY,source_hash:source.hash,reported_date:source.reported_date,clearance:"legacy",cleared_at:null,bundle:bundleVersion(done.bundle,source.hash)}));
  assert.equal(evidenceBinding(done.bundle,source),originalBinding);await store.approve(old.id,done.version);
  const before=JSON.stringify(await db.query("SELECT * FROM outputs WHERE task_id=$1 ORDER BY created,id",[old.id])),approvals=JSON.stringify(await db.query("SELECT * FROM approvals")),receipts=JSON.stringify(await db.query("SELECT * FROM evidence_approval_receipts"));
  const newSource=await cleared(db);await store.enqueue(newSource.id);const state=await store.snapshot(),review=state.reviews.find((r:any)=>r.task_id===old.id);

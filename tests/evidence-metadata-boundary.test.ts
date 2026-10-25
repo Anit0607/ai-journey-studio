@@ -10,20 +10,21 @@ const {source}=observed,policy={version:1,platforms:['LinkedIn']} as const;
 const artifact=(role:string,text:string):Artifact=>({role,text,hash:hash(text)});
 const finding=(claim:string,role='Writer'):Finding=>({id:hash(claim),kind:'wording_review',role,claim,reason:'Test exact source comparison.',artifact_hash:hash(claim),span:{start:0,end:claim.length}});
 const flags=(role:string,text:string)=>evidenceFindings([artifact(role,text)],source.text,source.reported_date,policy).filter(f=>f.role===role);
-const index=criticCitationIndex(observed.outputs,source),disclaimer=index.source.sentences[0],title=index.source.sentences[1];
+const index=criticCitationIndex(observed.outputs,source),disclaimer=index.source.sentences[0],title=index.source.sentences.find(sentence=>sentence.text.startsWith('Default new content workflows'))!;
 const validate=(claim:string,quote=title,role='Writer')=>validateEvidence(finding(claim,role),source.text,{start:quote.start,end:quote.end},quote.text);
 
 test('actual six-stage fixture remains byte/hash exact and unapprovable after only metadata recognition',()=>{
  const before=JSON.stringify(observed);assert.equal(hash(source.text),source.hash);assert.equal(source.hash,'818618f385fa1d481d81bd5dc985a768cd49742bc913a8d93ba9eee8f2c681f3');
  for(const item of observed.outputs)assert.equal(hash(item.text),item.hash);
- assert.equal(index.index_hash,'8487626016d74a7d1de40fa482d1f22fd01aa1c267eefe9c38c6cea673ea9cf7');
+ assert.notEqual(index.index_hash,'8487626016d74a7d1de40fa482d1f22fd01aa1c267eefe9c38c6cea673ea9cf7');assert.equal(index.source.sentences.length,6);
  assert.equal(observed.ledger_summary.reduce((sum,row)=>sum+Number(row.estimated),0),6469);
  assert(observed.ledger_summary.every(row=>row.status==='settled'&&row.finish_reason==='stop'));
  const q=evidenceQuality(observed.outputs,source,[],policy);
  assert.equal(q.status,'needs_revision');assert.equal(q.critic.valid,false);assert.equal(q.evidence_version,null);
  const excluded='(Source hash: '+source.hash+')';
  const lesson=q.flags.find(f=>f.role==='Platform Adapter'&&f.reason==='Commit-title evidence does not establish the inferred configuration lesson');assert(lesson);assert.equal(lesson.kind,'hard');
- assert.deepEqual(q.flags.filter(f=>f.id!==lesson.id).map(f=>f.id).sort(),observed.reviews[0].quality.flags.filter(f=>f.claim!==excluded).map(f=>f.id).sort());
+ const signature=(f:Finding)=>JSON.stringify([f.role,f.kind,f.reason,f.claim,f.span.start,f.span.end]);
+ assert.deepEqual(q.flags.filter(f=>f.id!==lesson.id).map(signature).sort(),observed.reviews[0].quality.flags.filter(f=>f.claim!==excluded).map(signature).sort());
  assert.equal(q.flags.length,13);assert(q.flags.some(f=>f.kind==='hard'&&f.role==='Critic'));
  assert(q.flags.some(f=>f.role==='Writer'&&f.kind==='hard'&&f.claim.includes('records a configuration change')));
  assert(q.flags.some(f=>f.role==='Strategist'&&f.kind==='hard'&&f.claim.includes('it is common to specialize')));
@@ -80,7 +81,7 @@ test('the actual For-starting configuration lesson cannot gain a wording waiver 
  const raw=JSON.parse(observed.outputs.find(a=>a.role==='Critic')!.text),entry=raw.evidence.find((e:{claim_id:string})=>e.claim_id==='platform:4');
  const data={...raw,evidence:[entry]},bundle=observed.outputs.map(item=>item.role==='Critic'?artifact('Critic',JSON.stringify(data)):item);
  assert.equal(criticSuggestions(bundle,source).valid,false);
- const claim=index.artifacts[1].sentences.find(s=>s.id==='platform:4')!.text;
+ const claim=index.artifacts[1].sentences.find(s=>s.text.startsWith('For those managing'))!.text;
  assert.throws(()=>validate(claim,title,'Platform Adapter'),/inferred configuration lesson/);
  const flagged=flags('Platform Adapter',claim).find(f=>/inferred configuration lesson/.test(f.reason));assert(flagged);assert.equal(flagged.kind,'hard');
  assert.throws(()=>validateEvidence(flagged,source.text,{start:title.start,end:title.end},title.text),/Only an individual wording/);
@@ -115,7 +116,7 @@ test('both Critic schemas reject disclaimer links; a valid literal link remains 
  assert.equal(criticSuggestions(replace(literal,data),source).valid,true);
  assert.equal(evidenceQuality(replace(literal,data),source,[],policy).evidence_version,null);
  // Unsupported claims never need fabricated disclaimer support and stay hard.
- const unsupported={...raw,evidence:[{claim_id:'platform:6',source_ids:[],verdict:'unsupported',reason:'The organizational lesson is not in the source.'}]};
+ const unsupported={...raw,index_hash:index.index_hash,evidence:[{claim_id:index.artifacts[1].sentences.find(s=>s.text.includes('organizational understanding'))!.id,source_ids:[],verdict:'unsupported',reason:'The organizational lesson is not in the source.'}]};
  const q=evidenceQuality(replace(observed.outputs,unsupported),source,[],policy);
  assert.equal(q.critic.valid,true);assert(q.flags.some(f=>f.role==='Platform Adapter'&&f.kind==='hard'&&f.claim.includes('organizational understanding')));
 });

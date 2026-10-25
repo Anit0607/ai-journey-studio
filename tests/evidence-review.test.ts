@@ -81,3 +81,18 @@ test('long legacy flags cover the full claim rather than accepting a truncated p
  const text='I use AI agents for implementation '+('with careful review '.repeat(32))+'and achieved 500 users.';const fs=evidenceFindings(bundle(text),sourceText);const f=fs.find(x=>x.role==='Writer')!;assert.equal(f.claim,text);assert.equal(f.span.end,text.length);assert.equal(f.kind,'hard');
  assert(evidenceFindings(bundle('This draft uses only the exact sentences and facts and contains no added assumptions.'),sourceText).some(x=>x.kind==='hard'));
 });
+
+test('new span policy preserves historical approval rows but blocks snapshot and publishing until a current receipt',()=>fixture(async(store,id)=>{
+ let review=(await store.snapshot()).reviews[0];await store.reviewEvidence(id,review.token,input(review.quality,review.quality.findings[0].id));review=(await store.snapshot()).reviews[0];
+ assert.equal(review.quality.flags.length,0);const version=review.token.slice(9);
+ await store.db.query('INSERT INTO approvals(task_id,version) VALUES($1,$2)',[id,version]);
+ const historical=await store.db.query('SELECT * FROM approvals');
+ assert.equal((await store.snapshot()).reviews[0].approval,null);
+ await store.db.query('INSERT INTO evidence_approval_receipts(id,task_id,binding,evidence_version,review_token) VALUES($1,$2,$3,$4,$5)',[randomUUID(),id,hash('old-policy-binding'),review.quality.evidence_version||'',review.token]);
+ const oldReceipts=await store.db.query('SELECT * FROM evidence_approval_receipts');
+ const publisher=new Publishing(store.db,{enabled:false,accounts:[{id:'isolated-li',platform:'LinkedIn',remote_id:'urn:li:person:12345',label:'Isolated account',enabled:true,verified:true,authorization_version:'isolated-v1',scopes:['w_member_social'],linkedin_version:'202609'}]});
+ await assert.rejects(publisher.enqueue({request_id:randomUUID(),task_id:id,review_token:review.token,platform:'LinkedIn',account_id:'isolated-li',scheduled_at:new Date(Date.now()+3600000).toISOString(),payload:{text:'Proposed approach: inspect one cleared source.'}}),/grounding/);
+ assert.equal((await store.snapshot()).reviews[0].approval,null);assert.deepEqual(await store.db.query('SELECT * FROM approvals'),historical);assert.deepEqual(await store.db.query('SELECT * FROM evidence_approval_receipts'),oldReceipts);
+ assert.equal((await store.db.query('SELECT * FROM publishing_outbox')).length,0);
+ await store.approve(id,version);assert((await store.snapshot()).reviews[0].approval);assert.deepEqual(await store.db.query('SELECT * FROM approvals'),historical);assert.equal((await store.db.query('SELECT * FROM evidence_approval_receipts')).length,2);
+}));

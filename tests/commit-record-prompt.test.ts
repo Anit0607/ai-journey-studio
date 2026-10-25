@@ -1,3 +1,4 @@
+import {providerResponseFormatBytes} from '../lib/critic-response-format';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
@@ -72,7 +73,7 @@ test('six offline checkpoints use narrow source-only guidance and tolerate one v
   // Valid citation suggestions do not resolve the owner's comparison of attributed prose.
   assert.equal(review.quality.status,'needs_revision');assert.equal(review.quality.evidence_version,null);
   assert.equal(review.quality.flags.length,2);assert(review.quality.flags.every((flag:{kind:string;role:string})=>flag.kind==='wording_review'&&['Writer','Platform Adapter'].includes(flag.role)));
-  assert.equal(state.ledger.length,6);for(const row of state.ledger){assert.equal(row.status,'settled');assert.equal(Number(row.reserved),tokenCost(pricing,Buffer.byteLength(prompts[row.checkpoint])+256,1200));}
+  assert.equal(state.ledger.length,6);for(const row of state.ledger){assert.equal(row.status,'settled');assert.equal(Number(row.reserved),tokenCost(pricing,Buffer.byteLength(prompts[row.checkpoint])+providerResponseFormatBytes('openai',row.checkpoint===5?{artifact:'critic'}:undefined)+256,1200));}
   assert.equal((await db.query('SELECT id FROM publishing_outbox')).length,0);
  }finally{await db.close();}
 });
