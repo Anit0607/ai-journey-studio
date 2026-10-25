@@ -180,3 +180,11 @@ test('page preserves a known uncertain server result and warns if its status ref
  assert.equal(await harness.action('publication-publish',{id:'exact-job'}),false);
  assert.deepEqual(calls,['/api/studio/publication-publish','/api/studio/state']);assert.match(harness.values[8],/Provider outcome uncertain/);assert.match(harness.values[6],/previous state may be stale/);
 });
+
+test('manual publication retains its separate lateness allowance while scheduled jobs display the scheduled clamp',()=>{
+ const h=ui('../app/publication-panel.tsx'),manual={...plan,id:'manual',delivery_mode:'manual'},scheduled={...plan,id:'scheduled',delivery_mode:'scheduled'};
+ for(const manualLimit of [3600,undefined]){
+  const panel=h.render(h.exports.default,{publishing:{jobs:[manual,scheduled],accounts:[],max_lateness_seconds:300,...(manualLimit!==undefined?{manual_max_lateness_seconds:manualLimit}:{})},media:{},reviews:[],busy:false,action:async()=>assert.fail('Rendering cannot act')});
+  assert.equal(nodes(panel).find(n=>n.props.job===manual)!.props.maxLateness,manualLimit??300);assert.equal(nodes(panel).find(n=>n.props.job===scheduled)!.props.maxLateness,300);
+ }
+});

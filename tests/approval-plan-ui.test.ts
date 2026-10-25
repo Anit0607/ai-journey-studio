@@ -14,7 +14,7 @@ function harness(file="../app/approval-plan-panel.tsx",fetcher?:typeof fetch){
 }
 function nodes(n:any):any[]{return Array.isArray(n)?n.flatMap(nodes):n?.props?[n,...nodes(n.props.children)]:[];}
 function text(n:any):string{return Array.isArray(n)?n.map(text).join(""):n?.props?text(n.props.children):typeof n==="string"?n:"";}
-const plan={task_id:"task",review_token:"revision:fixture:hash",entry_id:"entry",calendar_binding:"calendar",source_hash:"source-hash",clearance_id:"clearance",quality_binding:"quality",evidence_version:null,account_id:"fixture-linkedin",account_version:"v1",account_label:"Fictional owner",remote_id:"urn:li:person:12345",scheduled_at:"2030-10-15T04:30:00.000Z",timezone:"UTC",delivery_mode:"scheduled",text:"Exact approved text\nwith its original newline.",variant_hash:"variant-hash",version:"plan-hash"} satisfies ApprovalPlan;
+const plan={task_id:"task",review_token:"revision:fixture:hash",entry_id:"entry",calendar_binding:"calendar",source_hash:"source-hash",clearance_id:"clearance",quality_binding:"quality",evidence_version:null,account_id:"fixture-linkedin",account_version:"v1",account_label:"Fictional owner",remote_id:"urn:li:person:12345",scheduled_at:"2030-10-15T04:30:00.000Z",timezone:"UTC",delivery_mode:"scheduled",text:"Exact approved text\nwith its original newline.",variant_hash:"variant-hash",scheduler_policy_hash:null,version:"plan-hash"} satisfies ApprovalPlan;
 
 test("full exact plan is visible; deliberate acknowledgement sends only the bound approval once",async()=>{
  const h=harness(),calls:any[]=[];let finish!:(value:boolean)=>void;
@@ -45,4 +45,9 @@ test("a lost approval response inspects durable state with GET and never automat
  const tree=h.render(h.outer,{}),panel=nodes(tree).find(n=>n.props.preview?.plan===plan);assert(panel);
  assert.equal(await panel.props.action("approval-plan-approve",{expected_plan:plan.version}),false);
  assert.deepEqual(calls,[{path:"/api/studio/approval-plan-approve",method:"POST"},{path:"/api/studio/state",method:"GET"}]);assert.equal(h.values[2].recovered,true);assert.match(h.values[8],/Approval outcome is not confirmed/);assert.match(h.values[8],/no automatic resubmission/);
+});
+
+test("approval preview exposes exact scheduler binding and changed policy remounts unchecked consent",()=>{
+ const h=harness(),fixed={...plan,scheduler_policy_hash:"fixed-policy-hash",version:"fixed-plan-version"};const child=h.render(h.outer,{preview:{plan:fixed},busy:false,action:async()=>assert.fail("Rendering cannot approve")}),tree=h.render(child.type,child.props);assert(text(tree).includes(fixed.scheduler_policy_hash));
+ const changed=h.render(h.outer,{preview:{plan:{...fixed,scheduler_policy_hash:"changed-policy-hash",version:"changed-plan-version"}},busy:false,action:async()=>false});assert.notEqual(changed.key,child.key);
 });

@@ -21,7 +21,7 @@ function ExactPlan({plan,publishingEnabled,busy,action}:Props&{plan:ApprovalPlan
     <p>Existing calendar time (UTC): <strong>{plan.scheduled_at}</strong></p>
     <p>Delivery mode: scheduled automatic publication.</p>
     <pre>{plan.text}</pre>
-    <p className="fine">Source SHA-256 {plan.source_hash}<br/>Review {plan.review_token}<br/>LinkedIn draft SHA-256 {plan.variant_hash}<br/>Plan SHA-256 {plan.version}</p>
+    <p className="fine">Source SHA-256 {plan.source_hash}<br/>Review {plan.review_token}<br/>LinkedIn draft SHA-256 {plan.variant_hash}<br/>Scheduler policy SHA-256 {plan.scheduler_policy_hash||"generic cadence"}<br/>Plan SHA-256 {plan.version}</p>
     <label><input type="checkbox" checked={ack} disabled={busy||pending||submitted} onChange={event=>setAck(event.target.checked)}/>{APPROVAL_PLAN_ACK}</label>
     <button disabled={busy||pending||submitted||!ack} onClick={()=>void approve()}>Approve exact content and publication plan</button>
     <p>One approval records both content review and the exact delivery plan. Delivery still requires authorized publishing credentials and dispatch; OFF switches continue to block it. Approval is not a delivery receipt.</p>

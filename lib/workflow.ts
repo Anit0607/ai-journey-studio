@@ -1,3 +1,4 @@
+import {assertOwnerCalendarScope,type OwnerCalendarScope} from "./owner-calendar-policy";
 import {admittedHostedTask,HostedCalendarScanExhausted,HOSTED_SCAN_EXHAUSTED} from "./hosted-calendar-policy";
 import {assertArtifactPrivacy} from './artifact-privacy';
 import {resolveScopedSource} from "./github-source-policy";
@@ -15,11 +16,11 @@ import {providerCall,ProviderFailure,AccountingFailure,TerminationFailure,liveRe
 import {groundingRules,bundleQuality} from "./grounding";
 import type {OwnerDraftScope} from "./owner-draft-policy";
 const goals=["Extract factual claims and provenance.","Find an honest learning-story angle supported by the source.","Produce a content brief for practical agent users.","Write a draft with no unsupported claims.","Produce LinkedIn, X and Instagram variants.","Critique factual support and privacy for each exact variant; flag unsupported claims. "+CRITIC_CONTRACT];
-export async function step(store:Store,c:RuntimeConfig,call=providerCall,enabled=liveReady(c),policy:{hostedScopedCalendar?:boolean;ownerClearedOnly?:boolean;minimumGenerationLeadHours?:number;ownerDraft?:OwnerDraftScope;beforeProvider?:()=>Promise<void>}={}){
+export async function step(store:Store,c:RuntimeConfig,call=providerCall,enabled=liveReady(c),policy:{hostedScopedCalendar?:boolean;ownerClearedOnly?:boolean;minimumGenerationLeadHours?:number;ownerDraft?:OwnerDraftScope;ownerCalendar?:OwnerCalendarScope;beforeProvider?:()=>Promise<void>}={}){
   await store.heartbeat(enabled);
   if(!enabled)return {status:"blocked",reason:"Consent, credentials, current pricing or safety verification pending"};
   let task:Task|null;
-  try{task=await store.claim(policy.ownerDraft,policy.hostedScopedCalendar?{config:c}:undefined);}
+  try{task=await store.claim(policy.ownerDraft,policy.hostedScopedCalendar?{config:c}:undefined,policy.ownerCalendar?{scope:policy.ownerCalendar,config:c}:undefined);}
   catch(error){if(error instanceof HostedCalendarScanExhausted)return {status:"blocked",reason:HOSTED_SCAN_EXHAUSTED};throw error;}
   if(!task)return {status:"idle"};
   let reservation:string|null=null;
@@ -45,12 +46,12 @@ export async function step(store:Store,c:RuntimeConfig,call=providerCall,enabled
     if(!c.owner_cleared_sources_authorized&&sourceAuthorized(c,s,"gemini")&&c.fallback_authorized&&process.env.GEMINI_API_KEY)providers.push("gemini");
     for(let index=0;index<providers.length;index++){
       const provider=providers[index],p=c[provider]!;
-      reservation=await store.reserve(task,provider,p,tokenCost(p,Buffer.byteLength(groundedPrompt)+256,1200),undefined,policy.ownerDraft);
+      reservation=await store.reserve(task,provider,p,tokenCost(p,Buffer.byteLength(groundedPrompt)+256,1200),undefined,policy.ownerDraft,policy.ownerCalendar?{scope:policy.ownerCalendar,config:c}:undefined);
       try{
         await policy.beforeProvider?.();
         if(task.content_brief?.source_policy){
           const admitted=await store.db.transaction(async tx=>{
-            const current=policy.hostedScopedCalendar?await admittedHostedTask(tx,task.id,c):(await tx.query<Task>("SELECT * FROM tasks WHERE id=$1 FOR UPDATE",[task.id]))[0];
+            const current=policy.ownerCalendar?(await assertOwnerCalendarScope(tx,{scope:policy.ownerCalendar,config:c})).task:policy.hostedScopedCalendar?await admittedHostedTask(tx,task.id,c):(await tx.query<Task>("SELECT * FROM tasks WHERE id=$1 FOR UPDATE",[task.id]))[0];
             if(!current||current.status!=="running"||current.lease_token!==task.lease_token||!current.lease_until||new Date(current.lease_until)<=new Date()||current.checkpoint!==task.checkpoint||current.source_id!==task.source_id||current.source_hash!==task.source_hash||JSON.stringify(current.content_brief)!==JSON.stringify(task.content_brief))return false;
             const pending=(await tx.query<{status:string;provider:string;checkpoint:number}>("SELECT status,provider,checkpoint FROM ledger WHERE id=$1 AND task_id=$2 FOR UPDATE",[reservation,task.id]))[0];
             if(!pending||pending.status!=="reserved"||pending.provider!==provider||pending.checkpoint!==task.checkpoint)return false;
@@ -66,7 +67,7 @@ export async function step(store:Store,c:RuntimeConfig,call=providerCall,enabled
         const result=await call(provider,groundedPrompt,p);
         if(provider==="openai"&&result.report.serviceTier!=="default")throw new AccountingFailure(result.report);
         await store.report(reservation,result.report);
-        await store.settle(task,reservation,result.text,result.input,result.output,tokenCost(p,result.input,result.output),result.outcome);
+        await store.settle(task,reservation,result.text,result.input,result.output,tokenCost(p,result.input,result.output),result.outcome,policy.ownerCalendar);
         const saved=(await store.db.query<{status:string}>("SELECT status FROM tasks WHERE id=$1",[task.id]))[0];
         return {status:result.outcome==="complete"&&saved?.status!=="blocked"?"step_saved":"blocked",task:task.id,role:ROLES[task.checkpoint]};
       }catch(error){

@@ -1,3 +1,5 @@
+import {schedulerWindowPolicy} from '../lib/scheduler-window-policy';
+import {fixedSettings} from './scheduler-window-fixture';
 import test from "node:test";
 import assert from "node:assert/strict";
 import {randomUUID} from "node:crypto";
@@ -120,4 +122,20 @@ test("publication admission takes the calendar guard before outbox locks and rel
  assert.equal(admission[0],"SELECT id FROM calendar_settings WHERE id=1 FOR SHARE");
  assert(admission.findIndex(sql=>sql.includes("FROM calendar_entries"))<admission.findIndex(sql=>sql.startsWith("INSERT INTO publishing_attempts")));
  for(const sqls of transactions.filter(sqls=>sqls.some(sql=>sql.includes("publishing_outbox")&&sql.includes("FOR UPDATE"))))assert.equal(sqls[0],"SELECT id FROM calendar_settings WHERE id=1 FOR SHARE");
+}));
+
+
+test("exact approval preview binds configured scheduler policy; policy change cannot reuse approval and unsupported time is rejected",()=>fixture(async f=>{
+ const at="2030-10-14T16:30:00.000Z";
+ await f.db.query("UPDATE calendar_entries SET intended_post=$2,platform_schedule=$3 WHERE id=$1",[f.entry,at,JSON.stringify({...f.schedule,LinkedIn:{...f.schedule.LinkedIn,intended_post:at}})]);
+ f.runtime.scheduler_window_policy=schedulerWindowPolicy(fixedSettings().scheduler);
+ const plan=await f.preview();assert.equal(plan.scheduler_policy_hash,f.runtime.scheduler_window_policy.hash);
+ f.runtime.scheduler_window_policy=schedulerWindowPolicy(fixedSettings(false).scheduler);
+ const changed=await f.preview();assert.notEqual(changed.version,plan.version);
+ await assert.rejects(approveApprovalPlan(f.db,f.runtime,{...f.body,expected_plan:plan.version}),/plan changed/);await noApproval(f.db);
+ const row=await approveApprovalPlan(f.db,f.runtime,{...f.body,expected_plan:changed.version});assert.equal(row.scheduler_policy_hash,changed.scheduler_policy_hash);
+ const event=(await f.db.query("SELECT detail FROM events WHERE kind='calendar_publication_approved'"))[0];assert.equal(JSON.parse(event.detail).scheduler_policy_hash,changed.scheduler_policy_hash);
+ const unsupported="2030-10-14T16:32:00Z";
+ await f.db.query("UPDATE calendar_entries SET intended_post=$2,platform_schedule=$3 WHERE id=$1",[f.entry,unsupported,JSON.stringify({...f.schedule,LinkedIn:{...f.schedule.LinkedIn,intended_post:unsupported}})]);
+ await assert.rejects(f.preview(),/exact configured UTC anchor/);assert.deepEqual(f.counts(),{calls:0,credentials:0});
 }));
