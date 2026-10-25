@@ -7,13 +7,15 @@ import {CRITIC_CONTRACT} from '../lib/evidence-review';
 import {NEW_PLATFORM_POLICY} from '../lib/platform-policy';
 const observed=JSON.parse(readFileSync(new URL('./fixtures/github-rich-note-draft-2026-10-25.json',import.meta.url),'utf8')) as {source:{text:string}};
 const source=observed.source.text;
-test('attributed progress notes do not reinstate mandatory hooks, payoff, audience needs or advice',()=>{
+test('progress-note evidence limits do not replace the practical LinkedIn writing guidance',()=>{
  for(const checkpoint of [2,3,4]){
   const guidance=draftingGuidance(checkpoint,NEW_PLATFORM_POLICY,source);
-  assert.match(guidance,/Attributed progress note/);
-  assert.match(guidance,/Do not require a hook/);
-  assert.doesNotMatch(guidance,/choose one source-supported point, audience need|immediate payoff|deliver its payoff promptly/);
+  assert.equal(guidance,draftingGuidance(checkpoint,NEW_PLATFORM_POLICY));
+  assert.doesNotMatch(guidance,/Do not require a hook|no manufactured hook|Keep limitations and advice internal/);
  }
+ assert.match(draftingGuidance(2,NEW_PLATFORM_POLICY,source),/audience need, evidence gap and reader takeaway/);
+ assert.match(draftingGuidance(3,NEW_PLATFORM_POLICY,source),/deliver its payoff promptly/);
+ assert.match(draftingGuidance(4,NEW_PLATFORM_POLICY,source),/immediate payoff, evidence, useful takeaway/);
  assert.equal(draftingGuidance(3,NEW_PLATFORM_POLICY,'I reviewed my draft.'),draftingGuidance(3,NEW_PLATFORM_POLICY));
 });
 test('progress-note roles keep exact evidence, limited scope and timestamps without turning historical reports into assertions',()=>{
