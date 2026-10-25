@@ -1,6 +1,7 @@
 import {runOwnerCalendar,ownerCalendarSnapshot,validOwnerCalendarRequest} from "../../../../lib/owner-calendar";
 import {previewApprovalPlan,approveApprovalPlan} from "../../../../lib/approval-plan";
 import {runOwnerDraft,ownerDraftSnapshot,validOwnerDraftRequest} from "../../../../lib/owner-draft";
+import {advanceGenerationNow,GenerationTimeError,validGenerationTimeInput,parseGenerationTimeRequest} from '../../../../lib/calendar-generation-time';
 import {renderApprovedInstagram,getPrivateMedia,approvePublicMedia,safeMediaError} from "../../../../lib/publication-media";
 import {integrationConfig} from "../../../../lib/integration-config";
 import {mediaPublicOrigin,mediaPublicUrl} from "../../../../lib/publication-media-storage";
@@ -18,7 +19,7 @@ import {step} from "../../../../lib/workflow";
 import {SourceIntake,sourceAuthorized} from "../../../../lib/sources";
 import {queueAgentRevision} from "../../../../lib/agent-revisions";
 import {ownerApiAuthenticated,passwordOwnerAuthenticated} from "../../../../lib/owner-password";
-import {hostedEnvironment,hostedBlockers,hostedCronReady} from "../../../../lib/hosted";
+import {hostedEnvironment,hostedBlockers,hostedCronReady,hostedOwnerDraftReady} from "../../../../lib/hosted";
 import {recoverOverdueCalendarDraft,safeCalendarRecoveryError} from "../../../../lib/calendar-recovery";
 import {Calendar} from "../../../../lib/calendar";
 export const runtime="nodejs",dynamic="force-dynamic",maxDuration=300;
@@ -52,22 +53,27 @@ export async function GET(request:Request,context:Context){
     const hosted=hostedEnvironment()?{mode:"vercel-hobby",daily_batches:await store.db.query("SELECT day,status,attempts,steps,reason,started_at,heartbeat,finished_at FROM hosted_batches ORDER BY day DESC LIMIT 14"),notice:"One bounded daily batch, with up to an hour of scheduling variation. Backlog or slow calls may miss a review deadline; nothing is published automatically."}:null;
     const integrations=await createIntegrations(store.db);
     const approval_plans=await Promise.all(state.reviews.filter((review:any)=>state.tasks.some((task:any)=>task.id===review.task_id&&task.checkpoint===6&&["review","approved"].includes(task.status))).map(async(review:any)=>{try{return {task_id:review.task_id,plan:await previewApprovalPlan(store.db,integrations.publishing.runtime,review.task_id,review.token)};}catch(error){return {task_id:review.task_id,plan:null,reason:safePublicationError(error)||"Current source or review is not eligible; refresh and review its gates"};}}));
-    return response({...state,approval_plans,owner_draft:await ownerDraftSnapshot(store.db,c),owner_calendar:await ownerCalendarSnapshot(store.db,c),integrations:await integrations.snapshot(),hosted,calendar:await new Calendar(store.db,hostedEnvironment()?120:49).snapshot(state,c,enabled),blockers,live_enabled:enabled,source_approved:sourceApproved,owner_cleared_sources_authorized:c.owner_cleared_sources_authorized===true,proposed_source:CAPSULE});
+    return response({...state,approval_plans,owner_draft:await ownerDraftSnapshot(store.db,c),owner_calendar:await ownerCalendarSnapshot(store.db,c),integrations:await integrations.snapshot(),hosted,calendar:await new Calendar(store.db,hostedEnvironment()?120:49).snapshot(state,c,enabled,new Date(),hostedEnvironment()?hostedOwnerDraftReady(c):liveReady(c)),blockers,live_enabled:enabled,source_approved:sourceApproved,owner_cleared_sources_authorized:c.owner_cleared_sources_authorized===true,proposed_source:CAPSULE});
   }catch{return response({error:"Relational database unavailable. Configure an approved PostgreSQL connection or use the laptop-only embedded option."},503);}
 }
 export async function POST(request:Request,context:Context){
   const {action}=await context.params;
   // Worker execution credentials cannot grant owner source, evidence, content or publication consent.
-  if(!await (["publication-publish","owner-draft-run","owner-calendar-run","approval-plan-approve","source-clear","evidence-review","approve","approve-revision","publication-approve","publication-media-approve","agent-revise"].includes(action)?passwordOwnerAuthenticated(request):ownerApiAuthenticated(request)))return response({error:"Private access required"},401);
+  if(!await (["calendar-generation-now","publication-publish","owner-draft-run","owner-calendar-run","approval-plan-approve","source-clear","evidence-review","approve","approve-revision","publication-approve","publication-media-approve","agent-revise"].includes(action)?passwordOwnerAuthenticated(request):ownerApiAuthenticated(request)))return response({error:"Private access required"},401);
   if(!allowedOrigin(request))return response({error:"Origin rejected"},403);
-  if(!["approval-plan-approve","owner-draft-run","owner-calendar-run","publication-media-stage","publication-media-approve","integration-sync","integration-import","publication-enqueue","publication-approve","publication-cancel","publication-revise","publication-publish","metrics-save","money-add","money-void","coverage-confirm","source-stage","source-clear","source-revoke","agent-revise","calendar-dispatch","source","run","approve","cancel","retry","step","evidence-review","request-changes","revise","approve-revision","calendar-configure","calendar-plan","calendar-link","calendar-prepare","calendar-recover"].includes(action))return response({error:"Unknown action"},404);
+  if(!["calendar-generation-now","approval-plan-approve","owner-draft-run","owner-calendar-run","publication-media-stage","publication-media-approve","integration-sync","integration-import","publication-enqueue","publication-approve","publication-cancel","publication-revise","publication-publish","metrics-save","money-add","money-void","coverage-confirm","source-stage","source-clear","source-revoke","agent-revise","calendar-dispatch","source","run","approve","cancel","retry","step","evidence-review","request-changes","revise","approve-revision","calendar-configure","calendar-plan","calendar-link","calendar-prepare","calendar-recover"].includes(action))return response({error:"Unknown action"},404);
   if(hostedEnvironment()&&action==="step")return response({error:"Hosted checkpoints run only through the protected daily scheduler"},403);
   const limit=action==="evidence-review"?12000:action==="integration-import"?1_050_000:action==="publication-enqueue"||action==="publication-revise"?40000:["revise","source-stage"].includes(action)?40000:4096;
   if(Number(request.headers.get("content-length")||0)>limit)return response({error:"Request too large"},413);
   try{
     const raw=await readBody(request,limit);
-    const body=JSON.parse(raw),store=new Store(await database()),c=runtimeConfig();
+    const body=action==='calendar-generation-now'?parseGenerationTimeRequest(raw):JSON.parse(raw),store=new Store(await database()),c=runtimeConfig();
     let value:unknown;
+    if(action==="calendar-generation-now"){
+      if(!validGenerationTimeInput(body))return response({error:"Exact generation-time acknowledgement required"},400);
+      try{return response({result:await advanceGenerationNow(store.db,body,{readConfig:runtimeConfig,isReady:config=>hostedEnvironment()?hostedOwnerDraftReady(config):liveReady(config)})});}
+      catch(error){return response({error:error instanceof GenerationTimeError?error.message:"Generation-time change was not confirmed; refresh the calendar and inspect its saved time before retrying"},409);}
+    }
     if(action==="approval-plan-approve")value=await approveApprovalPlan(store.db,(await createIntegrations(store.db)).publishing.runtime,body);
     if(action==="owner-calendar-run"){
       if(!validOwnerCalendarRequest(body))return response({error:"Exact Calendar draft acknowledgement required"},400);

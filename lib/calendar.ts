@@ -3,6 +3,7 @@ import {githubSelectionPool} from "./github-source-selection";
 import {githubEvidenceEligibility,githubProvenanceHash,resolveScopedSource} from "./github-source-policy";
 import {NEW_PLATFORM_POLICY,NEW_PLATFORMS,activePlatforms,calendarPlatformPolicy,taskPlatformPolicy} from "./platform-policy";
 import {calendarRecoverySnapshot} from "./calendar-recovery";
+import {generationTimePreview,generationRowSQL,identifiableGenerationHistory} from './calendar-generation-time';
 import {platformVariants} from "./platform-variants";
 import {randomUUID} from "node:crypto";
 import type {Database} from "./db";
@@ -273,8 +274,10 @@ export class Calendar{
       return result;
     });
   }
-  async snapshot(state:any,c:RuntimeConfig,runtimeEnabled:boolean,now=new Date()){
-    const settings=await this.settings(),jobs=await this.db.query<any>("SELECT * FROM calendar_jobs ORDER BY created,id"),entries=await this.db.query<any>("SELECT * FROM calendar_entries ORDER BY intended_post,id");
+  async snapshot(state:any,c:RuntimeConfig,runtimeEnabled:boolean,now=new Date(),ownerActionReady=runtimeEnabled){
+    const {generation_exact:exactSettings,...settings}=(await this.db.query<any>(`SELECT s.*,${generationRowSQL('s')} AS generation_exact FROM calendar_settings s WHERE id=1`))[0];
+    const jobs=await this.db.query<any>("SELECT * FROM calendar_jobs ORDER BY created,id"),rawEntries=await this.db.query<any>(`SELECT e.*,${generationRowSQL('e')} AS generation_exact FROM calendar_entries e ORDER BY intended_post,id`);
+    const exactEntries=new Map(rawEntries.map(entry=>[entry.id,entry.generation_exact])),entries=rawEntries.map(raw=>{const entry={...raw};delete entry.generation_exact;return entry;});
     const selection=await githubSelectionPool(this.db,c,now);
     const budget={used:Number(state.budget.committed_microdollars),unresolved:Number(state.budget.unresolved_reservations),pricingBlocked:!!state.pricing_blocked};
     return {automatic_source_selection:{enabled:!!selection.policy,eligible_candidates:selection.candidates.length,notice:selection.reason||"Due dispatch selects one unused GitHub evidence item atomically; source availability may change"},settings,new_platform_policy:NEW_PLATFORM_POLICY,new_active_platforms:NEW_PLATFORMS,minimum_generation_lead_hours:this.minimumGenerationLeadHours,paid_activation:settings.generation_enabled===true,scheduler:"Due dispatch requires an active worker or external scheduler invocation; saving does not start a scheduler",configuration_needed:!settings.start_date||timingMissing(settings),entries:entries.map(entry=>{
@@ -294,7 +297,8 @@ export class Calendar{
       const variants=activePlatforms(policy).map(platform=>{const variant=parsed.variants.find(item=>item.platform===platform)!;return {platform,...(entry.platform_schedule[platform]||{intended_post:entry.intended_post,draft_due:entry.draft_due,review_due:entry.review_due}),status:content?(variant.hash?review?.approval&&parsed.complete?"user_approved_quality_separate":"review_needed":"not_separately_identified"):"not_generated",artifact_hash:variant.hash,source_artifact_hash:content?.hash||null};});
       const generationLate=!!entry.generation_due&&(job?.dispatched_at?new Date(job.dispatched_at)>new Date(entry.generation_due):!task&&new Date(entry.generation_due)<now);
       const timingNotice=generationLate?(job?.dispatched_at?"Queued after the target generation time; the review deadline is unchanged":"Target generation time has passed. Catch-up is allowed only while the review deadline remains in the future"):null;
-      return {...entry,platform_policy:policy||null,active_platforms:activePlatforms(policy),job,recovery:calendarRecoverySnapshot(entry,job,task,source,state.ledger||[],now),generation_late:generationLate,timing_notice:timingNotice,status:(review?.approval||(!review?.latest_revision&&review?.original_approval))&&!parsed.complete?"historical_approval_completeness_unverified":reviewReady&&(review?.quality.flags.length||review?.quality.editorial?.blocking)?"changes_needed":review?.approval?"user_approved_quality_separate":review?.latest_revision?"review_needed":task?.status==="review"?"review_needed":task?task.status:due?blockers.length?"due_blocked":"due_ready":blockers.length?"planned_blocked":"planned_ready",blocked_reasons:blockers,variants,linked_task_status:task?.status||null,linked_content_version:review?.token||null};
+      const timingHistory=!!job||state.tasks.some((item:Task)=>item.origin_key==='calendar:'+entry.id)||identifiableGenerationHistory(state.events||[],entry.id);
+      return {...entry,generation_time_preview:generationTimePreview(exactEntries.get(entry.id),exactSettings,selection,c,ownerActionReady,now,timingHistory),platform_policy:policy||null,active_platforms:activePlatforms(policy),job,recovery:calendarRecoverySnapshot(entry,job,task,source,state.ledger||[],now),generation_late:generationLate,timing_notice:timingNotice,status:(review?.approval||(!review?.latest_revision&&review?.original_approval))&&!parsed.complete?"historical_approval_completeness_unverified":reviewReady&&(review?.quality.flags.length||review?.quality.editorial?.blocking)?"changes_needed":review?.approval?"user_approved_quality_separate":review?.latest_revision?"review_needed":task?.status==="review"?"review_needed":task?task.status:due?blockers.length?"due_blocked":"due_ready":blockers.length?"planned_blocked":"planned_ready",blocked_reasons:blockers,variants,linked_task_status:task?.status||null,linked_content_version:review?.token||null};
     })};
   }
 }
