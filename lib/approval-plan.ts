@@ -36,6 +36,7 @@ export async function previewApprovalPlan(db:Database,runtime:PublishingRuntime,
     const account=accounts[0];
     if(runtime.accountCurrent&&!await runtime.accountCurrent(account,tx,false))fail("LinkedIn destination authorization changed");
     const quality=await reviewReadiness(tx,taskId,context.bundle,context.source);
+    if(quality.editorial.blocking)fail("Resolve the saved editorial hold before approval or publication");
     if(quality.flags.length)fail("Resolve source-grounding flags before approval");
     const variants=platformVariants(context.bundle.find(a=>a.role==="Platform Adapter"),policy),variant=variants.variants.find(v=>v.platform==="LinkedIn");
     if(!variants.complete||!variant?.hash||variant.text===null)fail("Exact LinkedIn draft is incomplete");

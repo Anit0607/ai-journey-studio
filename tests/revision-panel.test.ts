@@ -108,3 +108,12 @@ test('unverified-save rebase preserves an in-flight revert even when it matches 
  assert.equal(state.drafts.Writer,'saved writer');assert.equal(state.base.bundle.Writer,'submitted writer');
  assert.deepEqual(unsavedRevisionRoles(state),['Writer']);assert.equal(state.pending,null);
 });
+
+
+test('editorial hold is visible separately from zero factual flags and never presented as an automatic quality pass',()=>{
+ const current=review(),editorial={policy:'journey-editorial-v1',status:'needs_source',blocking:true,issues:[{role:'Critic',message:'Missing a specific supported story.'}],notice:'Factual checks do not measure story quality. No automated editorial pass is issued.'};
+ const markup=renderToStaticMarkup(createElement(RevisionPanel,{task:'task',review:{...current,quality:{...current.quality,editorial}},busy:false,action:async()=>false,agentRevisionEligible:false}));
+ assert.match(markup,/Story and reader value/);assert.match(markup,/needs source/);assert.match(markup,/Missing a specific supported story/);assert.match(markup,/No automated editorial pass/);assert.match(markup,/practical-journey brief/);
+ assert.match(markup,/<button[^>]*disabled[^>]*>Approve this exact revision<\/button>/);
+ const page=readFileSync(new URL('../app/page.tsx',import.meta.url),'utf8');assert.match(page,/quality\.editorial\?\.blocking/);assert.match(page,/Zero factual flags are not an editorial quality pass/);
+});

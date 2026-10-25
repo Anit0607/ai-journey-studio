@@ -28,12 +28,13 @@ test("full exact plan is visible; deliberate acknowledgement sends only the boun
  tree=h.render(child.type,child.props);assert.equal(checkbox().props.checked,false);assert.equal(button().props.disabled,true);
  finish(false);await new Promise(resolve=>setImmediate(resolve));tree=h.render(child.type,child.props);assert.equal(button().props.disabled,true,"Failed response must not retain consent or automatically repost");
  const changed=h.render(h.outer,{...props,preview:{plan:{...plan,version:"new-plan"}}});assert.notEqual(child.key,changed.key,"Changed plan remounts unchecked confirmation");
+ assert.match(text(tree),/Factual checks alone do not establish content quality/);assert.match(text(tree),/specific supported problem, decision or method/);
  assert.match(text(tree),/OFF switches continue to block/);assert.match(text(tree),/not a delivery receipt/);
 });
 
 test("missing configuration exposes the blocker without a default time, destination or approval action",()=>{
  const h=harness(),tree=h.render(h.outer,{preview:{plan:null,reason:"Exactly one existing calendar slot must be linked to this task"},busy:false,action:async()=>assert.fail("No action")});
- assert.match(text(tree),/Exactly one existing calendar slot/);assert.match(text(tree),/assistant must prepare/);assert.equal(nodes(tree).filter(n=>n.type==="button"||n.type==="input").length,0);
+ assert.match(text(tree),/Exactly one existing calendar slot/);assert.match(text(tree),/assistant must resolve/);assert.equal(nodes(tree).filter(n=>n.type==="button"||n.type==="input").length,0);
  const source=readFileSync(new URL("../app/approval-plan-panel.tsx",import.meta.url),"utf8");assert.doesNotMatch(source,/from ["']\.\.\/lib\/(?:approval-plan|publishing)["']/);
  const page=readFileSync(new URL("../app/page.tsx",import.meta.url),"utf8");assert.match(page,/<ApprovalPlanPanel preview=/);
 });

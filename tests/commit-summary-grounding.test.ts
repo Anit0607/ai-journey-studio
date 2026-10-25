@@ -34,7 +34,8 @@ test('attributed prompts do not supply capsule biography or an affirmative learn
  for(const provider of ['GitHub','YouTube']){
   const text=source.text.replace('Attributed GitHub','Attributed '+provider);
   const goal=sourceRoleGoal(1,text,ordinary),rules=groundingRules(text);
-  assert(!goal.includes(ordinary));assert.match(goal,/concise attributed source update/);
+  assert(!goal.includes(ordinary));assert.match(goal,/specific source-supported problem, decision or method/);
+  assert.match(goal,/internal editorial hold/);assert.match(goal,/Do not infer a personal learning story/);
   assert.match(rules,/third person/);assert.match(rules,/Prior|prior artifact/);
   for(const personal of SUPPORTED_SENTENCES)assert(!rules.includes(personal),personal);
  }

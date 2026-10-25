@@ -1,3 +1,4 @@
+import {assertNoEditorialHold} from './editorial-review';
 import {assertOwnerCalendarScope,OWNER_CALENDAR_STARTED,OWNER_CALENDAR_MAX_CALLS,OWNER_CALENDAR_MAX_RESERVED,type OwnerCalendarExecution,type OwnerCalendarScope} from "./owner-calendar-policy";
 import {admittedHostedTask,hostedCandidates,HOSTED_CANDIDATE_LIMIT,HostedCalendarScanExhausted,type HostedCalendarPolicy} from "./hosted-calendar-policy";
 import {resolveScopedSource} from "./github-source-policy";
@@ -59,7 +60,7 @@ export class Store{
       const quality=evidenceQuality(bundle,source||{text:"",hash:"",cleared:false},evidenceRows.filter(row=>row.task_id===task.id),taskPlatformPolicy(task));
       const token=latest?"revision:"+latest.id+":"+latest.version:"original:"+hash(bundle.map((item:Artifact)=>item.hash).join("|"));
       const receipts=evidenceReceipts.filter((row:any)=>row.task_id===task.id);
-      const approvalCurrent=!quality.flags.length&&receipts.some((row:any)=>row.binding===quality.binding&&row.review_token===token&&row.evidence_version===(quality.evidence_version||""));
+      const approvalCurrent=!quality.editorial.blocking&&!quality.flags.length&&receipts.some((row:any)=>row.binding===quality.binding&&row.review_token===token&&row.evidence_version===(quality.evidence_version||""));
       return {variants:platformVariants(bundle.find((item:Artifact)=>item.role==="Platform Adapter"),taskPlatformPolicy(task)),platform_policy:taskPlatformPolicy(task)||null,task_id:task.id,is_agent_revision:false,pending_agent_revision:data.tasks.find((child:Task)=>child.revision_parent_task_id===task.id&&["queued","running","blocked"].includes(child.status))||null,agent_revision_jobs:data.tasks.filter((child:Task)=>child.revision_parent_task_id===task.id),token:latest?"revision:"+latest.id+":"+latest.version:"original:"+hash(bundle.map((item:Artifact)=>item.hash).join("|")),latest_revision:latest?.id||null,original_bundle:data.outputs.filter((output:Output)=>output.task_id===task.id),original_approval:data.approvals.find((item:any)=>item.task_id===task.id)||null,bundle,quality,approval:(latest?revisionApprovals.find((item:any)=>item.revision_id===latest.id):data.approvals.find((item:any)=>item.task_id===task.id))&&approvalCurrent?(latest?revisionApprovals.find((item:any)=>item.revision_id===latest.id):data.approvals.find((item:any)=>item.task_id===task.id))||null:null,history:history.map((item:any)=>({...item,approval:revisionApprovals.find((approval:any)=>approval.revision_id===item.id)||null}))};
     });
     return {...data,tasks:data.tasks.map((task:Task)=>({...task,platform_policy_hash:taskPlatformPolicyHash(task)})),reviews,workers,database:this.db.kind,usage:usageSummary(data.ledger,month),analyst:await new OwnerReports(this.db).snapshot(data.ledger),
@@ -252,6 +253,7 @@ export class Store{
       const source=(await resolveScopedSource(tx,(await tx.query<Source>("SELECT * FROM sources WHERE id=$1 FOR UPDATE",[t.source_id]))[0]))!;
       if(!source?.cleared||source.hash!==t.source_hash||hash(source.text)!==source.hash||!sourceEligible(source)||!scopedTaskMatches(source,t))throw Error("Source invalidated");
       const quality=await reviewReadiness(tx,id,outputs,source);
+      assertNoEditorialHold(quality.editorial);
       if(quality.flags.length)throw Error("Resolve source-grounding flags before approval");
       await tx.query("INSERT INTO approvals(task_id,version,evidence_version) VALUES($1,$2,$3) ON CONFLICT(task_id) DO NOTHING",[id,version,quality.evidence_version]);
       await saveEvidenceApproval(tx,id,"original:"+version,quality);
@@ -300,6 +302,7 @@ export class Store{
       if(!context.latest)throw Error("No revision to approve");
       await assertNoPendingAgentRevision(tx,id);
       const quality=await reviewReadiness(tx,id,context.bundle,context.source);
+      assertNoEditorialHold(quality.editorial);
       if(quality.flags.length)throw Error("Resolve source-grounding flags before approval");
       if(bundleVersion(context.bundle,context.source.hash)!==context.latest.version)throw Error("Stale artifact version");
       const inserted=await tx.query("INSERT INTO revision_approvals(revision_id,version,evidence_version) VALUES($1,$2,$3) ON CONFLICT DO NOTHING RETURNING revision_id",[context.latest.id,context.latest.version,quality.evidence_version]);

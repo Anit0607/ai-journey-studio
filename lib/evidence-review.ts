@@ -1,3 +1,4 @@
+import {editorialReview,assertNoEditorialHold} from './editorial-review';
 import {taskPlatformPolicy,type PlatformPolicy} from "./platform-policy";
 import {randomUUID} from "node:crypto";
 import {hasInternalReviewMetadata} from "./platform-variants";
@@ -168,7 +169,7 @@ export function evidenceQuality(bundle:Artifact[],source:EvidenceSource,decision
  const flags=resolved.filter(x=>!x.resolution);
  const critic=criticSuggestions(bundle,source);for(const suggestion of critic.suggestions as Array<{verdict:string;role:string;claim:string;artifact_hash:string;start:number;end:number}>){if(suggestion.verdict==='unsupported')flags.push({...finding(suggestion.role,suggestion.claim,'Critic identifies unsupported content; correct it before approval','hard',suggestion.artifact_hash,{start:suggestion.start,end:suggestion.end}),resolution:null});}if(!critic.valid)flags.push({...finding('Critic','Invalid structured evidence review','Structured Critic links or source binding are invalid; correct the Critic artifact','hard',bundle.find(x=>x.role==='Critic')?.hash||'',{start:-1,end:-1}),resolution:null});
  if(!integrity)flags.push({...finding('Source','Integrity or privacy check failed','Current cleared source and intact six-artifact bundle required','hard','',{start:-1,end:-1}),resolution:null});
- return {status:flags.length?'needs_revision':'needs_human_review',flags,findings:resolved,binding,policy_version:EVIDENCE_POLICY,critic,source_text:source.text,source_hash:source.hash,bundle_hash:bundleVersion(bundle,source.hash),evidence_version:accepted.length?hash(accepted.map(x=>x.id).sort().join('|')):null,notice:'Evidence links and owner review are not independent factual verification. Review every claim; publication needs separate approval.'};
+ return {status:flags.length?'needs_revision':'needs_human_review',editorial:editorialReview(bundle),flags,findings:resolved,binding,policy_version:EVIDENCE_POLICY,critic,source_text:source.text,source_hash:source.hash,bundle_hash:bundleVersion(bundle,source.hash),evidence_version:accepted.length?hash(accepted.map(x=>x.id).sort().join('|')):null,notice:'Evidence links and owner review are not independent factual verification. Review every claim; publication needs separate approval.'};
 }
 export async function reviewReadiness(tx:Connection,task:string,bundle:Artifact[],source:EvidenceSource){const rows=await tx.query<Decision>('SELECT * FROM evidence_decisions WHERE task_id=$1 ORDER BY sequence',[task]);const persisted=(await tx.query<{content_brief:Record<string,unknown>}>('SELECT content_brief FROM tasks WHERE id=$1',[task]))[0];if(!persisted)throw Error('Unknown task');return evidenceQuality(bundle,source,rows,taskPlatformPolicy(persisted));}
 export async function saveEvidenceDecision(tx:Connection,task:string,bundle:Artifact[],source:EvidenceSource,input:{binding:string;finding_id:string;decision:string;reason:string;source_span:Span;source_quote:string;acknowledged:boolean}){
@@ -229,10 +230,11 @@ export function criticSuggestions(bundle:Artifact[],source:EvidenceSource){
 }
 
 export async function saveEvidenceApproval(tx:Connection,task:string,token:string,quality:ReturnType<typeof evidenceQuality>){
+ assertNoEditorialHold(quality.editorial);
  const rows=await tx.query<{id:string}>("INSERT INTO evidence_approval_receipts(id,task_id,binding,evidence_version,review_token) VALUES($1,$2,$3,$4,$5) ON CONFLICT DO NOTHING RETURNING id",[randomUUID(),task,quality.binding,quality.evidence_version||"",token]);
  if(rows.length)await tx.query("INSERT INTO events(id,task_id,kind,detail) VALUES($1,$2,'evidence_bound_content_approval',$3)",[randomUUID(),task,"Approval receipt "+rows[0].id+" bound to "+quality.binding+"; individual evidence version "+(quality.evidence_version||"none")+"; publication remains separate"]);
 }
 export async function evidenceApprovalCurrent(tx:Connection,task:string,token:string,quality:ReturnType<typeof evidenceQuality>,_stored:string|null|undefined){
  const rows=await tx.query<{binding:string;evidence_version:string;review_token:string}>('SELECT binding,evidence_version,review_token FROM evidence_approval_receipts WHERE task_id=$1',[task]);
- return !quality.flags.length&&rows.some(row=>row.binding===quality.binding&&row.review_token===token&&row.evidence_version===(quality.evidence_version||""));
+ return !quality.editorial.blocking&&!quality.flags.length&&rows.some(row=>row.binding===quality.binding&&row.review_token===token&&row.evidence_version===(quality.evidence_version||""));
 }
