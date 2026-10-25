@@ -11,7 +11,7 @@ import {Store} from "./store";
 import {ROLES,hash,type RuntimeConfig,type Source,type Task,type Output,tokenCost} from "./domain";
 import {providerCall,ProviderFailure,AccountingFailure,TerminationFailure,liveReady,type ProviderName} from "./providers";
 import type {OwnerDraftScope} from "./owner-draft-policy";
-import {providerResponseFormatBytes,type ProviderArtifactContract} from './critic-response-format';
+import {providerResponseFormatBytes,draftArtifactContract} from './critic-response-format';
 
 export async function step(store:Store,c:RuntimeConfig,call=providerCall,enabled=liveReady(c),policy:{hostedScopedCalendar?:boolean;ownerClearedOnly?:boolean;minimumGenerationLeadHours?:number;ownerDraft?:OwnerDraftScope;ownerCalendar?:OwnerCalendarScope;beforeProvider?:()=>Promise<void>}={}){
   await store.heartbeat(enabled);
@@ -36,7 +36,7 @@ export async function step(store:Store,c:RuntimeConfig,call=providerCall,enabled
     const groundedPrompt=buildDraftPrompt(task,s,previous,revisionContext);
     if(Buffer.byteLength(groundedPrompt)>(revisionContext?96000:48000))throw Error("Input size cap reached");
     const providers:ProviderName[]=["openai"];
-    const artifactContract:ProviderArtifactContract|undefined=task.checkpoint===5?{artifact:'critic'}:undefined;
+    const artifactContract=draftArtifactContract(task,s,previous);
     if(!c.owner_cleared_sources_authorized&&sourceAuthorized(c,s,"gemini")&&c.fallback_authorized&&process.env.GEMINI_API_KEY)providers.push("gemini");
     for(let index=0;index<providers.length;index++){
       const provider=providers[index],p=c[provider]!;
@@ -85,8 +85,8 @@ export async function step(store:Store,c:RuntimeConfig,call=providerCall,enabled
       return {status:"blocked",task:task.id,reason:error.message};
     }
     // Never store raw SDK/network errors: they may contain request details or credentials.
-    const safe=error instanceof Error&&["Owner draft execution stopped","Owner draft reservation limit reached","Owner draft accounting unresolved","Artifact integrity check failed","Hosted generation timing requires explicit replanning","Excluded private material","Scheduled review deadline passed; reschedule before generating","Input size cap reached","Monthly cap including internal buffer reached","Cancelled or stale lease","Source invalidated","Unverified billing tier; all provider execution paused"].includes(error.message)?error.message:"Completion blocked; any uncertain reservation retained; automatic replay disabled";
-    await store.uncertain(task,reservation,safe,safe==="Artifact integrity check failed"&&task.revision_parent_task_id?"revision_invalid":null);
+    const safe=error instanceof Error&&["Owner draft execution stopped","Owner draft reservation limit reached","Owner draft accounting unresolved","Artifact integrity check failed","Hosted generation timing requires explicit replanning","Excluded private material","Scheduled review deadline passed; reschedule before generating","Input size cap reached","Canonical note predecessor invalid","Monthly cap including internal buffer reached","Cancelled or stale lease","Source invalidated","Unverified billing tier; all provider execution paused"].includes(error.message)?error.message:"Completion blocked; any uncertain reservation retained; automatic replay disabled";
+    await store.uncertain(task,reservation,safe,safe==="Canonical note predecessor invalid"?"note_contract":safe==="Artifact integrity check failed"&&task.revision_parent_task_id?"revision_invalid":null);
     return {status:"blocked",task:task.id,reason:safe};
   }
 }

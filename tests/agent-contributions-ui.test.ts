@@ -21,3 +21,8 @@ test('prepared receipt never claims execution, and elapsed interval is explicitl
  const value=structuredClone(contributions),run=value.roles[0].runs[0] as any;run.elapsed_ms=4798;run.attempts[0].prepared={writing_profile:{version:'old-profile',hash:'old-hash'},source_hash:'source',prior_artifacts:[],prompt_hash:'prompt'};run.attempts[0].receipt_state='prepared_not_proof_of_transmission';
  const shown=text(exports.default({contributions:value,profile:OWNER_WRITING_PROFILE}));assert(shown.includes('prepared/reserved, not proof of transmission'));assert(shown.includes('4.798 seconds, including application overhead; not pure model latency'));assert(shown.includes('old-profile'));assert(shown.includes('Raw prompt text is not stored'));
 });
+
+test('canonical note contribution displays model-selected IDs separately from exact server-rendered source evidence',()=>{
+ const value=structuredClone(contributions),role=value.roles[0] as any;role.role='Story Miner';role.checkpoint=1;role.runs[0].selected_facts={decision:'selected',source_hash:'bound-source',selection_artifact_hash:'bound-selection',facts:[{id:'fact_a',start:17,end:45,text:'Exact source observation.'}]};
+ const shown=text(exports.default({contributions:value,profile:OWNER_WRITING_PROFILE}));assert(shown.includes('Exact source observation.'));assert(shown.includes('fact_a'));assert(shown.includes('bound-source'));assert(shown.includes('bound-selection'));assert(shown.includes('server-rendered'));assert(shown.includes('not independent factual verification'));
+});

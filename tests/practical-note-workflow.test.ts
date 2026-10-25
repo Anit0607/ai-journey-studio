@@ -1,3 +1,4 @@
+import {canonicalNoteArtifacts} from './canonical-note-helpers';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {readFile} from 'node:fs/promises';
@@ -16,7 +17,7 @@ const config:RuntimeConfig={owner_cleared_sources_authorized:true,credential_use
 async function fixture(work:(value:Awaited<ReturnType<typeof seed>>)=>Promise<void>){const db=await embedded();try{await work(await seed(db));}finally{await db.close();}}
 async function seed(db:Awaited<ReturnType<typeof embedded>>){
  const store=new Store(db),intake=new SourceIntake(db),staged=await intake.stage(observed.source),source=await intake.clear(staged.id,staged.hash,true),task=await store.enqueue(source.id);
- for(const [index,item] of (observed.outputs.slice(0,3) as Artifact[]).entries())await db.query('INSERT INTO outputs(id,task_id,role,text,hash,created) VALUES($1,$2,$3,$4,$5,$6)',[randomUUID(),task.id,item.role,item.text,item.hash,new Date(Date.UTC(2026,9,25,0,0,index)).toISOString()]);
+ for(const [index,item] of (canonicalNoteArtifacts(source).slice(0,3) as Artifact[]).entries())await db.query('INSERT INTO outputs(id,task_id,role,text,hash,created) VALUES($1,$2,$3,$4,$5,$6)',[randomUUID(),task.id,item.role,item.text,item.hash,new Date(Date.UTC(2026,9,25,0,0,index)).toISOString()]);
  await db.query('UPDATE tasks SET checkpoint=3 WHERE id=$1',[task.id]);return {db,store,source,task};
 }
 

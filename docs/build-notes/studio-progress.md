@@ -1,6 +1,7 @@
 # Studio progress and database sleep
 
 ## Verified progress
+- Documented the repository's stated purpose for AI Journey Studio as an app for the owner's AI learning journey, intended to support drafting for LinkedIn with separate owner approval before publication; this describes project purpose, not verified autonomous operation.
 - Documented assistant-observed database configuration, scheduler behavior and provider status on 25 October 2026; these are system observations, not the owner's personal experiences or feelings.
 - Verified that the existing Neon Free account had a monthly allowance of 100 compute-unit hours per project.
 - Verified that the production endpoint was configured with both minimum and maximum compute at 0.25 compute units and a five-minute autosuspend delay.
@@ -16,4 +17,5 @@
 - Documented that the commit linked below identifies the implementation change; the endpoint settings and runtime observations above come from separately inspected provider receipts, not from treating a commit link as runtime proof.
 
 ## Evidence
+- https://github.com/anit0607/ai-journey-studio/commit/a243a67eb1259b3f881e4e55d9329cf523fe093a
 - https://github.com/anit0607/ai-journey-studio/commit/e2a608b9f7a9e1dfde4f96709e8cb47a182819ff
