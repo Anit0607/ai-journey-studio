@@ -1,3 +1,4 @@
+import {comparisonRevisionOrigin} from './private-comparison-record';
 import {parseNoteSelection,canonicalFactPacket} from './note-fact-selection';
 import {ROLES,hash,type Task} from './domain';
 import {type Artifact} from './grounding';
@@ -42,7 +43,8 @@ export function agentContributions(task:Task,tasks:Row[],outputs:Row[],ledger:Ro
   for(const revision of revisions){
    const candidates=Array.isArray(revision.bundle)?revision.bundle.filter((a:Row)=>a.role===role):[],item=candidates.length===1?candidates[0]:null;
    if(!exactArtifact(item)||!Number.isInteger(revision.sequence)||revision.sequence!==lastSequence+1||(revision.parent_id||null)!==lastRevision){origin={kind:'unknown',task_id:null,revision_id:revision.id,created:revision.created};prior=item;lastSequence=revision.sequence;lastRevision=revision.id;continue;}
-   if(revision.agent_task_id){
+   const comparison=comparisonRevisionOrigin(task,revision,events,ledger);
+   if(comparison){origin=comparison;}else if(revision.agent_task_id){
     const run=runs.find(r=>r.task_id===revision.agent_task_id&&r.kind==='agent_revision');
     origin=run&&run.output&&run.output.hash===item.hash&&run.output.text===item.text?{kind:'agent_revision',task_id:run.task_id,revision_id:revision.id,created:revision.created}:{kind:'unknown',task_id:null,revision_id:revision.id,created:revision.created};
    }else if(!prior||prior.hash!==item.hash||prior.text!==item.text){origin={kind:'manual_edit',task_id:null,revision_id:revision.id,created:revision.created};}

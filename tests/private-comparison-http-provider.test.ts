@@ -62,3 +62,8 @@ test('dedicated transport fixes model, tier, reasoning/output limits, retention 
 test('review branch is explicitly excluded from Vercel auto-deployment while main settings remain unchanged',()=>{
  const config=JSON.parse(readFileSync(new URL('../vercel.json',import.meta.url),'utf8'));assert.deepEqual(config.git.deploymentEnabled,{'comparison/private-stronger-model-20261025':false});assert.equal(config.git.deploymentEnabled.main,undefined);assert.equal(config.buildCommand,'npm run build:vercel');
 });
+
+test('read-only execution readiness reflects the existing exact release and runtime gates',async()=>{
+ const h=harness(),get=()=>h.exports.GET(new Request(origin+'/api/private-comparison'));
+ assert.equal((await (await get()).json()).execution_ready,true);h.flags.release='';assert.equal((await (await get()).json()).execution_ready,false);h.flags.release=COMPARISON_SCOPE_HASH;h.flags.live=false;assert.equal((await (await get()).json()).execution_ready,false);assert.equal(h.calls.run,0);
+});
