@@ -1,0 +1,4 @@
+# Schema parity and consent hashes compare exact repository bytes on every OS.
+/migrations/*.sql text eol=lf
+/tests/fixtures/github-hash-pinned-progress-2026-10-24.txt -text
+/tests/fixtures/private-comparison-source.txt -text

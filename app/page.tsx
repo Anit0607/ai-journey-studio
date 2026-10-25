@@ -1,5 +1,6 @@
 "use client";
 import AgentContributionsPanel from "./agent-contributions-panel";
+import PrivateComparisonPanel from './private-comparison-panel';
 import {useEffect,useRef,useState} from "react";
 import {startActiveWorkspacePolling} from "../lib/workspace-polling";
 import SchedulerWindowNotice from "./scheduler-window-notice";
@@ -107,6 +108,7 @@ export default function Page(){
     {tab==="Connections"&&state.integrations&&<ConnectionsPanel integrations={state.integrations} busy={busy} action={sourceAction} onChanged={refresh}/>}
     {tab==="Analytics"&&<AnalyticsPanel analyst={state.analyst} tasks={tasks} busy={busy} action={sourceAction}/>}
     {tab==="Usage"&&<UsagePanel usage={state.usage} tasks={tasks} outputs={outputs}/>}
+    {tab==="Overview"&&<PrivateComparisonPanel refreshKey={state.events.map((event:State)=>event.id).join(':')}/>}
     {tab==="Usage"&&<section><h2>Actual usage ledger</h2><p>Warning $10 · maximum $15 · unresolved reservations {state.budget.unresolved_reservations}</p>{state.ledger.length===0?<div className="empty"><h3>No calls or costs recorded</h3><p>Usage remains empty until a real provider call is reserved.</p></div>:state.ledger.map((l:State)=><article key={l.id}><h3>{l.role||"Unattributed"} · {l.provider} · {l.model}</h3><small>IST month {l.month} · checkpoint {l.checkpoint??"unknown"} · task {l.task_id}</small><p>{l.status} · completion {l.completion_status??"unknown"} · reservation {money(Number(l.reserved))} · estimate {l.estimated===null?"unknown":money(Number(l.estimated))}</p><small>Input {l.input_tokens??"unknown"} · output {l.output_tokens??"unknown"}</small><details><summary>Pricing version / requested and returned tier</summary><pre>{JSON.stringify({pricing:l.pricing,requested_tier:l.requested_service_tier,returned_tier:l.returned_service_tier,returned_model:l.returned_model,request_id:l.provider_request_id,finish_reason:l.finish_reason},null,2)}</pre></details>{l.partial_output&&<details><summary>Incomplete output · not approval-ready</summary><pre>{l.partial_output}</pre><small>SHA-256 {l.partial_hash}</small></details>}</article>)}</section>}
     {tab==="Events"&&<section><h2>Execution events</h2>{state.events.length===0?<div className="empty"><h3>No execution events</h3><p>Progress appears as recorded events when work actually happens.</p></div>:state.events.map((e:State)=><article key={e.id}><h3>{e.kind}</h3><p>{e.detail}</p><small>{new Date(e.created).toLocaleString()} · Task {e.task_id}</small></article>)}</section>}
     </>}
