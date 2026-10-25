@@ -1,3 +1,4 @@
+import {validAssistantEvidenceInput} from '../../../../lib/evidence-review';
 import {runOwnerCalendar,ownerCalendarSnapshot,validOwnerCalendarRequest} from "../../../../lib/owner-calendar";
 import {previewApprovalPlan,approveApprovalPlan} from "../../../../lib/approval-plan";
 import {runOwnerDraft,ownerDraftSnapshot,validOwnerDraftRequest} from "../../../../lib/owner-draft";
@@ -59,11 +60,11 @@ export async function GET(request:Request,context:Context){
 export async function POST(request:Request,context:Context){
   const {action}=await context.params;
   // Worker execution credentials cannot grant owner source, evidence, content or publication consent.
-  if(!await (["calendar-generation-now","publication-publish","owner-draft-run","owner-calendar-run","approval-plan-approve","source-clear","evidence-review","approve","approve-revision","publication-approve","publication-media-approve","agent-revise"].includes(action)?passwordOwnerAuthenticated(request):ownerApiAuthenticated(request)))return response({error:"Private access required"},401);
+  if(!await (["calendar-generation-now","publication-publish","owner-draft-run","owner-calendar-run","approval-plan-approve","source-clear","evidence-review","assistant-evidence-review","approve","approve-revision","publication-approve","publication-media-approve","agent-revise"].includes(action)?passwordOwnerAuthenticated(request):ownerApiAuthenticated(request)))return response({error:"Private access required"},401);
   if(!allowedOrigin(request))return response({error:"Origin rejected"},403);
-  if(!["calendar-generation-now","approval-plan-approve","owner-draft-run","owner-calendar-run","publication-media-stage","publication-media-approve","integration-sync","integration-import","publication-enqueue","publication-approve","publication-cancel","publication-revise","publication-publish","metrics-save","money-add","money-void","coverage-confirm","source-stage","source-clear","source-revoke","agent-revise","calendar-dispatch","source","run","approve","cancel","retry","step","evidence-review","request-changes","revise","approve-revision","calendar-configure","calendar-plan","calendar-link","calendar-prepare","calendar-recover"].includes(action))return response({error:"Unknown action"},404);
+  if(!["calendar-generation-now","approval-plan-approve","owner-draft-run","owner-calendar-run","publication-media-stage","publication-media-approve","integration-sync","integration-import","publication-enqueue","publication-approve","publication-cancel","publication-revise","publication-publish","metrics-save","money-add","money-void","coverage-confirm","source-stage","source-clear","source-revoke","agent-revise","calendar-dispatch","source","run","approve","cancel","retry","step","evidence-review","assistant-evidence-review","request-changes","revise","approve-revision","calendar-configure","calendar-plan","calendar-link","calendar-prepare","calendar-recover"].includes(action))return response({error:"Unknown action"},404);
   if(hostedEnvironment()&&action==="step")return response({error:"Hosted checkpoints run only through the protected daily scheduler"},403);
-  const limit=action==="evidence-review"?12000:action==="integration-import"?1_050_000:action==="publication-enqueue"||action==="publication-revise"?40000:["revise","source-stage"].includes(action)?40000:4096;
+  const limit=["evidence-review","assistant-evidence-review"].includes(action)?12000:action==="integration-import"?1_050_000:action==="publication-enqueue"||action==="publication-revise"?40000:["revise","source-stage"].includes(action)?40000:4096;
   if(Number(request.headers.get("content-length")||0)>limit)return response({error:"Request too large"},413);
   try{
     const raw=await readBody(request,limit);
@@ -125,6 +126,7 @@ export async function POST(request:Request,context:Context){
       value=await store.enqueue(String(body.source));
     }
     if(action==="approve")value=await store.approve(String(body.task),String(body.version));
+    if(action==="assistant-evidence-review"){if(!validAssistantEvidenceInput(body))return response({error:"Exact assistant comparison required; actor and policy cannot be supplied"},400);value=await store.reviewAssistantEvidence(body);}
     if(action==="evidence-review")value=await store.reviewEvidence(String(body.task),String(body.expected),body);
     if(action==="request-changes")value=await store.revise(String(body.task),String(body.expected),body.note);
     if(action==="revise")value=await store.revise(String(body.task),String(body.expected),body.note,{role:body.role,text:body.text});
