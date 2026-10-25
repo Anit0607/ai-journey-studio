@@ -1,3 +1,6 @@
+import {DRAFT_PROMPT_PREPARED,DRAFT_OUTPUT_RECORDED,assertPromptMetadata,type DraftPromptMetadata} from './draft-run-receipt';
+import {agentContributions} from './agent-contributions';
+import {OWNER_WRITING_PROFILE} from './owner-writing-profile';
 import {assertNoEditorialHold} from './editorial-review';
 import {assertOwnerCalendarScope,OWNER_CALENDAR_STARTED,OWNER_CALENDAR_MAX_CALLS,OWNER_CALENDAR_MAX_RESERVED,type OwnerCalendarExecution,type OwnerCalendarScope} from "./owner-calendar-policy";
 import {admittedHostedTask,hostedCandidates,HOSTED_CANDIDATE_LIMIT,HostedCalendarScanExhausted,type HostedCalendarPolicy} from "./hosted-calendar-policy";
@@ -61,9 +64,9 @@ export class Store{
       const token=latest?"revision:"+latest.id+":"+latest.version:"original:"+hash(bundle.map((item:Artifact)=>item.hash).join("|"));
       const receipts=evidenceReceipts.filter((row:any)=>row.task_id===task.id);
       const approvalCurrent=!quality.editorial.blocking&&!quality.flags.length&&receipts.some((row:any)=>row.binding===quality.binding&&row.review_token===token&&row.evidence_version===(quality.evidence_version||""));
-      return {variants:platformVariants(bundle.find((item:Artifact)=>item.role==="Platform Adapter"),taskPlatformPolicy(task)),platform_policy:taskPlatformPolicy(task)||null,task_id:task.id,is_agent_revision:false,pending_agent_revision:data.tasks.find((child:Task)=>child.revision_parent_task_id===task.id&&["queued","running","blocked"].includes(child.status))||null,agent_revision_jobs:data.tasks.filter((child:Task)=>child.revision_parent_task_id===task.id),token:latest?"revision:"+latest.id+":"+latest.version:"original:"+hash(bundle.map((item:Artifact)=>item.hash).join("|")),latest_revision:latest?.id||null,original_bundle:data.outputs.filter((output:Output)=>output.task_id===task.id),original_approval:data.approvals.find((item:any)=>item.task_id===task.id)||null,bundle,quality,approval:(latest?revisionApprovals.find((item:any)=>item.revision_id===latest.id):data.approvals.find((item:any)=>item.task_id===task.id))&&approvalCurrent?(latest?revisionApprovals.find((item:any)=>item.revision_id===latest.id):data.approvals.find((item:any)=>item.task_id===task.id))||null:null,history:history.map((item:any)=>({...item,approval:revisionApprovals.find((approval:any)=>approval.revision_id===item.id)||null}))};
+      return {contributions:agentContributions(task,data.tasks,data.outputs,data.ledger,data.events,history,bundle),variants:platformVariants(bundle.find((item:Artifact)=>item.role==="Platform Adapter"),taskPlatformPolicy(task)),platform_policy:taskPlatformPolicy(task)||null,task_id:task.id,is_agent_revision:false,pending_agent_revision:data.tasks.find((child:Task)=>child.revision_parent_task_id===task.id&&["queued","running","blocked"].includes(child.status))||null,agent_revision_jobs:data.tasks.filter((child:Task)=>child.revision_parent_task_id===task.id),token:latest?"revision:"+latest.id+":"+latest.version:"original:"+hash(bundle.map((item:Artifact)=>item.hash).join("|")),latest_revision:latest?.id||null,original_bundle:data.outputs.filter((output:Output)=>output.task_id===task.id),original_approval:data.approvals.find((item:any)=>item.task_id===task.id)||null,bundle,quality,approval:(latest?revisionApprovals.find((item:any)=>item.revision_id===latest.id):data.approvals.find((item:any)=>item.task_id===task.id))&&approvalCurrent?(latest?revisionApprovals.find((item:any)=>item.revision_id===latest.id):data.approvals.find((item:any)=>item.task_id===task.id))||null:null,history:history.map((item:any)=>({...item,approval:revisionApprovals.find((approval:any)=>approval.revision_id===item.id)||null}))};
     });
-    return {...data,tasks:data.tasks.map((task:Task)=>({...task,platform_policy_hash:taskPlatformPolicyHash(task)})),reviews,workers,database:this.db.kind,usage:usageSummary(data.ledger,month),analyst:await new OwnerReports(this.db).snapshot(data.ledger),
+    return {...data,writing_profile:OWNER_WRITING_PROFILE,tasks:data.tasks.map((task:Task)=>({...task,platform_policy_hash:taskPlatformPolicyHash(task)})),reviews,workers,database:this.db.kind,usage:usageSummary(data.ledger,month),analyst:await new OwnerReports(this.db).snapshot(data.ledger),
       budget:{month_IST:month,committed_microdollars:used,warning:used>=WARNING,cap_microdollars:CAP,buffer_microdollars:BUFFER,unresolved_reservations:unresolved,basis:"Reported token estimates and unresolved reservations; not invoices"},
       pricing_blocked:data.ledger.some((r:any)=>r.pricing_anomaly&&r.status!=="settled"),
       updated:new Date().toISOString()};
@@ -133,12 +136,13 @@ export class Store{
       return claimed;
     });
   }
-  async reserve(task:Task,provider:string,p:Pricing,upper:number,month=istMonth(),scope?:OwnerDraftScope,calendar?:OwnerCalendarExecution){
+  async reserve(task:Task,provider:string,p:Pricing,upper:number,month=istMonth(),scope?:OwnerDraftScope,calendar?:OwnerCalendarExecution,promptMetadata?:DraftPromptMetadata){
     if(!Number.isSafeInteger(upper)||upper<=0)throw Error("Invalid reservation");
     return this.db.transaction(async tx=>{
       if(scope&&calendar)throw Error("Conflicting execution policy");
       const current=calendar?(await assertOwnerCalendarScope(tx,calendar)).task:(await tx.query<Task>("SELECT * FROM tasks WHERE id=$1 FOR UPDATE",[task.id]))[0];
       if(!current||current.status!=="running"||current.lease_token!==task.lease_token||current.checkpoint!==task.checkpoint||!ROLES[current.checkpoint])throw Error("Cancelled or stale lease");
+      if(promptMetadata)assertPromptMetadata(promptMetadata,current);
       if(scope)await assertOwnerDraftScope(tx,current,scope);
       else if((await tx.query("SELECT id FROM events WHERE task_id=$1 AND kind=$2",[task.id,OWNER_DRAFT_STARTED])).length)throw Error("Owner draft execution stopped");
       if(!calendar&&(await tx.query("SELECT id FROM events WHERE task_id=$1 AND kind=$2",[task.id,OWNER_CALENDAR_STARTED])).length)throw Error("Owner calendar execution stopped");
@@ -159,6 +163,7 @@ export class Store{
       if(Number(rows[0].used)+upper>CAP-BUFFER)throw Error("Monthly cap including internal buffer reached");
       const id=randomUUID();
       await tx.query("INSERT INTO ledger(id,task_id,month,provider,model,pricing,reserved,status,requested_service_tier,role,checkpoint) VALUES($1,$2,$3,$4,$5,$6,$7,'reserved',$8,$9,$10)",[id,task.id,month,provider,p.model,JSON.stringify(p),upper,provider==="openai"?"default":"standard",ROLES[current.checkpoint],current.checkpoint]);
+      if(promptMetadata)await this.event(tx,task.id,DRAFT_PROMPT_PREPARED,JSON.stringify({reservation_id:id,...promptMetadata}));
       await this.event(tx,task.id,"provider_started",provider+" / checkpoint "+task.checkpoint);
       return id;
     });
@@ -195,6 +200,7 @@ export class Store{
       if(calendar&&calendar.task_id!==task.id)throw Error("Owner calendar execution stopped");
       await tx.query("UPDATE tasks SET checkpoint=$2,status=$3,lease_token=NULL,lease_until=NULL,updated=now() WHERE id=$1",[task.id,task.checkpoint+1,finalPending?"running":status]);
       await this.event(tx,task.id,"artifact_saved",ROLES[task.checkpoint]);
+      await this.event(tx,task.id,DRAFT_OUTPUT_RECORDED,JSON.stringify({schema:1,reservation_id:id,checkpoint:task.checkpoint,role:ROLES[task.checkpoint],artifact_hash:hash(text)}));
       if(scopedInvalid){await tx.query("UPDATE tasks SET block_reason='scoped_source_invalid' WHERE id=$1",[task.id]);await this.event(tx,task.id,"blocked","Source policy revoked or changed while provider call was in flight; usage and output retained; no further calls");}
       if(exceeded)await this.event(tx,task.id,"blocked","Usage exceeded upper-bound reservation; investigation required");
       if(status==="review"&&!finalPending){

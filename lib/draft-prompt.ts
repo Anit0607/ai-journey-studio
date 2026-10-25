@@ -1,3 +1,4 @@
+import {ownerWritingPrompt} from './owner-writing-profile';
 import {ROLES,type Source,type Task} from './domain';
 import {type Artifact,bundleQuality,groundingRules} from './grounding';
 import {taskPlatformPolicy} from './platform-policy';
@@ -33,5 +34,5 @@ export function buildDraftPrompt(task:Task,source:Source,previous:Artifact[],rev
  const criticContext=checkpoint===5?'\nCURRENT CRITIC EVIDENCE INDEX (provenance and format only, not factual verification): '+JSON.stringify(criticCitationIndex(previous,source)):'';
  const allFlags=bundleQuality(previous,source.text,source.reported_date,platformPolicy).flags;
  const flags=progress&&[1,2,3,4].includes(checkpoint)?allFlags.filter(flag=>selected.some(item=>item.role===flag.role)||flag.role==='Source'):allFlags;
- return prompt+formatContext+revisionContext+holdContext+'\nGROUNDING CONTRACT: '+groundingRules(source.text)+sourceDraftingContract(checkpoint,source.text)+editorialPrompt(checkpoint)+'\nPrior claim flags (never treat these as new evidence): '+JSON.stringify(flags.slice(0,10).map(flag=>({...flag,claim:flag.claim.slice(0,120)})))+criticContext;
+ return prompt+formatContext+revisionContext+holdContext+'\nGROUNDING CONTRACT: '+groundingRules(source.text)+sourceDraftingContract(checkpoint,source.text)+editorialPrompt(checkpoint)+ownerWritingPrompt(task)+'\nPrior claim flags (never treat these as new evidence): '+JSON.stringify(flags.slice(0,10).map(flag=>({...flag,claim:flag.claim.slice(0,120)})))+criticContext;
 }
