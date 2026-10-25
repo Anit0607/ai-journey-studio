@@ -1,3 +1,4 @@
+import {canonicalNoteArtifacts} from './canonical-note-helpers';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {readFile} from 'node:fs/promises';
@@ -12,7 +13,7 @@ import {type Artifact} from '../lib/grounding';
 
 const fixture=JSON.parse(await readFile(new URL('./fixtures/database-note-draft-2026-10-25.json',import.meta.url),'utf8'));
 const source={...fixture.source,id:'00000000-0000-4000-8000-000000000001',cleared:true} as Source;
-const outputs:Artifact[]=fixture.outputs;
+const outputs:Artifact[]=canonicalNoteArtifacts(source,fixture.outputs);
 const task=(checkpoint:number)=>({id:'00000000-0000-4000-8000-000000000002',source_id:source.id,source_hash:source.hash,status:'running',checkpoint,lease_token:null,lease_until:null,updated:'2026-10-25T08:51:00.000Z',content_brief:{kind:'shortform',platforms:['LinkedIn'],platform_policy:NEW_PLATFORM_POLICY}} as Task);
 const render=(checkpoint:number,previous=outputs.slice(0,checkpoint))=>buildDraftPrompt(task(checkpoint),source,previous);
 const prior=(prompt:string)=>JSON.parse(prompt.split('\nPRIOR ARTIFACTS: ')[1].split('\n')[0]);
@@ -42,14 +43,13 @@ test('actual progress-note Writer and Adapter retain useful LinkedIn guidance wi
  assert.match(render(4),/Keep the single LinkedIn section/);
 });
 
-test('actual source-note selection is one concise labeled episode, not a narrative or a whole-log retelling',()=>{
+test('actual source-note selection is one source-bound ID selection, not a narrative or a whole-log retelling',()=>{
  const miner=render(1),strategist=render(2);
- assert.match(miner,/Select ONE specific source-supported episode or method, not a summary of the entire note/);
- assert.match(miner,/under 120 words, followed by two to four complete verbatim source sentences/);
- assert.match(strategist,/concise labeled brief/);
- assert.match(strategist,/truthful opening/);
- assert.match(strategist,/proposed instruction/);
- assert.match(strategist,/audience need, evidence gap and reader takeaway/);
+ assert.match(miner,/Select two to six server-issued fact IDs for ONE useful supported episode/);
+ assert.match(miner,/No factual prose or quotations are permitted/);
+ assert.match(strategist,/canonical_note_plan JSON/);
+ assert.match(strategist,/allowed opening and reader_action labels/);
+ assert.doesNotMatch(strategist,/concise labeled brief|complete verbatim source sentences/);
  assert.deepEqual(prior(miner),[]);
  assert.deepEqual(prior(strategist).map((x:Artifact)=>x.role),['Story Miner']);
 });
@@ -57,7 +57,8 @@ test('actual source-note selection is one concise labeled episode, not a narrati
 test('public writing sees selected brief, not repeated Harvester and Story Miner narratives',()=>{
  assert.deepEqual(prior(render(3)).map((x:Artifact)=>x.role),['Strategist']);
  assert.deepEqual(prior(render(4)).map((x:Artifact)=>x.role),['Strategist','Writer']);
- assert.equal(prior(render(3))[0].text,outputs.find(x=>x.role==='Strategist')!.text);
+ assert.equal(prior(render(3))[0].canonical_fact_packet.selection_artifact_hash,outputs.find(x=>x.role==='Strategist')!.hash);
+ for(const fact of prior(render(3))[0].canonical_fact_packet.facts)assert.equal(fact.text,source.text.slice(fact.start,fact.end));
  assert(!render(3).includes('indicating the autosuspend was active without manual intervention'),'Actual erroneous Story Miner narrative is not copied into Writer context');
  assert(!render(4).includes('indicating the autosuspend was active without manual intervention'));
  assert.match(render(3),/selected editorial brief below proposes framing, not new facts/);
@@ -66,11 +67,8 @@ test('public writing sees selected brief, not repeated Harvester and Story Miner
 test('omitted upstream holds remain explicit without copying their narrative or clearing them',()=>{
  const text='EDITORIAL HOLD: needs_source\nLong internal narrative marker that must not be copied.';
  const previous=outputs.slice(0,3).map(x=>x.role==='Story Miner'?{role:x.role,text,hash:hash(text)}:x);
- const prompt=render(3,previous);
- assert(!prompt.includes('Long internal narrative marker'));
- assert.match(prompt,/PRIOR EDITORIAL HOLDS.*"Story Miner","status":"needs_source"/);
- assert.match(prompt,/shorter context projection does not clear them/);
- assert.deepEqual(prior(prompt).map((x:Artifact)=>x.role),['Strategist']);
+ assert.throws(()=>render(3,previous),/Canonical note predecessor invalid/);
+ // A saved hold is never bypassed by the new source-only projection.
 });
 
 test('Critic still sees exact current artifacts and current index; format accounting and caps stay explicit',()=>{
@@ -81,7 +79,7 @@ test('Critic still sees exact current artifacts and current index; format accoun
  assert.match(prompt,/At most 8 entries and 600 characters per reason/);
  assert.match(prompt,/1200 output-token cap/);
  for(let checkpoint=0;checkpoint<6;checkpoint++)assert(Buffer.byteLength(render(checkpoint))+providerResponseFormatBytes('openai',checkpoint===5?{artifact:'critic'}:undefined)<48000);
- const q=evidenceQuality(outputs,source,[],NEW_PLATFORM_POLICY);
+ const q=evidenceQuality(fixture.outputs,source,[],NEW_PLATFORM_POLICY);
  assert.equal(q.flags.filter(x=>x.kind==='hard').length,20);
  assert.equal(q.flags.filter(x=>x.kind==='wording_review').length,9);
  assert.equal(q.critic.valid,false);

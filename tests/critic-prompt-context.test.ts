@@ -1,3 +1,4 @@
+import {criticContractFromPrompt} from './prompt-contract-helper';
 import {providerResponseFormatBytes} from '../lib/critic-response-format';
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -91,7 +92,7 @@ test('one mocked six-role run supplies current context, retains reservation boun
  }
  const state=await store.snapshot();assert.equal(prompts.length,6);assert.equal(state.tasks[0].status,'review');assert.equal(state.approvals.length,0);assert.equal(state.reviews[0].approval,null);assert.equal(state.reviews[0].quality.critic.valid,true);
  assert.equal(state.ledger.length,6);assert.deepEqual(state.outputs.map((item:any)=>item.role).sort(),[...ROLES].sort());
- for(const row of state.ledger){assert.equal(row.status,'settled');assert.equal(Number(row.reserved),tokenCost(pricing,Buffer.byteLength(prompts[row.checkpoint])+providerResponseFormatBytes('openai',row.checkpoint===5?{artifact:'critic'}:undefined)+256,1200));}
+ for(const row of state.ledger){assert.equal(row.status,'settled');assert.equal(Number(row.reserved),tokenCost(pricing,Buffer.byteLength(prompts[row.checkpoint])+providerResponseFormatBytes('openai',row.checkpoint===5?criticContractFromPrompt(prompts[row.checkpoint]):undefined)+256,1200));}
  assert.equal((await store.db.query('SELECT * FROM publishing_outbox')).length,0);
 }));
 

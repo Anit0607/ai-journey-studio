@@ -8,12 +8,12 @@ import {NEW_PLATFORM_POLICY} from '../lib/platform-policy';
 const observed=JSON.parse(readFileSync(new URL('./fixtures/github-rich-note-draft-2026-10-25.json',import.meta.url),'utf8')) as {source:{text:string}};
 const source=observed.source.text;
 test('progress-note evidence limits do not replace the practical LinkedIn writing guidance',()=>{
- for(const checkpoint of [2,3,4]){
+ for(const checkpoint of [3,4]){
   const guidance=draftingGuidance(checkpoint,NEW_PLATFORM_POLICY,source);
   assert.equal(guidance,draftingGuidance(checkpoint,NEW_PLATFORM_POLICY));
   assert.doesNotMatch(guidance,/Do not require a hook|no manufactured hook|Keep limitations and advice internal/);
  }
- assert.match(draftingGuidance(2,NEW_PLATFORM_POLICY,source),/audience need, evidence gap and reader takeaway/);
+ assert.match(draftingGuidance(2,NEW_PLATFORM_POLICY,source),/allowed opening and reader-action labels/);
  assert.match(draftingGuidance(3,NEW_PLATFORM_POLICY,source),/deliver its payoff promptly/);
  assert.match(draftingGuidance(4,NEW_PLATFORM_POLICY,source),/immediate payoff, evidence, useful takeaway/);
  assert.equal(draftingGuidance(3,NEW_PLATFORM_POLICY,'I reviewed my draft.'),draftingGuidance(3,NEW_PLATFORM_POLICY));
@@ -21,7 +21,7 @@ test('progress-note evidence limits do not replace the practical LinkedIn writin
 test('progress-note roles keep exact evidence, limited scope and timestamps without turning historical reports into assertions',()=>{
  for(let checkpoint=0;checkpoint<6;checkpoint++){
   const contract=sourceDraftingContract(checkpoint,source);
-  assert.match(contract,/Harvester returns only SOURCE: followed by the complete SOURCE/);
+  assert.match(contract,/Harvester returns the exact source binding and complete canonical fact-ID list/);
   assert.match(contract,/Do not round, truncate or reformat timestamps/);
   assert.match(contract,/thorough, robust or smooth/);
   assert.match(contract,/type checking, lint and builds are separate checks/);

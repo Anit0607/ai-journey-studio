@@ -1,3 +1,4 @@
+import {criticContractFromPrompt} from './prompt-contract-helper';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {randomUUID} from 'node:crypto';
@@ -139,7 +140,7 @@ test('one bounded mocked run retains an upstream source hold even if later draft
   const store=new Store(db),intake=new SourceIntake(db),staged=await intake.stage({text:source,category:'project-note',reported_date:'2026-10-20'});await intake.clear(staged.id,staged.hash,true);const task=await store.enqueue(staged.id);const prompts:string[]=[];
   for(let checkpoint=0;checkpoint<6;checkpoint++){
    assert.equal((await step(store,config,async(_provider,prompt,_pricing,_transport,_credential,contract)=>{
-    prompts.push(prompt);assert(prompt.includes(editorialPrompt(checkpoint)));assert.deepEqual(contract,checkpoint===5?{artifact:'critic'}:undefined);
+    prompts.push(prompt);assert(prompt.includes(editorialPrompt(checkpoint)));assert.deepEqual(contract,checkpoint===5?criticContractFromPrompt(prompt):undefined);
     let text=checkpoint===1?'EDITORIAL HOLD: needs_source\nMissing a concrete supported decision or method.':checkpoint===4?'### LinkedIn\n'+source:source;
     if(checkpoint===5){const index=criticCitationIndex(await db.query<Artifact>('SELECT role,text,hash FROM outputs WHERE task_id=$1 ORDER BY created,id',[task.id]),staged);text=JSON.stringify({schema:2,source_hash:staged.hash,index_hash:index.index_hash,'Unsupported claims:':'Compare current source.','Evidence needed:':'Owner comparison remains required.','Proposed advice:':'Review the current text.',evidence:[]});}
     return {text,input:10,output:10,outcome:'complete',report:{serviceTier:'default',model:pricing.model,requestId:'isolated-mock',finishReason:'stop'}};
@@ -147,7 +148,7 @@ test('one bounded mocked run retains an upstream source hold even if later draft
   }
   const state=await store.snapshot(),review=state.reviews[0];assert.equal(prompts.length,6);assert.equal(state.ledger.length,6);assert.equal(review.quality.flags.length,0);assert.equal(review.quality.critic.valid,true);
   assert.equal(review.quality.editorial.status,'needs_source');assert.equal(review.approval,null);await assert.rejects(store.approve(task.id,review.token.slice(9)),/editorial hold/);
-  let reserved=0;for(const row of state.ledger){assert.equal(row.status,'settled');const amount=tokenCost(pricing,Buffer.byteLength(prompts[row.checkpoint])+providerResponseFormatBytes('openai',row.checkpoint===5?{artifact:'critic'}:undefined)+256,1200);assert.equal(Number(row.reserved),amount);reserved+=amount;}
+  let reserved=0;for(const row of state.ledger){assert.equal(row.status,'settled');const amount=tokenCost(pricing,Buffer.byteLength(prompts[row.checkpoint])+providerResponseFormatBytes('openai',row.checkpoint===5?criticContractFromPrompt(prompts[row.checkpoint]):undefined)+256,1200);assert.equal(Number(row.reserved),amount);reserved+=amount;}
   assert(reserved<=130000);assert.equal((await db.query('SELECT * FROM publishing_outbox')).length,0);assert.equal((await db.query('SELECT * FROM approvals')).length,0);
  }finally{await db.close();}
 });

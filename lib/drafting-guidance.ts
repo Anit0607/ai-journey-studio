@@ -1,5 +1,5 @@
 import type {PlatformPolicy} from "./platform-policy";
-import {attributedCommitSummary} from "./drafting-contract";
+import {attributedCommitSummary,attributedProgressNote} from "./drafting-contract";
 /** Compact editorial adaptation; pinned MIT sources are recorded in THIRD_PARTY_NOTICES.md.
  * Formatting suggestions never supply factual evidence or add execution capabilities.
  */
@@ -12,6 +12,7 @@ const guidance:Readonly<Record<number,string>>={
 };
 export function draftingGuidance(checkpoint:number,policy?:PlatformPolicy,source?:string):string{
  if(source&&attributedCommitSummary(source)&&[2,3,4].includes(checkpoint))return '\nEDITORIAL GUIDANCE (format only, never evidence): Commit-title evidence only. '+(checkpoint===2?'Keep an internal source-only brief with exact metadata, the unchanged title and missing evidence.':checkpoint===4?(policy?'Keep the single LinkedIn section. ':'Keep the required platform sections. ')+'Keep a title-only record internal; preserve the editorial hold instead of creating a public variant.':'A commit title alone is not a practical episode. Return an internal editorial hold, keeping the exact repository record in internal evidence.')+' Do not require a hook, payoff, audience need, reader takeaway, advice or generalized benefit from this thin source. Keep the unchanged title in internal evidence. Do not interpret technical title terms as implementation details or add dates to public copy.';
+ if(source&&attributedProgressNote(source)&&checkpoint===2)return '\nEDITORIAL GUIDANCE (format only, never evidence): Choose only the allowed opening and reader-action labels for the selected source fact IDs. Keep the required canonical plan JSON; do not generate a prose brief or new claims.';
  if(policy&&checkpoint===2)return "\nEDITORIAL GUIDANCE (format only, never evidence): Brief for LinkedIn only: choose one source-supported point, audience need, evidence gap and reader takeaway. Do not plan other social platforms or invent assets.";
  if(policy&&checkpoint===4)return "\nEDITORIAL GUIDANCE (format only, never evidence): Keep the single LinkedIn section. One clear opening, immediate payoff, evidence, useful takeaway; short paragraphs, no manufactured success arc. No other platform variants.";
  return guidance[checkpoint]?'\nEDITORIAL GUIDANCE (format only, never evidence): '+guidance[checkpoint]:'';

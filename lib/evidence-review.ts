@@ -21,6 +21,8 @@ function spans(text:string):Array<Span&{text:string}>{
  const out:Array<Span&{text:string}>=[];const re=/[^\n]+?(?:[.!?](?=\s|$)|(?=\n|$))/g;let m;
  while((m=re.exec(text))){const lead=m[0].length-m[0].trimStart().length,body=m[0].trim();if(body)out.push({start:m.index+lead,end:m.index+lead+body.length,text:body});}return out;
 }
+/** Same lossless source boundaries used by factual review; no normalization. */
+export const sourceEvidenceSpans=spans;
 /** Provenance/format hints only, using exactly the sentence boundaries accepted below.
  * Text is already in the prompt: do not duplicate it or permit unbounded index growth.
  */

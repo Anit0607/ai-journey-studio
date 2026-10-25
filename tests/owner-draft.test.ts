@@ -1,3 +1,4 @@
+import {criticContractFromPrompt} from './prompt-contract-helper';
 import {providerResponseFormatBytes,type ProviderArtifactContract} from '../lib/critic-response-format';
 import {taskPlatformPolicyHash} from "../lib/platform-policy-binding";
 import test,{before,after,beforeEach} from "node:test";
@@ -43,7 +44,7 @@ async function ledger(task:Task,{reserved=1,estimated=1,status="settled",month=i
   const result=await runOwnerDraft(db,request(selected.task,selected.source,c),runner(c,async(provider,prompt,_pricing,_transport,_credential,contract)=>{calls.push({provider,prompt,contract});return completion();}));
   assert.equal(result.status,"review");assert.equal(result.steps,6);assert.ok(result.run_id);
   assert.deepEqual(calls.map(call=>call.provider),Array(6).fill("openai"));
-  assert.deepEqual(calls.map(call=>call.contract),[undefined,undefined,undefined,undefined,undefined,{artifact:"critic"}]);
+  assert.deepEqual(calls.map(call=>call.contract),[undefined,undefined,undefined,undefined,undefined,criticContractFromPrompt(calls[5].prompt)]);
   assert.ok(calls.every(call=>call.prompt.includes(selected.source.text)&&!call.prompt.includes(unrelated.source.text)));
   const saved=await state(selected.task.id);assert.equal(saved.status,"review");assert.equal(saved.checkpoint,6);
   assert.equal((await state(unrelated.task.id)).status,"queued");assert.equal((await state(unrelated.task.id)).checkpoint,0);
@@ -145,7 +146,7 @@ async function ledger(task:Task,{reserved=1,estimated=1,status="settled",month=i
   const bytes=prompts.reduce((total,prompt)=>total+Buffer.byteLength(prompt)+256,0);
   c.openai!.input_microdollars_per_token=(Math.floor(129000/bytes*1000)/1000).toFixed(3);
   const oldTotal=prompts.reduce((total,prompt)=>total+tokenCost(c.openai!,Buffer.byteLength(prompt)+256,1200),0);
-  const extra=tokenCost(c.openai!,Buffer.byteLength(prompts[5])+256+providerResponseFormatBytes('openai',{artifact:'critic'}),1200)-tokenCost(c.openai!,Buffer.byteLength(prompts[5])+256,1200);
+  const extra=tokenCost(c.openai!,Buffer.byteLength(prompts[5])+256+providerResponseFormatBytes('openai',criticContractFromPrompt(prompts[5])),1200)-tokenCost(c.openai!,Buffer.byteLength(prompts[5])+256,1200);
   assert(oldTotal<=OWNER_DRAFT_MAX_RESERVED);assert(oldTotal+extra>OWNER_DRAFT_MAX_RESERVED);
   await db.query("TRUNCATE sources,events,budget_months,runtime CASCADE");
   const selected=await fixture();let calls=0;const run=()=>runOwnerDraft(db,request(selected.task,selected.source,c),runner(c,async()=>{calls++;return completion();}));

@@ -1,3 +1,5 @@
+import {canonicalNoteArtifacts} from './canonical-note-helpers';
+import {draftArtifactContract} from '../lib/critic-response-format';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
@@ -74,7 +76,7 @@ test('revision input projection keeps public feedback only in Writer and Adapter
    assert.equal(data.owner_feedback,undefined);assert.equal(data.prior_artifacts,undefined);
    assert(!context.includes(observed.feedback));
    for(const prior of historical.outputs)assert(!context.includes(prior.hash));
-   assert.match(context,checkpoint===5?/fresh critique of the current child artifacts/:/Regenerate only this internal role from SOURCE/);
+   assert.match(context,checkpoint===5?/fresh critique of the current child artifacts/:/Regenerate only this internal role using its required canonical note JSON/);
   }
  }
 });
@@ -101,6 +103,7 @@ test('actual six-stage prompt assembly isolates parent context while retaining f
   await intake.clear(staged.id,staged.hash,true);const parent=await store.enqueue(staged.id);
   for(const item of historical.outputs)await db.query('INSERT INTO outputs(id,task_id,role,text,hash) VALUES($1,$2,$3,$4,$5)',[randomUUID(),parent.id,item.role,item.text,item.hash]);
   await db.query("UPDATE tasks SET status='review',checkpoint=6 WHERE id=$1",[parent.id]);
+  const generated=canonicalNoteArtifacts(historical.source,observed.outputs);
   const base=(await store.snapshot()).reviews[0],child=await queueAgentRevision(store,config,parent.id,base.token,observed.feedback),prompts:string[]=[];
   for(let checkpoint=0;checkpoint<6;checkpoint++){
    const result=await step(store,config,async(provider,prompt,_pricing,_transport,_credential,contract)=>{
@@ -111,7 +114,8 @@ test('actual six-stage prompt assembly isolates parent context while retaining f
     for(const key of ['Unsupported claims','Evidence needed','Proposed advice'])assert(!prompt.includes(oldCritic[key]));
     for(const entry of oldCritic.evidence)assert(!prompt.includes(entry.reason));
     assert(!prompt.includes(oldCritic.index_hash));
-    assert.deepEqual(contract,checkpoint===5?{artifact:'critic'}:undefined);
+    const current=await db.query<Artifact>('SELECT role,text,hash FROM outputs WHERE task_id=$1 ORDER BY created,id',[child.id]);
+    assert.deepEqual(contract,draftArtifactContract({...child,checkpoint},historical.source as any,current));
     if(checkpoint===5){
      const index=JSON.parse(prompt.split(citationMarker)[1]);
      const current=await db.query<Artifact>('SELECT role,text,hash FROM outputs WHERE task_id=$1 ORDER BY created,id',[child.id]);
@@ -119,17 +123,17 @@ test('actual six-stage prompt assembly isolates parent context while retaining f
      for(const role of ['Writer','Platform Adapter'])assert.equal(index.artifacts.find((item:{role:string})=>item.role===role)!.artifact_hash,observed.outputs.find(item=>item.role===role)!.hash);
      assert.match(prompt,/citation must support the whole assertion/);
     }
-    // Deliberately replay captured provider outputs: context isolation must not
-    // pretend to correct old model text, bless its Critic or invent a live pass.
-    return {text:observed.outputs[checkpoint].text,input:10,output:10,outcome:'complete',report:{serviceTier:'default',model:pricing.model,requestId:'isolated-mock',finishReason:'stop'}};
+    // Typed selection fixtures precede the captured public/invalid Critic outputs.
+    // Contract validity must not bless that Critic or invent a live quality pass.
+    return {text:generated[checkpoint].text,input:10,output:10,outcome:'complete',report:{serviceTier:'default',model:pricing.model,requestId:'isolated-mock',finishReason:'stop'}};
    },true);
    assert.equal(result.status,'step_saved');
   }
   const state=await store.snapshot(),review=state.reviews[0];
   assert.equal(prompts.length,6);assert.equal(state.ledger.length,6);
-  for(const row of state.ledger){assert.equal(row.status,'settled');assert.equal(Number(row.reserved),tokenCost(pricing,Buffer.byteLength(prompts[row.checkpoint])+providerResponseFormatBytes('openai',row.checkpoint===5?{artifact:'critic'}:undefined)+256,1200));}
+  for(const row of state.ledger){assert.equal(row.status,'settled');assert.equal(Number(row.reserved),tokenCost(pricing,Buffer.byteLength(prompts[row.checkpoint])+providerResponseFormatBytes('openai',draftArtifactContract({...child,checkpoint:row.checkpoint},historical.source as any,generated.slice(0,row.checkpoint)))+256,1200));}
   assert.deepEqual(state.outputs.filter((item:{task_id:string})=>item.task_id===child.id).map((item:Artifact)=>item.role).sort(),[...ROLES].sort());
-  assert.equal(review.quality.critic.valid,false);assert.equal(review.quality.flags.length,22);
+  assert.equal(review.quality.critic.valid,false);assert.deepEqual(review.quality.flags.map((f:any)=>f.id),evidenceQuality(generated,historical.source,[],NEW_PLATFORM_POLICY).flags.map(f=>f.id));
   assert.equal(review.approval,null);assert.equal(review.quality.evidence_version,null);
   assert.equal(state.approvals.length,0);
   assert.equal((await db.query('SELECT id FROM publishing_outbox')).length,0);

@@ -1,3 +1,4 @@
+import {noteStageIssue} from './note-fact-selection';
 import {DRAFT_PROMPT_PREPARED,DRAFT_OUTPUT_RECORDED,assertPromptMetadata,type DraftPromptMetadata} from './draft-run-receipt';
 import {agentContributions} from './agent-contributions';
 import {OWNER_WRITING_PROFILE} from './owner-writing-profile';
@@ -64,7 +65,7 @@ export class Store{
       const token=latest?"revision:"+latest.id+":"+latest.version:"original:"+hash(bundle.map((item:Artifact)=>item.hash).join("|"));
       const receipts=evidenceReceipts.filter((row:any)=>row.task_id===task.id);
       const approvalCurrent=!quality.editorial.blocking&&!quality.flags.length&&receipts.some((row:any)=>row.binding===quality.binding&&row.review_token===token&&row.evidence_version===(quality.evidence_version||""));
-      return {contributions:agentContributions(task,data.tasks,data.outputs,data.ledger,data.events,history,bundle),variants:platformVariants(bundle.find((item:Artifact)=>item.role==="Platform Adapter"),taskPlatformPolicy(task)),platform_policy:taskPlatformPolicy(task)||null,task_id:task.id,is_agent_revision:false,pending_agent_revision:data.tasks.find((child:Task)=>child.revision_parent_task_id===task.id&&["queued","running","blocked"].includes(child.status))||null,agent_revision_jobs:data.tasks.filter((child:Task)=>child.revision_parent_task_id===task.id),token:latest?"revision:"+latest.id+":"+latest.version:"original:"+hash(bundle.map((item:Artifact)=>item.hash).join("|")),latest_revision:latest?.id||null,original_bundle:data.outputs.filter((output:Output)=>output.task_id===task.id),original_approval:data.approvals.find((item:any)=>item.task_id===task.id)||null,bundle,quality,approval:(latest?revisionApprovals.find((item:any)=>item.revision_id===latest.id):data.approvals.find((item:any)=>item.task_id===task.id))&&approvalCurrent?(latest?revisionApprovals.find((item:any)=>item.revision_id===latest.id):data.approvals.find((item:any)=>item.task_id===task.id))||null:null,history:history.map((item:any)=>({...item,approval:revisionApprovals.find((approval:any)=>approval.revision_id===item.id)||null}))};
+      return {contributions:agentContributions(task,data.tasks,data.outputs,data.ledger,data.events,history,bundle,source),variants:platformVariants(bundle.find((item:Artifact)=>item.role==="Platform Adapter"),taskPlatformPolicy(task)),platform_policy:taskPlatformPolicy(task)||null,task_id:task.id,is_agent_revision:false,pending_agent_revision:data.tasks.find((child:Task)=>child.revision_parent_task_id===task.id&&["queued","running","blocked"].includes(child.status))||null,agent_revision_jobs:data.tasks.filter((child:Task)=>child.revision_parent_task_id===task.id),token:latest?"revision:"+latest.id+":"+latest.version:"original:"+hash(bundle.map((item:Artifact)=>item.hash).join("|")),latest_revision:latest?.id||null,original_bundle:data.outputs.filter((output:Output)=>output.task_id===task.id),original_approval:data.approvals.find((item:any)=>item.task_id===task.id)||null,bundle,quality,approval:(latest?revisionApprovals.find((item:any)=>item.revision_id===latest.id):data.approvals.find((item:any)=>item.task_id===task.id))&&approvalCurrent?(latest?revisionApprovals.find((item:any)=>item.revision_id===latest.id):data.approvals.find((item:any)=>item.task_id===task.id))||null:null,history:history.map((item:any)=>({...item,approval:revisionApprovals.find((approval:any)=>approval.revision_id===item.id)||null}))};
     });
     return {...data,writing_profile:OWNER_WRITING_PROFILE,tasks:data.tasks.map((task:Task)=>({...task,platform_policy_hash:taskPlatformPolicyHash(task)})),reviews,workers,database:this.db.kind,usage:usageSummary(data.ledger,month),analyst:await new OwnerReports(this.db).snapshot(data.ledger),
       budget:{month_IST:month,committed_microdollars:used,warning:used>=WARNING,cap_microdollars:CAP,buffer_microdollars:BUFFER,unresolved_reservations:unresolved,basis:"Reported token estimates and unresolved reservations; not invoices"},
@@ -192,8 +193,11 @@ export class Store{
         const source=await resolveScopedSource(tx,(await tx.query<Source>("SELECT * FROM sources WHERE id=$1 FOR UPDATE",[current.source_id]))[0]);
         scopedInvalid=!source||!sourceEligible(source,current.source_hash)||!scopedTaskMatches(source,current);
       }
+      const stageSource=task.checkpoint<=2?(await tx.query<Source>('SELECT * FROM sources WHERE id=$1',[current.source_id]))[0]:undefined;
+      const stagePrevious=stageSource?await tx.query<Output>('SELECT * FROM outputs WHERE task_id=$1 ORDER BY created,id',[task.id]):[];
+      const contractIssue=stageSource&&stageSource.hash===current.source_hash?noteStageIssue(task.checkpoint,text,stageSource,stagePrevious):null;
       const cancelled=current.status==="cancelled",exceeded=cost>Number(ledger.reserved);
-      const status=cancelled?"cancelled":exceeded||scopedInvalid?"blocked":task.checkpoint===5?"review":"queued";
+      const status=cancelled?"cancelled":exceeded||scopedInvalid||!!contractIssue?"blocked":task.checkpoint===5?"review":"queued";
       // A Calendar one-shot publishes neither a reviewable root nor a parent revision
       // until its final locked consent/timing check and finish receipt commit together.
       const finalPending=status==="review"&&!!calendar;
@@ -202,6 +206,7 @@ export class Store{
       await this.event(tx,task.id,"artifact_saved",ROLES[task.checkpoint]);
       await this.event(tx,task.id,DRAFT_OUTPUT_RECORDED,JSON.stringify({schema:1,reservation_id:id,checkpoint:task.checkpoint,role:ROLES[task.checkpoint],artifact_hash:hash(text)}));
       if(scopedInvalid){await tx.query("UPDATE tasks SET block_reason='scoped_source_invalid' WHERE id=$1",[task.id]);await this.event(tx,task.id,"blocked","Source policy revoked or changed while provider call was in flight; usage and output retained; no further calls");}
+      if(contractIssue&&!cancelled&&!scopedInvalid&&!exceeded){await tx.query("UPDATE tasks SET block_reason='note_contract' WHERE id=$1",[task.id]);await this.event(tx,task.id,"note_contract_blocked",contractIssue+"; returned artifact and settled usage retained; no next-stage call");}
       if(exceeded)await this.event(tx,task.id,"blocked","Usage exceeded upper-bound reservation; investigation required");
       if(status==="review"&&!finalPending){
         const revision=await finalizeAgentRevision(tx,{...task,checkpoint:task.checkpoint+1,status});
@@ -236,7 +241,7 @@ export class Store{
       if(!t||t.status!=="blocked")throw Error("Task cannot be retried");
       if((await tx.query("SELECT id FROM events WHERE task_id=$1 AND kind=$2",[id,OWNER_DRAFT_STARTED])).length)throw Error("Owner draft attempt cannot be replayed");
       if((await tx.query("SELECT id FROM events WHERE task_id=$1 AND kind=$2",[id,OWNER_CALENDAR_STARTED])).length)throw Error("Owner Calendar attempt cannot be replayed");
-      if(t.checkpoint>=6||["revision_stale","revision_source","revision_invalid","revision_accounting","scoped_source_invalid"].includes((t as Task&{block_reason:string|null}).block_reason||""))throw Error("Completed revision cannot be retried; review its parent content");
+      if(t.checkpoint>=6||["revision_stale","revision_source","revision_invalid","revision_accounting","scoped_source_invalid","note_contract"].includes((t as Task&{block_reason:string|null}).block_reason||""))throw Error("Completed revision cannot be retried; review its parent content");
       if((t as Task&{block_reason:string|null}).block_reason==="safety")throw Error("Safety termination cannot be retried");
       const unknown=await tx.query("SELECT id FROM ledger WHERE task_id=$1 AND status IN ('reserved','unknown')",[id]);
       if(unknown.length)throw Error("Unknown completion; reconciliation required before retry");
