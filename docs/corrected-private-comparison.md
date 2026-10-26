@@ -1,6 +1,8 @@
-# Finite corrective comparison candidate (inactive)
+# Finite owner-approved corrective comparison
 
-This change does not grant a second paid attempt. The original scope remains
+The owner approved one corrected private attempt on 2026-10-26 in reply
+`Sentinel_5fe38455d5bc8191ad426a18b4a923a4`, explicitly keeping both attempts
+within the original US$0.85 cap. This is not permission for further retries. The original scope remains
 unchanged and its blocked six-stage run is preserved, not restarted or adopted.
 The registry contains exactly that original scope and one separately bounded
 corrective candidate; it is not a general retry or scope-registration mechanism.
@@ -15,13 +17,14 @@ plan bound of 740,760 (826,084 combined with the predecessor). The original
 remain enforced independently. Unknown usage, additional attempts, changed source,
 permission, original output, configuration, or Calendar state fail closed.
 
-Authorization is deliberately `pending`; the consent reference and final compiled
-prompt-policy binding are not invented. A matching environment gate alone cannot
-activate this candidate. After the final voice, grammar, Critic, diagnostic and
-review changes are integrated, a canonical-LF prompt-policy manifest must be
-independently generated and tested. Binding that factual digest while consent is
-pending does not authorize execution. New owner permission must be separately
-recorded and reviewed before any release gate is enabled or model call occurs.
+Authorization is `approved` and pins that exact affirmative reference plus the
+reviewed canonical-LF prompt-policy digest
+`a92c37461e9d2b3d904ceb831cd498aebb7a9863a534865d94d56aac474dbf0a`.
+Execution still requires the separately configured production-only exact-scope
+gate, authenticated owner UI confirmation and unchanged source/state/budget proof.
+A future policy change does not rewrite this immutable scope or historical
+provenance; it blocks new execution. The original gate is not reopened. This
+release does not itself execute a provider call, adopt outputs or publish.
 
 The authenticated GET exposes a read-only admission preflight. This is a current
 observation, not execution authority or a reservation. It performs no writes,
@@ -34,7 +37,7 @@ and run; the old failed run remains inspectable and non-adoptable.
 Offline tests include the captured predecessor output/usage proof and a historical
 full-context fixture whose real JSON digest matches the recorded predecessor.
 The runtime harness mocks authorization and the nonsecret configuration digest
-only inside an isolated test module; production authorization stays pending.
+only inside an isolated test module; production authorization is not altered by tests.
 Historical fixture success is not a claim that today's live rows still match.
 
 Integration must also retain diagnostic terminal reasons and pass the newly

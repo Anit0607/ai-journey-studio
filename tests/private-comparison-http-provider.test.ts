@@ -11,8 +11,8 @@ import * as scopes from '../lib/private-comparison-scopes';
 
 const origin='https://comparison.example.test';
 function harness(){
- const flags={authenticated:true,release:COMPARISON_SCOPE_HASH,status:'completed_requires_review',live:true},calls={auth:0,db:0,run:0,read:0};
- const env={get STUDIO_PRIVATE_COMPARISON_SCOPE(){return flags.release;},get STUDIO_PRIVATE_CORRECTED_COMPARISON_SCOPE(){return scopes.CORRECTED_COMPARISON_SCOPE_HASH;}};
+ const flags={authenticated:true,release:COMPARISON_SCOPE_HASH,status:'completed_requires_review',live:true,correctiveApproved:true,correctiveRelease:scopes.CORRECTED_COMPARISON_SCOPE_HASH,familyReady:true,currentPolicyHash:scopes.currentComparisonPromptPolicyHash()},calls={auth:0,db:0,run:0,read:0};
+ const env={get STUDIO_PRIVATE_COMPARISON_SCOPE(){return flags.release;},get STUDIO_PRIVATE_CORRECTED_COMPARISON_SCOPE(){return flags.correctiveRelease;}};
  const modules:Record<string,unknown>={
   '../../../lib/auth':{allowedOrigin:(r:Request)=>allowedOrigin(r,origin),response},
   '../../../lib/owner-password':{passwordOwnerAuthenticated:async()=>{calls.auth++;return flags.authenticated;}},
@@ -21,8 +21,8 @@ function harness(){
   '../../../lib/providers':{liveReady:()=>flags.live},
   '../../../lib/hosted':{hostedEnvironment:()=>true,hostedOwnerDraftReady:()=>flags.live},
   '../../../lib/private-comparison-policy':{COMPARISON_SCOPE_HASH,validComparisonRequest},
-  '../../../lib/private-comparison-scopes':scopes,
-  '../../../lib/private-comparison':{comparisonSnapshot:async()=>{calls.read++;return {history:[]};},runPrivateComparison:async(_db:unknown,_input:unknown,options:any)=>{calls.run++;assert.equal(options.ready(),true);return {status:flags.status,steps:6};}}
+  '../../../lib/private-comparison-scopes':{...scopes,currentComparisonPromptPolicyHash:()=>flags.currentPolicyHash,comparisonPolicyAuthorized:(policy:scopes.ComparisonPolicy,current?:string)=>(!policy.corrected||flags.correctiveApproved)&&scopes.comparisonPolicyAuthorized(policy,current)},
+  '../../../lib/private-comparison':{comparisonSnapshot:async()=>{calls.read++;return {history:[],admission_preflight:{eligible:flags.familyReady}};},runPrivateComparison:async(_db:unknown,_input:unknown,options:any)=>{calls.run++;assert.equal(options.ready(),true);return {status:flags.status,steps:6};}}
  };
  const exports:Record<string,any>={};
  const code=ts.transpileModule(readFileSync(new URL('../app/api/private-comparison/route.ts',import.meta.url),'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText;
@@ -72,7 +72,19 @@ test('read-only execution readiness reflects the existing exact release and runt
 });
 
 test('pending corrective scope is unexecutable even if its distinct gate accidentally matches',async()=>{
- const h=harness();const response=await h.post({expected_state_hash:'a'.repeat(64),scope_hash:scopes.CORRECTED_COMPARISON_SCOPE_HASH,acknowledged:true});assert.equal(response.status,403);assert.equal(h.calls.run,0);assert.equal(h.calls.db,0);
+ const h=harness();h.flags.correctiveApproved=false;const response=await h.post({expected_state_hash:'a'.repeat(64),scope_hash:scopes.CORRECTED_COMPARISON_SCOPE_HASH,acknowledged:true});assert.equal(response.status,403);assert.equal(h.calls.run,0);assert.equal(h.calls.db,0);
  const snapshot=await h.exports.GET(new Request(origin+'/api/private-comparison'));assert.equal((await snapshot.json()).execution_ready,false);assert.equal(h.calls.run,0);
  const unknown=await h.exports.GET(new Request(origin+'/api/private-comparison?scope_hash='+'f'.repeat(64)));assert.equal(unknown.status,400);
+});
+
+test('approved corrected GET requires exact new gate, current policy, family proof and live readiness',async()=>{
+ const h=harness(),get=async()=>(await (await h.exports.GET(new Request(origin+'/api/private-comparison'))).json()).execution_ready;
+ assert.equal(await get(),true);h.flags.correctiveRelease='';assert.equal(await get(),false);h.flags.correctiveRelease=scopes.CORRECTED_COMPARISON_SCOPE_HASH;
+ h.flags.currentPolicyHash='f'.repeat(64);assert.equal(await get(),false);h.flags.currentPolicyHash=scopes.currentComparisonPromptPolicyHash();
+ h.flags.familyReady=false;assert.equal(await get(),false);h.flags.familyReady=true;h.flags.live=false;assert.equal(await get(),false);assert.equal(h.calls.run,0);
+});
+test('approved corrected POST stays closed without its gate, then forwards only an exact deliberate request',async()=>{
+ const h=harness(),input={expected_state_hash:'a'.repeat(64),scope_hash:scopes.CORRECTED_COMPARISON_SCOPE_HASH,acknowledged:true};
+ h.flags.correctiveRelease='';assert.equal((await h.post(input)).status,403);assert.equal(h.calls.db,0);assert.equal(h.calls.run,0);
+ h.flags.correctiveRelease=scopes.CORRECTED_COMPARISON_SCOPE_HASH;assert.equal((await h.post(input)).status,200);assert.equal(h.calls.run,1);
 });
