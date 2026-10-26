@@ -27,11 +27,12 @@ test('actual progress-note Writer and Adapter retain useful LinkedIn guidance wi
   assert.match(prompt,/Never write its actions or feelings as the owner’s experience/);
   assert.match(prompt,/suggested reader actions from factual claims/);
   assert.match(prompt,/not a claim that it was performed, tested, or experienced by the owner/);
-  assert.match(prompt,/120–180-word shortform post/);
+  assert.match(prompt,/900–1300 characters/);
+  assert.doesNotMatch(prompt,/120–180-word/);
   const longform=buildDraftPrompt({...task(checkpoint),content_brief:{...task(checkpoint).content_brief,kind:'longform'}},source,outputs.slice(0,checkpoint));
   assert.doesNotMatch(longform,/120–180/);
-  assert.match(longform,/longform means a structured deeper piece using only supplied evidence/);
-  assert.match(longform,/Follow the active format guidance; do not pad the story beyond its evidence/);
+  assert.match(longform,/LinkedIn shortform\/longform labels change depth, not the owner character target/);
+  assert.match(longform,/Follow the owner character target; do not pad the story beyond its evidence/);
   assert.match(longform,/ONE supported choice or method/);
   assert(longform.includes(source.text));
   assert.match(longform,/Never write its actions or feelings as the owner’s experience/);
@@ -80,8 +81,10 @@ test('Critic still sees exact current artifacts and current index; format accoun
  assert.match(prompt,/1200 output-token cap/);
  for(let checkpoint=0;checkpoint<6;checkpoint++)assert(Buffer.byteLength(render(checkpoint))+providerResponseFormatBytes('openai',checkpoint===5?{artifact:'critic'}:undefined)<48000);
  const q=evidenceQuality(fixture.outputs,source,[],NEW_PLATFORM_POLICY);
- assert.equal(q.flags.filter(x=>x.kind==='hard').length,20);
- assert.equal(q.flags.filter(x=>x.kind==='wording_review').length,9);
+ // Exact PR50 baseline already has 18 hard + 11 wording holds; no guard is removed.
+ assert.equal(q.flags.filter(x=>x.kind==='hard').length,18);
+ assert.equal(q.flags.filter(x=>x.kind==='wording_review').length,11);
+ assert.equal(hash(JSON.stringify(q.flags.map(({id,kind,role})=>({id,kind,role})))),'a502b84e8c2359c6f16c1a09f85257f2b54abb06afaa1adcf07c3b7855d8b146');
  assert.equal(q.critic.valid,false);
  assert.equal(q.editorial.status,'editorial_review_required');
 });

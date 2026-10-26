@@ -1,3 +1,4 @@
+import {ownerMessageContext,saveOwnerMessageContext,type OwnerContextInput} from './owner-message-context';
 import {noteStageIssue} from './note-fact-selection';
 import {DRAFT_PROMPT_PREPARED,DRAFT_OUTPUT_RECORDED,assertPromptMetadata,type DraftPromptMetadata} from './draft-run-receipt';
 import {agentContributions} from './agent-contributions';
@@ -62,7 +63,7 @@ export class Store{
       const bundle=latest?.bundle||data.outputs.filter((output:Output)=>output.task_id===task.id);
       const source=data.sources.find((item:Source)=>item.id===task.source_id);
       const token=latest?"revision:"+latest.id+":"+latest.version:"original:"+hash(bundle.map((item:Artifact)=>item.hash).join("|"));
-      const quality=evidenceQuality(bundle,source||{text:"",hash:"",cleared:false},evidenceRows.filter(row=>row.task_id===task.id),taskPlatformPolicy(task),token);
+      const quality=evidenceQuality(bundle,source||{text:"",hash:"",cleared:false},evidenceRows.filter(row=>row.task_id===task.id),taskPlatformPolicy(task),token,ownerMessageContext(task,source||{text:"",hash:"",cleared:false},evidenceRows.filter(row=>row.task_id===task.id)));
       const receipts=evidenceReceipts.filter((row:any)=>row.task_id===task.id);
       const approvalCurrent=!quality.editorial.blocking&&!quality.flags.length&&receipts.some((row:any)=>row.binding===quality.binding&&row.review_token===token&&row.evidence_version===(quality.evidence_version||""));
       return {contributions:agentContributions(task,data.tasks,data.outputs,data.ledger,data.events,history,bundle,source),variants:platformVariants(bundle.find((item:Artifact)=>item.role==="Platform Adapter"),taskPlatformPolicy(task)),platform_policy:taskPlatformPolicy(task)||null,task_id:task.id,is_agent_revision:false,pending_agent_revision:data.tasks.find((child:Task)=>child.revision_parent_task_id===task.id&&["queued","running","blocked"].includes(child.status))||null,agent_revision_jobs:data.tasks.filter((child:Task)=>child.revision_parent_task_id===task.id),token:latest?"revision:"+latest.id+":"+latest.version:"original:"+hash(bundle.map((item:Artifact)=>item.hash).join("|")),latest_revision:latest?.id||null,original_bundle:data.outputs.filter((output:Output)=>output.task_id===task.id),original_approval:data.approvals.find((item:any)=>item.task_id===task.id)||null,bundle,quality,approval:(latest?revisionApprovals.find((item:any)=>item.revision_id===latest.id):data.approvals.find((item:any)=>item.task_id===task.id))&&approvalCurrent?(latest?revisionApprovals.find((item:any)=>item.revision_id===latest.id):data.approvals.find((item:any)=>item.task_id===task.id))||null:null,history:history.map((item:any)=>({...item,approval:revisionApprovals.find((approval:any)=>approval.revision_id===item.id)||null}))};
@@ -304,6 +305,13 @@ export class Store{
       const context=await this.revisionContext(tx,id,expected);
       await assertNoPendingAgentRevision(tx,id);
       return saveEvidenceDecision(tx,id,context.bundle,context.source,input);
+    });
+  }
+  async recordOwnerMessageContext(input:OwnerContextInput){
+    return this.db.transaction(async tx=>{
+      const context=await this.revisionContext(tx,input.task,input.expected);
+      await assertNoPendingAgentRevision(tx,input.task);
+      return saveOwnerMessageContext(tx,context.task,context.source,context.token,input);
     });
   }
   async reviewAssistantEvidence(input:AssistantEvidenceInput){

@@ -1,0 +1,110 @@
+import test,{before,after,beforeEach} from 'node:test';
+import assert from 'node:assert/strict';
+import {readFileSync} from 'node:fs';
+import {randomUUID} from 'node:crypto';
+import {embedded,type Database} from '../lib/db';
+import {hash,type Source,type RuntimeConfig} from '../lib/domain';
+import {Store} from '../lib/store';
+import {SourceIntake} from '../lib/sources';
+import {canonicalNoteArtifacts} from './canonical-note-helpers';
+import {newTaskPlatformBrief,NEW_PLATFORM_POLICY} from '../lib/platform-policy';
+import {criticCitationIndex,evidenceQuality,ASSISTANT_EVIDENCE_POLICY} from '../lib/evidence-review';
+import {ownerMessageContext,exactOwnerContextClaim,validOwnerContextInput,type OwnerContextInput} from '../lib/owner-message-context';
+import {OWNER_MESSAGE_CONTEXT_SCOPE as scope,OWNER_MESSAGE_CONTEXT_POLICY,OWNER_MESSAGE_CONTEXT_POLICY_HASH as policyHash,OWNER_MESSAGE_CONTEXT_STATEMENT as statement} from '../lib/owner-message-context-policy';
+import {bindScopedComparisonFixture} from './private-comparison-adoption-fixture';
+import {COMPARISON_PRICING,COMPARISON_TARGET} from '../lib/private-comparison-policy';
+import {previewApprovalPlan,approveApprovalPlan} from '../lib/approval-plan';
+import type {PublishingRuntime} from '../lib/publishing';
+import {POST} from '../app/api/studio/[action]/route';
+import {provisionOwner,handleOwnerAuth} from '../lib/owner-password';
+const fixture=JSON.parse(readFileSync(new URL('./fixtures/database-note-draft-2026-10-25.json',import.meta.url),'utf8'));
+let db:Database;before(async()=>{db=await embedded();});after(async()=>{await db.close();});beforeEach(async()=>{await db.query('TRUNCATE sources,events,budget_months,runtime,studio_auth_user CASCADE');});
+async function seed(options:{clean?:boolean;scoped?:boolean;writer?:string}={}){
+ const intake=new SourceIntake(db),text=readFileSync(new URL('./fixtures/private-comparison-source.txt',import.meta.url),'utf8'),staged=await intake.stage({text,category:'project-note',reported_date:'2026-10-25'});await db.query('UPDATE sources SET id=$1 WHERE id=$2',[scope.source_id,staged.id]);
+ let source=options.scoped?(await db.query<Source>('SELECT * FROM sources WHERE id=$1',[scope.source_id]))[0]:await intake.clear(scope.source_id,staged.hash,true);
+ await db.query("INSERT INTO tasks(id,source_id,source_hash,status,checkpoint,content_brief) VALUES($1,$2,$3,'review',6,$4)",[scope.task_id,source.id,source.hash,JSON.stringify({...newTaskPlatformBrief(),kind:'shortform'})]);
+ const artifacts=canonicalNoteArtifacts(source,fixture.outputs),publicText=options.writer??(options.clean?source.text.split('\n').find(s=>s.startsWith('- Updated source intake'))!.slice(2):statement);
+ artifacts[3]={role:'Writer',text:publicText,hash:hash(publicText)};artifacts[4]={role:'Platform Adapter',text:'### LinkedIn\n'+publicText,hash:hash('### LinkedIn\n'+publicText)};
+ const index=criticCitationIndex(artifacts.slice(0,5),source),critique=JSON.stringify({schema:2,source_hash:source.hash,index_hash:index.index_hash,'Unsupported claims:':'Compare current assertions against their bound evidence.','Evidence needed:':'Source comparisons remain required; no independent verification.','Proposed advice:':'Review the exact final post separately.',evidence:[]});artifacts[5]={role:'Critic',text:critique,hash:hash(critique)};
+ for(const [n,a] of artifacts.entries())await db.query('INSERT INTO outputs(id,task_id,role,text,hash,created) VALUES($1,$2,$3,$4,$5,$6)',[randomUUID(),scope.task_id,a.role,a.text,a.hash,new Date(Date.UTC(2026,9,25,0,0,n)).toISOString()]);
+ await db.query("INSERT INTO calendar_entries(id,planned_date,kind,intended_post,draft_due,review_due,source_id,task_id,platform_schedule) VALUES($1,'2026-11-01','shortform','2026-11-01T16:30:00Z','2026-10-26T12:00:00Z','2026-10-30T16:30:00Z',$2,$3,$4)",[COMPARISON_TARGET.calendar_id,scope.source_id,scope.task_id,JSON.stringify({platform_policy:NEW_PLATFORM_POLICY,LinkedIn:{intended_post:'2026-11-01T16:30:00Z',draft_due:'2026-10-26T12:00:00Z',review_due:'2026-10-30T16:30:00Z'}})]);
+ const config:RuntimeConfig={owner_cleared_sources_authorized:true,credential_use_authorized:true,security_tests_passed:true,pricing_verified_date:new Date().toISOString().slice(0,10),fallback_authorized:false,openai:COMPARISON_PRICING};const scoped=options.scoped?await bindScopedComparisonFixture(db,config,source):null;if(scoped)source=scoped.source;
+ const store=new Store(db),review=async()=>(await store.snapshot()).reviews.find((r:any)=>r.task_id===scope.task_id),r=await review();
+ const input:OwnerContextInput={task:scope.task_id,expected:r.token,policy_hash:policyHash,expected_context_version:null,decision:'attach',acknowledged:true};
+ const attach=async()=>{const r=await review();return store.recordOwnerMessageContext({...input,expected:r.token,expected_context_version:r.quality.owner_message_context.version});};
+ const compare=async()=>{const r=await review();for(const item of r.quality.findings.filter((f:any)=>f.evidence_source==='owner_message_context'&&!f.resolution))await store.reviewAssistantEvidence({task:scope.task_id,expected:r.token,binding:r.quality.binding,finding_id:item.id,decision:'accept',reason:'The entire sentence is the owner’s exact self-report, not an independently verified implementation or technical outcome.',source_span:{start:0,end:statement.length},source_quote:statement,acknowledged:true});};
+ return {store,source,review,input,attach,compare,scoped,artifacts};
+}
+async function protectedState(){const result:Record<string,unknown>={};for(const table of ['sources','tasks','runtime','budget_months','calendar_settings','outputs','content_revisions','approvals','revision_approvals','evidence_approval_receipts','publishing_outbox','publishing_approvals','github_source_policies','github_source_grants','source_provenance','ledger','calendar_entries'])result[table]=await db.query('SELECT * FROM '+table);return JSON.stringify(result);}
+async function task(){return (await db.query<any>('SELECT * FROM tasks WHERE id=$1',[scope.task_id]))[0];}
+async function contextRows(){return db.query<any>('SELECT * FROM evidence_decisions WHERE task_id=$1 ORDER BY sequence',[scope.task_id]);}
+
+test('distinct immutable context receipt is truthful, task/source bound and not an owner review or fact acceptance',async()=>{
+ const f=await seed(),r=await f.review();assert(r.quality.flags.some((x:any)=>x.kind==='hard'&&x.claim===statement));assert.equal(r.quality.owner_message_context.status,'unattached');const before=await protectedState();await f.attach();assert.equal(await protectedState(),before);
+ const rows=await contextRows();assert.equal(rows.length,1);assert.equal(rows[0].actor,'assistant');assert.equal(rows[0].policy_version,OWNER_MESSAGE_CONTEXT_POLICY);assert.equal(rows[0].context.origin,'owner_self_report');assert.equal(rows[0].context.imported_by,'assistant');assert.equal(rows[0].evidence.message_quote,scope.message_quote);assert.equal(rows[0].context.message_reference,scope.message_reference);assert.equal(rows[0].context.authorization_reference,scope.authorization_reference);
+ const active=await f.review();assert.equal(active.quality.owner_message_context.status,'active');assert.notEqual(active.quality.binding,r.quality.binding);assert.equal(active.quality.flags.length,2);assert(active.quality.flags.every((x:any)=>x.kind==='wording_review'&&x.evidence_source==='owner_message_context'));assert.equal(active.quality.evidence_version,null);assert.equal(active.approval,null);
+ await assert.rejects(db.query("UPDATE evidence_decisions SET actor='owner'"),/immutable/);await assert.rejects(db.query('DELETE FROM evidence_decisions'),/immutable/);
+ // Old readers still ignore this distinct policy; it cannot masquerade as an acceptance.
+ assert(evidenceQuality(active.bundle,f.source,rows,NEW_PLATFORM_POLICY,active.token).flags.some(x=>x.kind==='hard'));
+});
+test('only the complete verbatim owner statement is supported, not substrings, paraphrases or compound new facts',async()=>{
+ const f=await seed();await f.attach();const r=await f.review(),context=r.quality.owner_message_context;
+ for(const claim of [statement,statement.replaceAll("'",'’'),statement.replaceAll(' ','  ')])assert(exactOwnerContextClaim(claim,context));
+ for(const change of [{policy_hash:hash('other')},{statement:'I saved 80%.'},{source_hash:hash('other')},{message_reference:'fake'},{authorization_reference:'fake'},{quote:'changed'}])assert.equal(exactOwnerContextClaim(statement,{...context,...change}),false);
+ for(const claim of ["I'm building AI Journey Studio with AI agents.",statement.slice(0,-1)+' and saved 80%.','Quick context: '+statement,statement.replace('AI Journey Studio','Another Product'),statement.replace('building','built'),statement.replace('only go out once I approve them','go out without approval')])assert.equal(exactOwnerContextClaim(claim,context),false);
+ const extra='\nThe app has 500 users.',bundle=r.bundle.map((a:any)=>a.role==='Writer'?{...a,text:a.text+extra,hash:hash(a.text+extra)}:a),q=evidenceQuality(bundle,f.source,await contextRows(),NEW_PLATFORM_POLICY,r.token,context);assert(q.flags.some(x=>x.kind==='hard'&&x.claim.includes('500')));
+});
+test('two explicit assistant comparisons resolve context wording with exact source kind and receipt hashes only',async()=>{
+ const f=await seed();await f.attach();const r=await f.review(),item=r.quality.findings.find((x:any)=>x.evidence_source==='owner_message_context');
+ const bad={task:scope.task_id,expected:r.token,binding:r.quality.binding,finding_id:item.id,decision:'accept' as const,reason:'Compare complete owner self-report.',source_span:{start:0,end:statement.length},source_quote:statement,acknowledged:true as const};
+ for(const change of [{source_quote:scope.message_quote},{source_quote:f.source.text.slice(0,statement.length)},{source_span:{start:0,end:20}},{binding:hash('stale')},{expected:'original:'+hash('stale')}])await assert.rejects(f.store.reviewAssistantEvidence({...bad,...change}));
+ await assert.rejects(f.store.reviewEvidence(scope.task_id,r.token,bad),/separate assistant context/);
+ await f.compare();const ready=await f.review();assert.equal(ready.quality.flags.length,0);assert.equal(ready.quality.critic.valid,true);assert.equal(ready.approval,null);const accepted=(await contextRows()).filter(x=>x.policy_version===ASSISTANT_EVIDENCE_POLICY);assert.equal(accepted.length,2);for(const row of accepted){assert.equal(row.context.owner_message_context_version,r.quality.owner_message_context.version);assert.equal(row.context.owner_message_statement_hash,hash(statement));assert.equal(row.evidence.source_quote,statement);}
+});
+test('revocation and reattachment never resurrect previous comparisons or final approval; immutable old rows remain',async()=>{
+ const f=await seed();await f.attach();await f.compare();let r=await f.review();await f.store.approve(scope.task_id,r.token.slice(9));const approvals=await db.query('SELECT * FROM approvals'),receipts=await db.query('SELECT * FROM evidence_approval_receipts');assert((await f.review()).approval);
+ const oldVersion=r.quality.owner_message_context.version,oldBinding=r.quality.binding;await f.store.recordOwnerMessageContext({...f.input,expected:r.token,expected_context_version:oldVersion,decision:'revoke'});r=await f.review();assert.equal(r.quality.owner_message_context.status,'revoked');assert.notEqual(r.quality.owner_message_context.version,oldVersion);assert.notEqual(r.quality.binding,oldBinding);assert.equal(r.approval,null);assert.equal((await task()).status,'review');assert(r.quality.flags.some((x:any)=>x.kind==='hard'));
+ await f.attach();r=await f.review();assert.notEqual(r.quality.owner_message_context.version,oldVersion);assert.notEqual(r.quality.binding,oldBinding);assert.equal(r.quality.flags.length,2);assert.equal(r.approval,null);await f.compare();assert.equal((await f.review()).quality.flags.length,0);assert.equal((await f.review()).approval,null);assert.deepEqual(await db.query('SELECT * FROM approvals'),approvals);assert.deepEqual(await db.query('SELECT * FROM evidence_approval_receipts'),receipts);
+});
+test('owner withdrawal of contextual comparison dominates later assistant attempts in the same binding',async()=>{
+ const f=await seed();await f.attach();await f.compare();const r=await f.review(),item=r.quality.findings.find((x:any)=>x.evidence_source==='owner_message_context');await f.store.reviewEvidence(scope.task_id,r.token,{binding:r.quality.binding,finding_id:item.id,decision:'withdraw',reason:'Withdraw this assistant comparison.',source_span:{start:0,end:statement.length},source_quote:statement,acknowledged:true});assert((await f.review()).quality.flags.some((x:any)=>x.id===item.id));await assert.rejects(f.compare(),/owner decision/);
+});
+test('same-byte new revision invalidates comparison tokens without silently removing the scoped context receipt',async()=>{
+ const f=await seed();await f.attach();await f.compare();const r=await f.review();await f.store.revise(scope.task_id,r.token,'New exact review version; do not inherit assistant comparisons.');const after=await f.review();assert.equal(after.quality.owner_message_context.version,r.quality.owner_message_context.version);assert.notEqual(after.token,r.token);assert.equal(after.quality.flags.length,2);
+});
+test('strict request shape, actor/ref/quote spoof, stale review/context and duplicate concurrent attach fail safely',async()=>{
+ const f=await seed();for(const bad of [{...f.input,actor:'owner'},{...f.input,quote:statement},{...f.input,message_reference:'fake'},{...f.input,policy_hash:hash('other')},{...f.input,expected_context_version:undefined},{...f.input,acknowledged:false}])assert.equal(validOwnerContextInput(bad),false);
+ await assert.rejects(f.store.recordOwnerMessageContext({...f.input,expected:'original:'+hash('stale')}));const results=await Promise.allSettled([f.store.recordOwnerMessageContext(f.input),f.store.recordOwnerMessageContext(f.input)]);assert.equal(results.filter(x=>x.status==='fulfilled').length,1);assert.equal((await contextRows()).length,1);await assert.rejects(f.store.recordOwnerMessageContext(f.input),/Stale owner-message/);
+ const r=await f.review();assert.equal((await f.store.recordOwnerMessageContext({...f.input,expected_context_version:r.quality.owner_message_context.version})).status,'already_attached');assert.equal((await contextRows()).length,1);
+});
+test('wrong task/source/project/message/policy, corrupt chain and quote tamper fail closed',async()=>{
+ const f=await seed();await f.attach();const rows=await contextRows(),t=await task();
+ for(const changes of [{actor:'owner'},{policy_version:ASSISTANT_EVIDENCE_POLICY},{context:{...rows[0].context,project:'Other App'}},{context:{...rows[0].context,message_reference:'fake'}},{context:{...rows[0].context,authorization_reference:'fake'}},{context:{...rows[0].context,previous_version:hash('lost')}},{context:{...rows[0].context,statement_hash:hash('wrong')}},{evidence:{...rows[0].evidence,source_quote:'I built a different product.'}},{evidence:{...rows[0].evidence,extra:'payload'}}])assert.equal(ownerMessageContext(t,f.source,[{...rows[0],...changes}]).status,'invalid');
+ for(const changed of [{...t,id:randomUUID()},{...t,source_hash:hash('other')},{...t,source_id:randomUUID()},{...t,revision_parent_task_id:randomUUID()}])assert.equal(ownerMessageContext(changed,f.source,rows).status,'invalid');
+ for(const source of [{...f.source,id:randomUUID()},{...f.source,hash:hash('other')},{...f.source,text:f.source.text+'\nchanged'},{...f.source,revoked_at:'now'}])assert.equal(ownerMessageContext(t,source,rows).status,'invalid');assert.equal(ownerMessageContext(t,f.source,[rows[0],rows[0]]).status,'invalid');
+ const invalid=ownerMessageContext(t,f.source,[{...rows[0],actor:'owner'}]),r=await f.review();assert(evidenceQuality(r.bundle,f.source,rows,NEW_PLATFORM_POLICY,r.token,invalid).flags.some(x=>x.claim==='Owner-message context integrity failed'));
+});
+test('context never waives invalid Critic, editorial or privacy holds',async()=>{
+ const f=await seed();await f.attach();const before=await contextRows();
+ const r=await f.review(),critic=r.bundle.find((a:any)=>a.role==='Critic').text;
+ for(const text of ['{"schema":2}', 'EDITORIAL HOLD: needs_revision\n'+critic]){
+  await db.query("UPDATE outputs SET text=$1,hash=$2 WHERE task_id=$3 AND role='Critic'",[text,hash(text),scope.task_id]);
+  await assert.rejects(f.compare());assert.equal((await contextRows()).length,before.length);assert((await f.review()).quality.flags.length);
+ }
+ await db.query("UPDATE outputs SET text=$1,hash=$2 WHERE task_id=$3 AND role='Critic'",[critic,hash(critic),scope.task_id]);
+ const current=await f.review(),item=current.quality.findings.find((x:any)=>x.evidence_source==='owner_message_context');await assert.rejects(f.store.reviewAssistantEvidence({task:scope.task_id,expected:current.token,binding:current.quality.binding,finding_id:item.id,decision:'accept',reason:'password=do-not-save',source_span:{start:0,end:statement.length},source_quote:statement,acknowledged:true}),/Excluded/);assert.equal((await contextRows()).length,before.length);
+});
+test('source revocation and pending revision block context writes',async()=>{
+ const f=await seed();await db.query("INSERT INTO tasks(id,source_id,source_hash,status,revision_parent_task_id,origin_key,revision_base_token,revision_note) VALUES($1,$2,$3,'queued',$4,'context-test-revision',$5,'Review')",[randomUUID(),f.source.id,f.source.hash,scope.task_id,f.input.expected]);await assert.rejects(f.attach(),/pending/);await db.query("UPDATE tasks SET status='cancelled' WHERE revision_parent_task_id=$1",[scope.task_id]);await new SourceIntake(db).revoke(f.source.id,f.source.hash);await assert.rejects(f.attach(),/Source invalidated/);assert.equal((await contextRows()).length,0);
+});
+test('authentic scoped Github grant works; policy revocation removes contextual support without changing source bytes',async()=>{
+ const f=await seed({scoped:true}),original=await db.query('SELECT * FROM sources');await f.attach();await f.compare();assert.equal((await f.review()).quality.flags.length,0);await f.scoped!.policies.revoke(f.scoped!.policy.id,f.scoped!.policy.scope_hash,f.scoped!.session);const r=await f.review();assert(r.quality.flags.length);assert.equal(r.quality.owner_message_context.status,'invalid');await assert.rejects(f.attach(),/Source invalidated/);assert.deepEqual(await db.query('SELECT * FROM sources'),original);
+});
+test('context version changes final approval plan even when public text never used the owner statement',async()=>{
+ const f=await seed({clean:true});let calls=0;const runtime:PublishingRuntime={enabled:true,accounts:[{id:'linkedin-offline',platform:'LinkedIn',remote_id:'urn:li:person:offline',label:'Offline owner',enabled:true,verified:true,authorization_version:'offline-v1',scopes:['w_member_social']}],credential:async()=>{calls++;throw Error('No credential allowed');},fetch:async()=>{calls++;throw Error('No external request allowed');},now:()=>new Date('2026-10-26T00:00:00Z')};const r=await f.review();assert.equal(r.quality.flags.length,0);const before=await previewApprovalPlan(db,runtime,scope.task_id,r.token);await f.store.approve(scope.task_id,r.token.slice(9));assert((await f.review()).approval);await f.attach();assert.equal((await f.review()).approval,null);const after=await previewApprovalPlan(db,runtime,scope.task_id,r.token);assert.equal(after.text,before.text);assert.notEqual(after.quality_binding,before.quality_binding);assert.notEqual(after.version,before.version);await assert.rejects(approveApprovalPlan(db,runtime,{task_id:before.task_id,review_token:before.review_token,expected_plan:before.version,acknowledgement_version:before.acknowledgement_version,acknowledgement:before.acknowledgement,acknowledgement_hash:before.acknowledgement_hash,acknowledged:true}),/plan changed/);assert.equal(calls,0);assert.equal((await db.query('SELECT * FROM publishing_outbox')).length,0);
+});
+test('context route requires same-origin actual owner session and rejects caller-supplied origin or quote',async()=>{
+ const f=await seed(),origin='http://127.0.0.1:3201',secret='isolated-context-test-'+'x'.repeat(40),password='6728194035',globals=globalThis as typeof globalThis&{studioDb?:Promise<Database>};globals.studioDb=Promise.resolve(db);const saved={...process.env};Object.assign(process.env,{STUDIO_ORIGIN:origin,STUDIO_AUTH_SECRET:secret,STUDIO_RUNTIME_CONFIG:'{}',STUDIO_ACCESS_TOKEN:'isolated-worker-'+'y'.repeat(40),STUDIO_INTEGRATIONS_CONFIG:'{}'});delete process.env.VERCEL;
+ try{await provisionOwner(db,password,true);const login=await handleOwnerAuth(new Request(origin+'/api/auth/login',{method:'POST',headers:{Origin:origin,'Content-Type':'application/json'},body:JSON.stringify({password})}),'login',{STUDIO_ORIGIN:origin,STUDIO_AUTH_SECRET:secret},async()=>db);assert.equal(login.status,200);const cookie=login.headers.getSetCookie().map(v=>v.split(';')[0]).join('; ');const call=(body:unknown=f.input,session=cookie,from=origin)=>POST(new Request(origin+'/api/studio/owner-message-context',{method:'POST',headers:{Cookie:session,Origin:from,Authorization:'Bearer '+process.env.STUDIO_ACCESS_TOKEN,'Content-Type':'application/json'},body:JSON.stringify(body)}),{params:Promise.resolve({action:'owner-message-context'})});assert.equal((await call(f.input,'')).status,401);assert.equal((await call(f.input,cookie+'tamper')).status,401);assert.equal((await call(f.input,cookie,'https://other.example')).status,403);assert.equal((await call({...f.input,origin:'owner'})).status,400);assert.equal((await call({...f.input,quote:'fake'})).status,400);assert.equal((await call()).status,200);assert.equal((await contextRows())[0].actor,'assistant');assert.equal((await db.query('SELECT * FROM evidence_approval_receipts')).length,0);
+ }finally{delete globals.studioDb;for(const key of Object.keys(process.env))if(!(key in saved))delete process.env[key];Object.assign(process.env,saved);}
+});
