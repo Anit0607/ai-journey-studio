@@ -16,10 +16,10 @@ function modules(currentDigest:string,approved=false){
   if(loaded[name])return loaded[name];
   if(!['./private-comparison-scopes','./private-comparison-record','./private-comparison-predecessor','./private-comparison'].includes(name))return require(name.startsWith('./')?'../lib/'+name.slice(2):name);
   let source=readFileSync(new URL('../lib/'+name.slice(2)+'.ts',import.meta.url),'utf8');
-  if(name==='./private-comparison-scopes'&&approved){
-   const before="Object.freeze({status:'pending',consent_reference:null,prompt_policy_hash:'"+pinned+"'})";
-   assert.equal(source.split(before).length,2,'mock only the exact pending grant in isolated test code');
-   source=source.replace(before,"Object.freeze({status:'approved',consent_reference:'offline-test-only-not-live-consent',prompt_policy_hash:'"+pinned+"'})");
+  if(name==='./private-comparison-scopes'){
+   const before="Object.freeze({status:'approved',consent_reference:'Sentinel_5fe38455d5bc8191ad426a18b4a923a4',prompt_policy_hash:'"+pinned+"'})";
+   assert.equal(source.split(before).length,2,'mock only the exact reviewed grant in isolated test code');
+   source=source.replace(before,approved?"Object.freeze({status:'approved',consent_reference:'offline-test-only-not-live-consent',prompt_policy_hash:'"+pinned+"'})":"Object.freeze({status:'pending',consent_reference:null,prompt_policy_hash:'"+pinned+"'})");
   }
   const exports:Record<string,any>={};loaded[name]=exports;
   runInNewContext(ts.transpileModule(source,{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText,{exports,require:load,Buffer,Date,setTimeout,clearTimeout});
@@ -42,9 +42,9 @@ function completedFixture(scopes:any){
  const prior={id:scopes.COMPARISON_PREDECESSOR.run_id,task_id:COMPARISON_TARGET.task_id,provider:'openai',model:COMPARISON_PRICING.model,pricing:COMPARISON_PRICING,status:'settled',completion_status:'blocked',reserved:850000,estimated:85324,input_tokens:stages.reduce((n,s)=>n+s.input,0),output_tokens:stages.reduce((n,s)=>n+s.output,0),role:null,checkpoint:null,requested_service_tier:'default',pricing_anomaly:false};
  return {id,events:[...original,...successor],ledger:[prior,{...prior,id,reserved:764676,completion_status:'completed_requires_review'}]};
 }
-test('pending production permission remains unexecutable and cannot validate corrected history',async()=>{
+test('isolated pending permission remains unexecutable and cannot validate corrected history',async()=>{
  const {scopes,record,runtime}=modules(hash('later prompt code')),policy=scopes.comparisonPolicy(scopes.CORRECTED_COMPARISON_SCOPE_HASH),f=completedFixture(scopes);
- assert.equal(productionScopes.CORRECTED_COMPARISON_AUTHORIZATION.status,'pending');assert.equal(productionScopes.CORRECTED_COMPARISON_AUTHORIZATION.consent_reference,null);
+ assert.equal(productionScopes.CORRECTED_COMPARISON_AUTHORIZATION.status,'approved');assert.equal(productionScopes.CORRECTED_COMPARISON_AUTHORIZATION.consent_reference,'Sentinel_5fe38455d5bc8191ad426a18b4a923a4');
  assert.equal(scopes.comparisonPolicyRecordedPermission(policy),false);assert.equal(scopes.comparisonPolicyAuthorized(policy,pinned),false);
  assert.throws(()=>record().verifiedComparisonRun(f.events,f.ledger,f.id));
  let calls=0;const unavailable=()=>{calls++;throw Error('must remain offline');};

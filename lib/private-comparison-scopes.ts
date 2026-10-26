@@ -3,11 +3,11 @@ import {hash} from './domain';
 import {COMPARISON_SCOPE,COMPARISON_SCOPE_HASH,COMPARISON_CAP} from './private-comparison-policy';
 /** Closed, finite registry. Never mutate the original one-shot policy or historical receipts. */
 export const COMPARISON_PREDECESSOR=Object.freeze({run_id:'7d849360-6740-4cc6-bf14-63db7fb2d694',scope_hash:'ed2bf1903a48644cccff06e8c4ae24cd1716c30a969229cdf5a16723be27a0ce',finished_event_id:'919d9139-55ac-4c63-8a95-3c5a02be602f',state_hash:'0f112a9dc532fe253f1ebe9bf238ac85cbf236476b803a8396a81dfe9a7127e9',config_hash:'25cf1f9326e6b3a93ec7747f6072c7bf0851fef0da02e654b8dffc053fed5ea7',status:'blocked',steps:6,spent_microdollars:85324,stage_hashes:Object.freeze(['c08a7d7c259963eab09b6ed0b8f3b1dd2161dc522ee4afa807fa7794348320e0','cce7adb0bc001526f66f115f96a88b9c6929c87252e57fcc92886b001fb0f384','6669ad85efcd1e2f5e1b81415b03a17cab1025d0c505ce79f7267f2f431ebb96','bc0e1271b9c777fb5dc4ebf2b6be6211b3b9a3e5fd1d8a7a3344451d65e71e34','4cc2ec64651262ece38904e569d127419561dff285a408b07d5398773fb4e4f8','d8d3b129306514339e4df66fe1e8de41b874cbb50c3c6a386627442af699347b'])});
-// Deliberately unexecutable candidate. Only actual new owner consent and the final
-// independently verified integrated prompt-policy manifest authorize a future release.
+// Owner approved one corrected comparison on 2026-10-26; the reference below
+// binds that affirmative reply, not a retry or any publication permission.
 // This exact reviewed digest is immutable scope data, not a dynamic current-policy alias.
 // A factual pinned digest is not consent; pending/null consent remains fail-closed.
-export const CORRECTED_COMPARISON_AUTHORIZATION:{status:'pending'|'approved';consent_reference:string|null;prompt_policy_hash:string|null}=Object.freeze({status:'pending',consent_reference:null,prompt_policy_hash:'a92c37461e9d2b3d904ceb831cd498aebb7a9863a534865d94d56aac474dbf0a'});
+export const CORRECTED_COMPARISON_AUTHORIZATION:{status:'pending'|'approved';consent_reference:string|null;prompt_policy_hash:string|null}=Object.freeze({status:'approved',consent_reference:'Sentinel_5fe38455d5bc8191ad426a18b4a923a4',prompt_policy_hash:'a92c37461e9d2b3d904ceb831cd498aebb7a9863a534865d94d56aac474dbf0a'});
 export const CORRECTED_COMPARISON_CAP=764676;
 // Successor-only conservative bounds; original one-shot limits are immutable.
 export const CORRECTED_COMPARISON_INPUT_BOUNDS=Object.freeze([20000,20000,28000,30000,35000,65000]);

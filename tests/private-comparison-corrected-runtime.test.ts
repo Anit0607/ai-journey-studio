@@ -8,7 +8,7 @@ import * as domain from '../lib/domain';
 import * as scopes from '../lib/private-comparison-scopes';
 import {COMPARISON_PRICING} from '../lib/private-comparison-policy';
 const require=createRequire(import.meta.url),clone=<T>(v:T):T=>JSON.parse(JSON.stringify(v));
-/** Unit-only authorization/config-digest mocks. Production constants stay pending.
+/** Unit-only authorization/config-digest mocks. Production authorization is not mutated by these tests.
  * Full historical task/source/calendar/original data reproduces the real state
  * digest without a state-hash stub. It proves historical binding, not fresh live
  * readiness: the authenticated read-only preflight must establish that later. */
