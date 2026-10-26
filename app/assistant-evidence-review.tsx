@@ -1,15 +1,18 @@
 'use client';
 import {useRef,useState} from 'react';
 import type {Decision,Finding,Span} from '../lib/evidence-review';
+import type {OwnerMessageContextView} from './owner-message-context-panel';
 type Sentence=Span&{text:string};
-type Props={item:Finding&{resolution:Decision|null};quality:{binding:string;source_text:string;source_sentences?:Sentence[]};task:string;token:string;busy:boolean;action:(path:string,body:unknown)=>Promise<unknown>};
+type Props={item:Finding&{resolution:Decision|null;evidence_source?:'owner_message_context'};quality:{binding:string;source_text:string;source_sentences?:Sentence[];owner_message_context?:OwnerMessageContextView};task:string;token:string;busy:boolean;action:(path:string,body:unknown)=>Promise<unknown>};
 /** Deliberate delegated comparison, never an owner's personal testimony. */
 export default function AssistantEvidenceReview({item,quality,task,token,busy,action}:Props){
  const [start,setStart]=useState(''),[end,setEnd]=useState(''),[reason,setReason]=useState(''),[ack,setAck]=useState(false),[submitted,setSubmitted]=useState(false),[message,setMessage]=useState('');const lock=useRef(false);
  if(item.kind!=='wording_review'||item.category||item.resolution?.actor==='owner')return null;
- const sentences=quality.source_sentences||[],first=sentences[Number(start)],last=sentences[Number(end)];
+ const contextual=item.evidence_source==='owner_message_context',context=quality.owner_message_context;
+ if(contextual&&(!context?.eligible||context.status!=='active'||!context.statement||!context.source_hash))return <p role="status">The owner-message context is not current. Refresh its receipt before comparing this wording.</p>;
+ const evidenceText=contextual?context!.statement!:quality.source_text,sentences=(contextual?context!.source_sentences:quality.source_sentences)||[],first=sentences[Number(start)],last=sentences[Number(end)];
  const span=start!==''&&end!==''&&Number(end)>=Number(start)&&first&&last?{start:first.start,end:last.end}:null;
- const quote=span?quality.source_text.slice(span.start,span.end):'',withdraw=item.resolution?.actor==='assistant';
+ const quote=span?evidenceText.slice(span.start,span.end):'',withdraw=item.resolution?.actor==='assistant';
  async function submit(){
   if(lock.current||submitted||busy||!ack||!reason.trim()||(!withdraw&&(!span||!quote||quote.length>2000)))return;
   lock.current=true;setSubmitted(true);setAck(false);
@@ -19,6 +22,7 @@ export default function AssistantEvidenceReview({item,quality,task,token,busy,ac
  }
  return <section aria-label={'Assistant source comparison '+item.id}>
   <h4>Assistant source comparison</h4><p>{withdraw?'Assistant compared wording against cited source; not owner review or independent verification.':'An assistant comparison records wording against cited source; not owner review or independent verification.'} This cannot waive hard findings, invalid Critic evidence or editorial holds, and cannot approve, schedule or publish.</p>
+  {contextual&&<p>Evidence origin: owner self-report imported by the assistant, separate from the technical source note. This comparison cannot establish implementation details beyond the exact recorded statement.</p>}
   {!withdraw&&<><label>First complete source sentence<select style={{display:'block',width:'100%',maxWidth:'100%'}} aria-label={'Assistant first source sentence '+item.id} value={start} disabled={busy||submitted} onChange={e=>{setStart(e.target.value);setEnd(e.target.value);setAck(false);}}><option value="">Select exact evidence</option>{sentences.map((s,n)=><option key={s.start} value={String(n)}>{n+1}. {s.text}</option>)}</select></label>
   <label>Last complete source sentence<select style={{display:'block',width:'100%',maxWidth:'100%'}} aria-label={'Assistant last source sentence '+item.id} value={end} disabled={busy||submitted||start===''} onChange={e=>{setEnd(e.target.value);setAck(false);}}><option value="">Select ending sentence</option>{sentences.map((s,n)=>n>=Number(start)&&<option key={s.start} value={String(n)}>{n+1}. {s.text}</option>)}</select></label><blockquote>{quote||'No evidence selected.'}</blockquote>{span&&<small>Exact JavaScript UTF-16 source offsets {span.start}–{span.end}</small>}</>}
   <label>Assistant comparison reason<textarea style={{display:'block',width:'100%',maxWidth:'100%'}} aria-label={'Assistant comparison reason '+item.id} maxLength={600} value={reason} disabled={busy||submitted} onChange={e=>{setReason(e.target.value);setAck(false);}}/></label>

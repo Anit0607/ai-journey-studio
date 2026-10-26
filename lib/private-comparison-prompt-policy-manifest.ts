@@ -1,5 +1,6 @@
-/** Generated from canonical-LF source bytes. Verify freshness before release/activation.
- * Excludes this module and scope/consent data to avoid circular authorization hashes. */
+/** Generated from canonical UTF8-LF prompt and runtime evidence-policy source bytes.
+ * Excludes this module and immutable comparison scope/consent data.
+ * Hashing context policy does not grant provider transmission or a new model call. */
 export const COMPARISON_PROMPT_POLICY_FILES=Object.freeze([
   {
     "path": "lib/artifact-privacy.ts",
@@ -15,7 +16,7 @@ export const COMPARISON_PROMPT_POLICY_FILES=Object.freeze([
   },
   {
     "path": "lib/draft-prompt.ts",
-    "sha256": "651c916d2c694753b776ecda7a8238257eacd5c3c86e1a946b5d379b3d9aa3ef"
+    "sha256": "f390ac632f11a6490e560a259b7eb6dafc017fab6b62724b45f9be6a471306bf"
   },
   {
     "path": "lib/drafting-contract.ts",
@@ -31,7 +32,7 @@ export const COMPARISON_PROMPT_POLICY_FILES=Object.freeze([
   },
   {
     "path": "lib/evidence-review.ts",
-    "sha256": "8eb313575f0774802f065119be876d4d8e7fe98a532316571b01b49eec38c6d4"
+    "sha256": "75fdf4042ec9b3b169ec200e0d117d978a363a975a9906e95ad793c49ac8fa19"
   },
   {
     "path": "lib/grounding.ts",
@@ -42,12 +43,20 @@ export const COMPARISON_PROMPT_POLICY_FILES=Object.freeze([
     "sha256": "e8d954b147d99a453dfc3666adbb698f3e8c98d9a607582cd8830fb699ec50fa"
   },
   {
+    "path": "lib/owner-message-context-policy.ts",
+    "sha256": "3d378bf19339d76fda6822df6083871e7149aeabee45b568dd7a11ea007b6cc2"
+  },
+  {
+    "path": "lib/owner-message-context.ts",
+    "sha256": "0e4f463dc54848cebaa263759122c70694306716f4eb5a0ceaf30cb1991243e3"
+  },
+  {
     "path": "lib/owner-project-context.ts",
     "sha256": "bb2e3cf93a3c8f914980ce6564e04bdccd46d34cf69a58f4e595c1c84ecc75eb"
   },
   {
     "path": "lib/owner-writing-profile.ts",
-    "sha256": "d0a317779355a812820b85780a09654cf3d84b1797c2ed59b28cfcbe7213f737"
+    "sha256": "8478e7d316a82a341425c6eb20fceabb16189f1076b303a09386814b048033c5"
   },
   {
     "path": "lib/platform-policy.ts",
@@ -66,4 +75,4 @@ export const COMPARISON_PROMPT_POLICY_FILES=Object.freeze([
     "sha256": "fd779bfcd7d00308d2a477db4b131c3dd443dc01362ffce64803805235ca1908"
   }
 ]);
-export const COMPARISON_PROMPT_POLICY_HASH="a92c37461e9d2b3d904ceb831cd498aebb7a9863a534865d94d56aac474dbf0a";
+export const COMPARISON_PROMPT_POLICY_HASH="6d102692f5c59b64e25356dc7e8cd55c4a6da844570318a0221b70baecb1c0ec";

@@ -1,3 +1,4 @@
+import {ownerMessageContext,exactOwnerContextClaim,type OwnerMessageContext} from './owner-message-context';
 import {ownerProjectWording} from './owner-project-context';
 import {editorialReview,assertNoEditorialHold} from './editorial-review';
 import {taskPlatformPolicy,type PlatformPolicy} from "./platform-policy";
@@ -12,8 +13,8 @@ import type {Connection} from "./db";
 export const EVIDENCE_POLICY="evidence-review-v3-lossless-spans";
 export const ASSISTANT_EVIDENCE_POLICY="assistant-wording-comparison-v1";
 export type Span={start:number;end:number};
-export type Finding={category?:'structure';id:string;kind:"wording_review"|"hard";role:string;claim:string;reason:string;artifact_hash:string;span:Span};
-export type Decision={id:string;binding:string;finding_id:string;decision:"accept"|"withdraw";policy_version:string;actor:string;reason:string;evidence:{source_span:Span;source_quote:string};context:{source_hash:string;artifact_hash:string;bundle_hash:string;claim_span:Span;claim_text:string;reported_date?:string|null;review_token?:string;review_token_hash?:string;source_quote_hash?:string;source_span_hash?:string};created?:string};
+export type Finding={evidence_source?:'owner_message_context';category?:'structure';id:string;kind:"wording_review"|"hard";role:string;claim:string;reason:string;artifact_hash:string;span:Span};
+export type Decision={id:string;binding:string;finding_id:string;decision:"accept"|"withdraw";policy_version:string;actor:string;reason:string;evidence:{source_span:Span;source_quote:string};context:{source_hash:string;artifact_hash:string;bundle_hash:string;claim_span:Span;claim_text:string;reported_date?:string|null;review_token?:string;review_token_hash?:string;source_quote_hash?:string;source_span_hash?:string;owner_message_context_version?:string;owner_message_statement_hash?:string};created?:string};
 type EvidenceSource={text:string;hash:string;cleared?:boolean;clearance_id?:string|null;cleared_at?:unknown;revoked_at?:unknown;reported_date?:string};
 const plain=(text:string)=>text.trim().replace(/^(?:[-*+>]\s+|#{1,3}\s+)/,'').replace(/\*\*/g,'').replace(/^["“]|["”,]$/g,'').replace(/[.!]$/,'').replace(/\s+/g,' ').toLowerCase();
 function spans(text:string):Array<Span&{text:string}>{
@@ -124,7 +125,7 @@ function hardReason(claim:string,source:string,role?:string):string|null{
  }
  return null;
 }
-export function evidenceBinding(bundle:Artifact[],source:EvidenceSource,policy?:PlatformPolicy){return hash(JSON.stringify({policy:EVIDENCE_POLICY,source_hash:source.hash,reported_date:source.reported_date||null,clearance:source.clearance_id||"legacy",cleared_at:source.cleared_at?new Date(String(source.cleared_at)).toISOString():null,bundle:bundleVersion(bundle,source.hash),...(policy?{platform_policy:policy}:{})}));}
+export function evidenceBinding(bundle:Artifact[],source:EvidenceSource,policy?:PlatformPolicy,ownerContext?:OwnerMessageContext){return hash(JSON.stringify({policy:EVIDENCE_POLICY,source_hash:source.hash,reported_date:source.reported_date||null,clearance:source.clearance_id||"legacy",cleared_at:source.cleared_at?new Date(String(source.cleared_at)).toISOString():null,bundle:bundleVersion(bundle,source.hash),...(policy?{platform_policy:policy}:{}),...(ownerContext?.version?{owner_message_context_version:ownerContext.version}:{})}));}
 function finding(role:string,claim:string,reason:string,kind:Finding['kind'],artifact_hash:string,span:Span,category?:Finding['category']):Finding{return {id:hash(JSON.stringify({policy:EVIDENCE_POLICY,role,artifact_hash,span,claim,reason,kind,...(category?{category}:{} )})),role,claim,reason,kind,artifact_hash,span,...(category?{category}:{} )};}
 export function evidenceFindings(bundle:Artifact[],source:string,reportedDate?:string,policy?:PlatformPolicy):Finding[]{
  const legacy=bundleQuality(bundle,source,reportedDate,policy),out:Finding[]=[];
@@ -164,6 +165,13 @@ export function validateEvidence(finding:Finding,source:string,sourceSpan:Span,q
  const words=finding.claim.toLowerCase().match(/[a-z]{4,}/g)||[];
  if(!words.some(x=>quote.toLowerCase().includes(x)))throw Error("Select relevant source evidence");
 }
+function validateFindingEvidence(item:Finding,source:string,ownerContext:OwnerMessageContext|undefined,span:Span,quote:string){
+ if(item.evidence_source==='owner_message_context'){
+  if(!exactOwnerContextClaim(item.claim,ownerContext)||!ownerContext?.statement||span?.start!==0||span.end!==ownerContext.statement.length||quote!==ownerContext.statement)throw Error('Exact complete active owner-message statement required');
+  assertSourcePrivacy(quote);return;
+ }
+ validateEvidence(item,source,span,quote);
+}
 const spanHash=(span:Span)=>hash(JSON.stringify({start:span.start,end:span.end}));
 function assistantContextCurrent(row:Decision,source:EvidenceSource,token?:string){
  try{
@@ -172,9 +180,9 @@ function assistantContextCurrent(row:Decision,source:EvidenceSource,token?:strin
   return row.context.review_token===token&&row.context.review_token_hash===hash(token)&&row.context.source_quote_hash===hash(row.evidence.source_quote)&&row.context.source_span_hash===spanHash(row.evidence.source_span)&&row.context.reported_date===(source.reported_date||null);
  }catch{return false;}
 }
-export function evidenceQuality(bundle:Artifact[],source:EvidenceSource,decisions:Decision[]=[],policy?:PlatformPolicy,reviewToken?:string){
+export function evidenceQuality(bundle:Artifact[],source:EvidenceSource,decisions:Decision[]=[],policy?:PlatformPolicy,reviewToken?:string,ownerContext?:OwnerMessageContext){
  let integrity=true;try{assertBundle(bundle);assertSourcePrivacy(source.text);if(hash(source.text)!==source.hash||source.cleared===false||source.revoked_at)throw Error();for(const x of bundle)assertArtifactPrivacy(x.text);}catch{integrity=false;}
- const binding=evidenceBinding(bundle,source,policy),findings=evidenceFindings(bundle,source.text,source.reported_date,policy),latest=new Map<string,Decision>();
+ const binding=evidenceBinding(bundle,source,policy,ownerContext),findings=evidenceFindings(bundle,source.text,source.reported_date,policy).map(item=>item.reason.startsWith('Personal claim needs specific cleared evidence')&&exactOwnerContextClaim(item.claim,ownerContext)?{...finding(item.role,item.claim,'Compare the complete owner-message self-report; not independent verification','wording_review',item.artifact_hash,item.span),evidence_source:'owner_message_context' as const}:item),latest=new Map<string,Decision>();
  const assistants=new Map<string,Decision>();
  for(const row of decisions)if(row.binding===binding){
   if(row.actor==='owner'&&row.policy_version===EVIDENCE_POLICY)latest.set(row.finding_id,row);
@@ -185,20 +193,21 @@ export function evidenceQuality(bundle:Artifact[],source:EvidenceSource,decision
  for(const [id,row] of assistants)if(!latest.has(id))latest.set(id,row);
  const accepted:Decision[]=[];
  const resolved=findings.map(item=>{const row=latest.get(item.id);let resolution:Decision|null=null;
-  if(integrity&&row?.decision==='accept'&&item.kind==='wording_review'&&row.context?.source_hash===source.hash&&row.context.artifact_hash===item.artifact_hash&&row.context.bundle_hash===bundleVersion(bundle,source.hash)&&row.context.claim_span?.start===item.span.start&&row.context.claim_span?.end===item.span.end&&row.context.claim_text===item.claim&&(row.actor==='owner'||assistantContextCurrent(row,source,reviewToken)))try{validateEvidence(item,source.text,row.evidence.source_span,row.evidence.source_quote);resolution=row;accepted.push(row);}catch{}
+  if(integrity&&row?.decision==='accept'&&item.kind==='wording_review'&&row.context?.source_hash===source.hash&&row.context.artifact_hash===item.artifact_hash&&row.context.bundle_hash===bundleVersion(bundle,source.hash)&&row.context.claim_span?.start===item.span.start&&row.context.claim_span?.end===item.span.end&&row.context.claim_text===item.claim&&(row.actor==='owner'||assistantContextCurrent(row,source,reviewToken)))try{if(item.evidence_source==='owner_message_context'&&(row.actor!=='assistant'||row.context.owner_message_context_version!==ownerContext?.version||row.context.owner_message_statement_hash!==ownerContext?.source_hash))throw Error();validateFindingEvidence(item,source.text,ownerContext,row.evidence.source_span,row.evidence.source_quote);resolution=row;accepted.push(row);}catch{}
   return {...item,resolution};});
  const flags=resolved.filter(x=>!x.resolution);
  const critic=criticSuggestions(bundle,source);for(const suggestion of critic.suggestions as Array<{verdict:string;role:string;claim:string;artifact_hash:string;start:number;end:number}>){if(suggestion.verdict==='unsupported')flags.push({...finding(suggestion.role,suggestion.claim,'Critic identifies unsupported content; correct it before approval','hard',suggestion.artifact_hash,{start:suggestion.start,end:suggestion.end}),resolution:null});}if(!critic.valid)flags.push({...finding('Critic','Invalid structured evidence review','Structured Critic links or source binding are invalid; correct the Critic artifact','hard',bundle.find(x=>x.role==='Critic')?.hash||'',{start:-1,end:-1}),resolution:null});
+ if(ownerContext?.status==='invalid')flags.push({...finding('Source','Owner-message context integrity failed','Refresh or resolve the task-bound context receipt; it cannot grant source facts','hard','',{start:-1,end:-1}),resolution:null});
  if(!integrity)flags.push({...finding('Source','Integrity or privacy check failed','Current cleared source and intact six-artifact bundle required','hard','',{start:-1,end:-1}),resolution:null});
- return {status:flags.length?'needs_revision':'needs_human_review',editorial:editorialReview(bundle),flags,findings:resolved,binding,policy_version:EVIDENCE_POLICY,critic,source_text:source.text,source_sentences:sourceEvidenceSpans(source.text),source_hash:source.hash,bundle_hash:bundleVersion(bundle,source.hash),evidence_version:accepted.length?hash(accepted.map(x=>x.id).sort().join('|')):null,notice:'Evidence links and owner review are not independent factual verification. Review every claim; publication needs separate approval.'};
+ return {owner_message_context:ownerContext,status:flags.length?'needs_revision':'needs_human_review',editorial:editorialReview(bundle),flags,findings:resolved,binding,policy_version:EVIDENCE_POLICY,critic,source_text:source.text,source_sentences:sourceEvidenceSpans(source.text),source_hash:source.hash,bundle_hash:bundleVersion(bundle,source.hash),evidence_version:accepted.length?hash(accepted.map(x=>x.id).sort().join('|')):null,notice:'Evidence links and owner review are not independent factual verification. Review every claim; publication needs separate approval.'};
 }
-export async function reviewReadiness(tx:Connection,task:string,bundle:Artifact[],source:EvidenceSource,reviewToken?:string){const rows=await tx.query<Decision>('SELECT * FROM evidence_decisions WHERE task_id=$1 ORDER BY sequence',[task]);const persisted=(await tx.query<{content_brief:Record<string,unknown>}>('SELECT content_brief FROM tasks WHERE id=$1',[task]))[0];if(!persisted)throw Error('Unknown task');const latest=(await tx.query<{id:string;version:string}>('SELECT id,version FROM content_revisions WHERE task_id=$1 ORDER BY sequence DESC LIMIT 1',[task]))[0];const token=latest?'revision:'+latest.id+':'+latest.version:'original:'+hash(bundle.map(item=>item.hash).join('|'));return evidenceQuality(bundle,source,rows,taskPlatformPolicy(persisted),reviewToken||token);}
+export async function reviewReadiness(tx:Connection,task:string,bundle:Artifact[],source:EvidenceSource,reviewToken?:string){const rows=await tx.query<Decision>('SELECT * FROM evidence_decisions WHERE task_id=$1 ORDER BY sequence',[task]);const persisted=(await tx.query<import('./domain').Task>('SELECT * FROM tasks WHERE id=$1',[task]))[0];if(!persisted)throw Error('Unknown task');const latest=(await tx.query<{id:string;version:string}>('SELECT id,version FROM content_revisions WHERE task_id=$1 ORDER BY sequence DESC LIMIT 1',[task]))[0];const token=latest?'revision:'+latest.id+':'+latest.version:'original:'+hash(bundle.map(item=>item.hash).join('|'));return evidenceQuality(bundle,source,rows,taskPlatformPolicy(persisted),reviewToken||token,ownerMessageContext(persisted,source,rows));}
 export async function saveEvidenceDecision(tx:Connection,task:string,bundle:Artifact[],source:EvidenceSource,input:{binding:string;finding_id:string;decision:string;reason:string;source_span:Span;source_quote:string;acknowledged:boolean}){
  const quality=await reviewReadiness(tx,task,bundle,source);
  if(!input||input.binding!==quality.binding)throw Error('Stale evidence review; refresh before saving');
  const item=quality.findings.find(x=>x.id===input.finding_id);if(!item||item.span.start<0||bundle.find(x=>x.role===item.role)?.text.slice(item.span.start,item.span.end)!==item.claim||item.kind!=='wording_review'||input.acknowledged!==true||!['accept','withdraw'].includes(input.decision))throw Error('Individual wording review acknowledgement required');
  if(typeof input.reason!=='string'||!input.reason.trim()||input.reason.length>600)throw Error('Review reason required (maximum 600 characters)');assertSourcePrivacy(input.reason);
- if(input.decision==='accept')validateEvidence(item,source.text,input.source_span,input.source_quote);
+ if(input.decision==='accept'){if(item.evidence_source==='owner_message_context')throw Error('Use the separate assistant context comparison; no personal owner source review is recorded');validateEvidence(item,source.text,input.source_span,input.source_quote);}
  const existing=item.resolution;if(input.decision==='accept'&&existing)throw Error('This wording already has a current decision');
  if(input.decision==='withdraw'&&!existing)throw Error('No current decision to withdraw');
  const id=randomUUID(),evidence=input.decision==='accept'?{source_span:input.source_span,source_quote:input.source_quote}:existing!.evidence;
@@ -230,10 +239,10 @@ export async function saveAssistantEvidenceDecision(tx:Connection,task:string,to
   assertNoEditorialHold(quality.editorial);if(!quality.critic.valid)throw Error('Invalid Critic evidence cannot be waived');
   for(const artifact of bundle)assertArtifactPrivacy(artifact.text);
   if(item.resolution)throw Error('This wording already has a current comparison');
-  validateEvidence(item,source.text,input.source_span as Span,input.source_quote);
+  validateFindingEvidence(item,source.text,quality.owner_message_context,input.source_span as Span,input.source_quote);
  }else if(item.resolution?.actor!=='assistant')throw Error('No current assistant comparison to withdraw');
  const evidence=input.decision==='accept'?{source_span:input.source_span as Span,source_quote:input.source_quote}:item.resolution!.evidence;
- const id=randomUUID(),context={source_hash:source.hash,artifact_hash:item.artifact_hash,bundle_hash:quality.bundle_hash,claim_span:item.span,claim_text:item.claim,reported_date:source.reported_date||null,review_token:token,review_token_hash:hash(token),source_quote_hash:hash(evidence.source_quote),source_span_hash:spanHash(evidence.source_span)};
+ const id=randomUUID(),context={source_hash:source.hash,artifact_hash:item.artifact_hash,bundle_hash:quality.bundle_hash,claim_span:item.span,claim_text:item.claim,reported_date:source.reported_date||null,review_token:token,review_token_hash:hash(token),source_quote_hash:hash(evidence.source_quote),source_span_hash:spanHash(evidence.source_span),...(item.evidence_source==='owner_message_context'?{owner_message_context_version:quality.owner_message_context!.version!,owner_message_statement_hash:quality.owner_message_context!.source_hash!}:{})};
  await tx.query("INSERT INTO evidence_decisions(id,task_id,binding,finding_id,decision,policy_version,actor,reason,evidence,context) VALUES($1,$2,$3,$4,$5,$6,'assistant',$7,$8,$9)",[id,task,quality.binding,item.id,input.decision,ASSISTANT_EVIDENCE_POLICY,input.reason.trim(),JSON.stringify(evidence),JSON.stringify(context)]);
  await tx.query("INSERT INTO events(id,task_id,kind,detail) VALUES($1,$2,'assistant_wording_compared',$3)",[randomUUID(),task,JSON.stringify({decision_id:id,decision:input.decision,actor:'assistant',policy_version:ASSISTANT_EVIDENCE_POLICY,binding:quality.binding,finding_id:item.id,review_token_hash:hash(token),notice:'Assistant compared wording against cited source; not owner review or independent verification. No content approval or publication.'})]);
  if(input.decision==='withdraw')await tx.query("UPDATE tasks SET status='review',updated=now() WHERE id=$1 AND status='approved'",[task]);

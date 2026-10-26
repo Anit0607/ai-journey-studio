@@ -99,7 +99,7 @@ test('rendered safety guidance prevents caveat-template leakage without inventin
   assert.match(prompt,/Do not imply all two-minute requests stopped/);
  }
  const critic=buildDraftPrompt(task(5),source,outputs());assert.match(critic,/use "Privacy: clear" within an existing assessment value/);assert.match(critic,/Privacy checks remain mandatory/);assert.match(critic,/never echo excluded-category labels as boilerplate/);assert.match(critic,/consecutive source sentences covering both the established project referent and the method/);
- const short=buildDraftPrompt(task(3,source,'shortform'),source,outputs().slice(0,3));assert.match(short,/120–180-word shortform post/);
+ const short=buildDraftPrompt(task(3,source,'shortform'),source,outputs().slice(0,3));assert.match(short,/900–1300 characters/);assert.doesNotMatch(short,/120–180-word/);
 });
 
 test('current selector/critic schemas, exact source citations and existing private-stage bounds remain intact',()=>{
