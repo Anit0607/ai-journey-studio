@@ -90,5 +90,13 @@ test('generated Critic reason allows technical authorization, not credential mat
  assert.throws(()=>validateEvidence(f,quote,{start:0,end:quote.length},quote),/Excluded private/);
  // A mocked transaction only reaches the human reason check; no write is allowed.
  const humanBundle=bundle('The project owner built a source-linked outline and reviewed each generated statement.');const q=evidenceQuality(humanBundle,source),finding=q.findings.find(x=>x.kind==='wording_review')!;assert(finding);
- await assert.rejects(saveEvidenceDecision({query:async<T>(sql:string)=>{if(sql.startsWith('SELECT * FROM evidence_decisions'))return [] as T[];if(sql.startsWith('SELECT content_brief'))return [{content_brief:{}}] as T[];throw Error('No write allowed');}},'isolated',humanBundle,source,{binding:q.binding,finding_id:finding.id,decision:'accept',reason:'Discuss authorization concepts',source_span:{start:0,end:SOURCE.length},source_quote:SOURCE,acknowledged:true}),/Excluded private/);
+ const reads:string[]=[],writes:string[]=[],expectedReads=['SELECT * FROM evidence_decisions WHERE task_id=$1 ORDER BY sequence','SELECT * FROM tasks WHERE id=$1','SELECT id,version FROM content_revisions WHERE task_id=$1 ORDER BY sequence DESC LIMIT 1'];
+ await assert.rejects(saveEvidenceDecision({query:async<T>(sql:string,params?:unknown[])=>{
+  if(!sql.startsWith('SELECT ')){writes.push(sql);throw Error('No write allowed');}
+  reads.push(sql);assert.deepEqual(params,['isolated']);
+  if(sql===expectedReads[0]||sql===expectedReads[2])return [] as T[];
+  if(sql===expectedReads[1])return [{id:'isolated',source_id:'isolated-source',source_hash:source.hash,status:'review',checkpoint:6,content_brief:{}}] as T[];
+  throw Error('Unexpected read: '+sql);
+ }},'isolated',humanBundle,source,{binding:q.binding,finding_id:finding.id,decision:'accept',reason:'Discuss authorization concepts',source_span:{start:0,end:SOURCE.length},source_quote:SOURCE,acknowledged:true}),/Excluded private/);
+ assert.deepEqual(reads,expectedReads);assert.deepEqual(writes,[],'Private human evidence must be rejected before any write');
 });
