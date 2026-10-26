@@ -1,4 +1,5 @@
 import {comparisonRevisionOrigin} from './private-comparison-record';
+import {privateComparisonCosts} from './private-comparison-costs';
 import {parseNoteSelection,canonicalFactPacket} from './note-fact-selection';
 import {ROLES,hash,type Task} from './domain';
 import {type Artifact} from './grounding';
@@ -54,5 +55,6 @@ export function agentContributions(task:Task,tasks:Row[],outputs:Row[],ledger:Ro
   if(!exactArtifact(current)||!prior||current!.hash!==prior.hash||current!.text!==prior.text)origin={kind:'unknown',task_id:null,revision_id:null,created:null};
   return {role,checkpoint,purpose:purposes[checkpoint],current_hash:current?.hash||null,current_origin:origin,runs,usage:usage(ledger.filter(r=>familyIds.has(r.task_id)&&r.role===role&&r.checkpoint===checkpoint))};
  });
- return {roles,unattributed_calls:ledger.filter(r=>familyIds.has(r.task_id)&&(!ROLES.includes(r.role)||r.checkpoint!==ROLES.indexOf(r.role))).length,notice:'Role descriptions are responsibilities, not evaluations. Saved model artifacts may be superseded by manual edits. Usage is a provider-reported estimate, not an invoice. No style score, factual pass or publication approval is inferred.'};
+ // Preserve the existing API key; its value counts ledger records, not provider calls.
+ return {roles,unattributed_calls:ledger.filter(r=>familyIds.has(r.task_id)&&(!ROLES.includes(r.role)||r.checkpoint!==ROLES.indexOf(r.role))).length,private_comparisons:privateComparisonCosts(task.id,events,ledger),notice:'Role descriptions are responsibilities, not evaluations. Role usage below is original-run and agent-revision history only; it excludes private comparisons and is not the cost of the current artifact. Saved model artifacts may be superseded by manual edits. Usage is a provider-reported estimate, not an invoice. No style score, factual pass or publication approval is inferred.'};
 }
