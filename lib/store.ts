@@ -285,7 +285,7 @@ export class Store{
     if(expected!==token)throw Error("Stale revision; refresh before editing");
     return {task,source,latest,bundle,token};
   }
-  async revise(id:string,expected:string,note:string,edit?:{role:string;text:string}){
+  async revise(id:string,expected:string,note:string,edit?:{role:string;text:string},actor:"owner"|"assistant"="owner"){
     if(typeof note!=="string"||!note.trim()||note.length>1000)throw Error("Revision note required");
     if(edit&&(!ROLES.includes(edit.role as typeof ROLES[number])||typeof edit.text!=="string"||!edit.text.trim()||Buffer.byteLength(edit.text)>32000))throw Error("Invalid revision text");
     assertSourcePrivacy(note);
@@ -298,8 +298,8 @@ export class Store{
       // it with a plain note instead of leaving a citation set that no longer matches the text.
       if(edit&&["Writer","Platform Adapter"].includes(edit.role)&&!criticSuggestions(context.bundle,context.source).legacy){const critic=bundle.find(item=>item.role==="Critic");if(critic){critic.text=OUTDATED_CRITIC_NOTE;critic.hash=hash(OUTDATED_CRITIC_NOTE);}}
       const revision=randomUUID(),version=bundleVersion(bundle,context.source.hash);
-      await tx.query("INSERT INTO content_revisions(id,task_id,parent_id,base_token,version,bundle,request_note,sequence) VALUES($1,$2,$3,$4,$5,$6,$7,$8)",[revision,id,context.latest?.id||null,expected,version,JSON.stringify(bundle),note.trim(),(context.latest?.sequence||0)+1]);
-      await this.event(tx,id,edit?"manual_revision_saved":"changes_requested","New revision "+revision+"; historical approvals preserved; fresh approval required");
+      await tx.query("INSERT INTO content_revisions(id,task_id,parent_id,base_token,version,bundle,request_note,sequence) VALUES($1,$2,$3,$4,$5,$6,$7,$8)",[revision,id,context.latest?.id||null,expected,version,JSON.stringify(bundle),(actor==="assistant"?"[Assistant edit] ":"")+note.trim(),(context.latest?.sequence||0)+1]);
+      await this.event(tx,id,actor==="assistant"?"assistant_revision_saved":edit?"manual_revision_saved":"changes_requested",(actor==="assistant"?"Assistant-saved edit, not owner review or approval. ":"")+"New revision "+revision+"; historical approvals preserved; fresh approval required");
       return {id:revision,version};
     });
   }

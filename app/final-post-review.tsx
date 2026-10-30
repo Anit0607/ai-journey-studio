@@ -15,7 +15,7 @@ function highlighted(text:string,flags:Flag[]){
  parts.push(text.slice(cursor));return parts;
 }
 
-export default function FinalPostReview({task,token,review,busy,action}:{task:string;token:string;review:any;busy:boolean;action:Action}){
+export default function FinalPostReview({task,token,review,busy,action,oneClick=false}:{task:string;token:string;review:any;busy:boolean;action:Action;oneClick?:boolean}){
  const [ack,setAck]=useState(false);
  const quality=review.quality,linkedin=review.variants?.variants?.find((v:any)=>v.platform==="LinkedIn");
  if(!quality||!linkedin?.text)return null;
@@ -34,8 +34,9 @@ export default function FinalPostReview({task,token,review,busy,action}:{task:st
    <ul>{inPost.map(f=><li key={f.id}>{f.claim}</li>)}</ul>
    {internal.length>0&&<details><summary>{internal.length} more in the internal draft (not published)</summary><ul>{internal.map(f=><li key={f.id}>{f.claim}</li>)}</ul><p className="fine">These come from the Writer stage, which is kept as working notes and never posted. Your confirmation covers them too.</p></details>}
    <p className="fine">These sentences are reworded from your source or describe you personally, so only you can say whether they are true. If one is wrong, edit the post first.</p>
+   {oneClick?<p><strong>To approve:</strong> use <strong>Approve and schedule</strong> in the “Approve final LinkedIn post” box above. One tick confirms these sentences and schedules the post.</p>:<>
    <label><input type="checkbox" checked={ack} onChange={e=>setAck(e.target.checked)}/> I have read this whole post. Every statement in it is true, and I am happy to share it publicly.</label>
-   <div className="actions"><button className="primary" disabled={busy||blocked||!ack} onClick={()=>void action("attest-final-post",{task,expected:token,binding:quality.binding,acknowledged:true})}>Confirm this post</button></div>
+   <div className="actions"><button className="primary" disabled={busy||blocked||!ack} onClick={()=>void action("attest-final-post",{task,expected:token,binding:quality.binding,acknowledged:true})}>Confirm this post</button></div></>}
    {blocked&&<p className="fine">Finish the pending agent revision or editorial hold first.</p>}
   </div>}
   {flags.length===0&&<p><strong style={{color:"var(--accent)"}}>✓ Post confirmed.</strong> {review.approval?"It is approved.":"Approve and schedule it with the LinkedIn approval above, or approve the exact version below."}</p>}

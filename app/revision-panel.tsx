@@ -72,7 +72,7 @@ export function revisionSaveReason(state:RevisionEditor,role:string,note:string,
   return "";
 }
 type Action=(path:string,body:unknown,onSaved?:(result:unknown)=>void)=>Promise<unknown>;
-export default function RevisionPanel({task,review,busy,action,agentRevisionEligible=false}:{task:string;review:any;busy:boolean;action:Action;agentRevisionEligible?:boolean}){
+export default function RevisionPanel({task,review,busy,action,agentRevisionEligible=false,oneClick=false}:{task:string;review:any;busy:boolean;action:Action;agentRevisionEligible?:boolean;oneClick?:boolean}){
   const [note,setNote]=useState(""),[role,setRole]=useState("Writer"),[editing,setEditing]=useState(false),[ack,setAck]=useState(false),[ackToken,setAckToken]=useState<string|null>(null),[saving,setSaving]=useState(false);
   const [editor,dispatch]=useReducer(reduceRevisionEditor,review,createRevisionEditor);
   const saveInFlight=useRef(false),reasonId=useId();
@@ -108,7 +108,7 @@ export default function RevisionPanel({task,review,busy,action,agentRevisionElig
     <p>Original approval remains in history. Approval does not establish truth or authorize publishing.</p>
     <p className="fine">{review.quality.notice}</p>
     {review.quality.editorial&&<section aria-label="Editorial review"><h3>Story and reader value</h3><p><strong>{review.quality.editorial.status.replaceAll("_"," ")}</strong></p><p>{review.quality.editorial.notice}</p>{review.quality.editorial.issues.map((issue:any,index:number)=><p key={index}><strong>{issue.role}:</strong> {issue.message}</p>)}</section>}
-    <FinalPostReview task={task} token={review.token} review={review} busy={busy||saving} action={action}/>
+    <FinalPostReview task={task} token={review.token} review={review} busy={busy||saving} action={action} oneClick={oneClick}/>
     <details><summary>Advanced: review sentence by sentence</summary>
     {review.quality.flags.length>0&&<details><summary>Source-grounding flags ({review.quality.flags.length})</summary>{review.quality.flags.map((flag:any,index:number)=><p key={index}><strong>{flag.role}:</strong> {flag.claim}<br/>{flag.reason}</p>)}</details>}
     <EvidencePanel quality={review.quality} task={task} token={review.token} busy={busy||saving} action={action}/>
