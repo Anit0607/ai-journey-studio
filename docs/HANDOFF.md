@@ -108,12 +108,17 @@ Gemini exports or files over 1 MB. Keep an eye on Neon free-tier storage
 
 - Network allowed domains (added by owner): `ai-journey-studio.vercel.app`,
   `api.vercel.com`, `console.neon.tech`, `api.linkedin.com`. All were reachable.
-- Secrets the owner is adding (loaded only in a new session): `VERCEL_TOKEN`
-  and `NEON_API_KEY`. Use them read-only unless the owner approves a change.
+- Credentials are stored as **Network secrets**, not environment variables.
+  The egress proxy injects them (`Authorization: Bearer ...`) into requests
+  to `api.vercel.com` and `console.neon.tech`, so there is no
+  `VERCEL_TOKEN`/`NEON_API_KEY` variable to read. Just call the APIs. Use them
+  read-only unless the owner approves a change.
 
 ## First steps for the next session
 
-1. Confirm `VERCEL_TOKEN` and `NEON_API_KEY` are set (do not print them).
+1. Confirm the injected credentials work: `curl https://api.vercel.com/v2/user`
+   and `curl https://console.neon.tech/api/v2/projects` should no longer
+   return 401/403.
 2. With the Vercel API, read the project's env var **names**, their targets
    (Production/Preview) and the values of only `STUDIO_RUNTIME_CONFIG` and
    `STUDIO_INTEGRATIONS_CONFIG`. Do not print secret values.
