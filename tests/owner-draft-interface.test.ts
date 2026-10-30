@@ -17,7 +17,7 @@ function ui(file:string,fetcher?:(path:string,init?:RequestInit)=>Promise<unknow
  };
  const output=ts.transpileModule(readFileSync(new URL(file,import.meta.url),"utf8"),{compilerOptions:{module:ts.ModuleKind.CommonJS,jsx:ts.JsxEmit.ReactJSX,esModuleInterop:true}}).outputText;
  const exports:Record<string,any>={};
- const mockRequire=(name:string)=>name==="react"?hooks:name==="react/jsx-runtime"?require(name):name.endsWith("/execution-readiness")?{executionReadiness:()=>({})}:{__esModule:true,default:()=>null};
+ const mockRequire=(name:string)=>name==="react"?hooks:name==="react/jsx-runtime"?require(name):name.endsWith("/execution-readiness")?{executionReadiness:()=>({})}:name.endsWith("/lib/post-status")?{currentDelivery:()=>null,deliveryLocksApproval:()=>false}:{__esModule:true,default:()=>null};
  new Function("require","exports","window","fetch","AbortSignal",output)(mockRequire,exports,{location:{search:""}},fetcher|| (async()=>assert.fail("Unexpected request")),{timeout:(ms:number)=>{timeouts.push(ms);return new AbortController().signal;}});
  return {exports,values,effects,timeouts,reset:()=>{values.length=0;effects.length=0;},render:(component:any,props:Record<string,any>={})=>{cursor=0;return component(props) as Node;}};
 }

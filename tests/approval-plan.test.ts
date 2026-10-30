@@ -131,7 +131,7 @@ test("publication admission takes the calendar guard before outbox locks and rel
 
 
 test("exact approval preview binds configured scheduler policy; policy change cannot reuse approval and unsupported time is rejected",()=>fixture(async f=>{
- const at="2030-10-14T16:30:00.000Z";
+ const at="2030-10-14T18:00:00.000Z";
  await f.db.query("UPDATE calendar_entries SET intended_post=$2,platform_schedule=$3 WHERE id=$1",[f.entry,at,JSON.stringify({...f.schedule,LinkedIn:{...f.schedule.LinkedIn,intended_post:at}})]);
  f.runtime.scheduler_window_policy=schedulerWindowPolicy(fixedSettings().scheduler);
  const plan=await f.preview();assert.equal(plan.scheduler_policy_hash,f.runtime.scheduler_window_policy.hash);

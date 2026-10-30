@@ -37,7 +37,8 @@ import {Calendar} from "../lib/calendar";
 import {BENCHMARK_PRESET} from "../lib/schedule-presets";
 test("adding Thursday through the actual Calendar handlers preserves its time in the request and database",async()=>{
  const db=await embedded();try{
- const initial={start_date:"2026-10-26",post_time:null,short_days:[1,3,5],long_day:0,generation_lead_hours:120,timing_mode:"per_platform" as const,platform_times:{LinkedIn:{...BENCHMARK_PRESET.times.LinkedIn}},timing_basis:BENCHMARK_PRESET.id,generation_enabled:true};
+ const {"4":_thursday,...withoutThursday}=BENCHMARK_PRESET.times.LinkedIn as Record<string,string>;
+ const initial={start_date:"2026-10-26",post_time:null,short_days:[1,2],long_day:3,generation_lead_hours:120,timing_mode:"per_platform" as const,platform_times:{LinkedIn:withoutThursday},timing_basis:"custom",generation_enabled:true};
  const calendar=new Calendar(db,120);await calendar.configure(initial);
  const h=ui("../app/calendar-panel.tsx");let body:any;
  const props={calendar:{settings:await calendar.settings(),entries:[],minimum_generation_lead_hours:120,configuration_needed:false},sources:[],tasks:[],busy:false,action:async(path:string,input:any)=>{assert.equal(path,"calendar-configure");body=input;await calendar.configure(input);}};
@@ -46,7 +47,7 @@ test("adding Thursday through the actual Calendar handlers preserves its time in
  tree=render();const input=nodes(tree).find(n=>n.props["aria-label"]==="LinkedIn Thursday time IST")!;assert.ok(input);input.props.onChange({target:{value:"16:00"}});
  tree=render();assert.match(text(tree),/Timing basis: Custom \/ unset/);assert.equal(nodes(tree).find(n=>n.props["aria-label"]==="LinkedIn Thursday time IST")!.props.value,"16:00");
  nodes(tree).find(n=>n.type==="button"&&text(n)==="Save calendar settings")!.props.onClick();await new Promise(r=>setTimeout(r,50));
- assert.equal(body.platform_times.LinkedIn[4],"16:00");assert.equal(body.timing_basis,"custom");const saved=await calendar.settings();assert.equal(saved.platform_times.LinkedIn[4],"16:00");assert.deepEqual(saved.short_days,[1,3,5,4]);
+ assert.equal(body.platform_times.LinkedIn[4],"16:00");assert.equal(body.timing_basis,"custom");const saved=await calendar.settings();assert.equal(saved.platform_times.LinkedIn[4],"16:00");assert.deepEqual(saved.short_days,[1,2,4]);
  await calendar.plan(1);const entry=(await db.query<any>("SELECT * FROM calendar_entries WHERE planned_date='2026-10-29'"))[0];assert.ok(entry);assert.equal(new Date(entry.intended_post).toISOString(),"2026-10-29T10:30:00.000Z");assert.equal(new Date(entry.review_due).toISOString(),"2026-10-27T10:30:00.000Z");assert.equal(new Date(entry.generation_due).toISOString(),"2026-10-24T10:30:00.000Z");
  }finally{await db.close();}
 });

@@ -9,7 +9,7 @@ import {enqueueLegacy} from './legacy-task-fixture';
 import {variantFixture} from './variant-fixture';
 import {schedulerWindowPolicy} from '../lib/scheduler-window-policy';
 import {fixedSettings} from './scheduler-window-fixture';
-const POST='2026-10-26T16:30:00.000Z',TEXT='Proposed approach: inspect one cleared source.';
+const POST='2026-10-26T18:00:00.000Z',TEXT='Proposed approach: inspect one cleared source.';
 async function fixture(work:(f:Awaited<ReturnType<typeof seed>>)=>Promise<void>){const db=await embedded();try{await work(await seed(db));}finally{await db.close();}}
 async function seed(db:Database){
  const store=new Store(db),source=await store.source(CAPSULE,'user-reported-notes','2026-10-09',true),task=await enqueueLegacy(store,source.id);
@@ -22,7 +22,7 @@ async function seed(db:Database){
 }
 
 test('scheduled enqueue/revise/approval enforce exact anchors and immutable policy binding',()=>fixture(async f=>{
- for(const at of ['2026-10-26T16:26:00Z','2026-10-26T16:32:00Z','2026-11-05T10:30:00Z'])await assert.rejects(f.publisher.enqueue({...f.input,scheduled_at:at}),/exact configured UTC anchor/);
+ for(const at of ['2026-10-26T17:56:00Z','2026-10-26T18:02:00Z','2026-11-05T10:30:00Z'])await assert.rejects(f.publisher.enqueue({...f.input,scheduled_at:at}),/exact configured UTC anchor/);
  const row=await f.publisher.enqueue(f.input);assert.equal(row.scheduler_policy_hash,f.runtime.scheduler_window_policy!.hash);await f.publisher.approve(row.id,row.version,true);
  await assert.rejects(f.publisher.revise(row.id,row.version,{...f.input,scheduled_at:'2026-10-27T16:30:00Z'}),/exact configured UTC anchor/);
  f.runtime.scheduler_window_policy=schedulerWindowPolicy(fixedSettings(false).scheduler);await assert.rejects(f.publisher.approve(row.id,row.version,true),/Scheduler policy changed/);
@@ -49,16 +49,16 @@ test('all stale unattempted backlog is retired before the current anchor can pub
 
 test('no early, intake, off-window, unapproved, duplicate or over-five-minute-late provider calls',async t=>{
  await t.test('unapproved and duplicate',()=>fixture(async f=>{const row=await f.publisher.enqueue(f.input);assert.equal((await f.publisher.dispatch(new Date(POST))).status,'idle');await f.publisher.approve(row.id,row.version,true);const both=await Promise.all([f.publisher.dispatch(new Date(POST)),f.publisher.dispatch(new Date(POST))]);assert.equal(both.filter(result=>result.status==='published').length,1);assert.equal(f.counts().calls,1);}));
- for(const at of ['2026-10-26T16:00:00Z','2026-10-26T16:15:00Z','2026-10-26T16:26:00Z','2026-10-26T16:35:00.001Z','2026-10-26T16:36:00Z','2026-10-26T16:36:00.001Z'])await t.test(at,()=>fixture(async f=>{const row=await f.publisher.enqueue(f.input);await f.publisher.approve(row.id,row.version,true);f.runtime.max_lateness_seconds=3600;f.setNow(at);await f.publisher.dispatch(new Date(at));assert.equal(f.counts().calls,0);assert.equal(f.counts().credentials,0);}));
- await t.test('exact five-minute boundary allowed',()=>fixture(async f=>{const row=await f.publisher.enqueue(f.input);await f.publisher.approve(row.id,row.version,true);f.setNow('2026-10-26T16:35:00Z');assert.equal((await f.publisher.dispatch(new Date('2026-10-26T16:35:00Z'))).status,'published');}));
+ for(const at of ['2026-10-26T17:30:00Z','2026-10-26T17:45:00Z','2026-10-26T17:56:00Z','2026-10-26T18:05:00.001Z','2026-10-26T18:06:00Z','2026-10-26T18:06:00.001Z'])await t.test(at,()=>fixture(async f=>{const row=await f.publisher.enqueue(f.input);await f.publisher.approve(row.id,row.version,true);f.runtime.max_lateness_seconds=3600;f.setNow(at);await f.publisher.dispatch(new Date(at));assert.equal(f.counts().calls,0);assert.equal(f.counts().credentials,0);}));
+ await t.test('exact five-minute boundary allowed',()=>fixture(async f=>{const row=await f.publisher.enqueue(f.input);await f.publisher.approve(row.id,row.version,true);f.setNow('2026-10-26T18:05:00Z');assert.equal((await f.publisher.dispatch(new Date('2026-10-26T18:05:00Z'))).status,'published');}));
 });
 
 test('failed, uncertain, claimed and published deliveries never auto-replay',async t=>{
- for(const status of ['failed','uncertain','claimed','published'])await t.test(status,()=>fixture(async f=>{const row=await f.publisher.enqueue(f.input);await f.publisher.approve(row.id,row.version,true);await f.db.query('UPDATE publishing_outbox SET status=$2 WHERE id=$1',[row.id,status]);await f.publisher.dispatch(new Date(POST));assert.equal(f.counts().calls,0);await assert.rejects(f.publisher.revise(row.id,row.version,f.input),/terminal/);await assert.rejects(f.publisher.enqueue({...f.input,request_id:randomUUID(),scheduled_at:'2026-10-28T10:30:00Z'}),/reconciliation|replay/);}));
+ for(const status of ['failed','uncertain','claimed','published'])await t.test(status,()=>fixture(async f=>{const row=await f.publisher.enqueue(f.input);await f.publisher.approve(row.id,row.version,true);await f.db.query('UPDATE publishing_outbox SET status=$2 WHERE id=$1',[row.id,status]);await f.publisher.dispatch(new Date(POST));assert.equal(f.counts().calls,0);await assert.rejects(f.publisher.revise(row.id,row.version,f.input),/terminal/);await assert.rejects(f.publisher.enqueue({...f.input,request_id:randomUUID(),scheduled_at:'2026-10-28T14:00:00Z'}),/reconciliation|replay/);}));
 });
 
 test('late clock or policy change during credential retrieval is revalidated before provider I/O',async t=>{
- for(const kind of ['clock','policy','source'])await t.test(kind,()=>fixture(async f=>{const row=await f.publisher.enqueue(f.input);await f.publisher.approve(row.id,row.version,true);f.runtime.credential=async()=>{if(kind==='clock')f.setNow('2026-10-26T16:35:00.001Z');if(kind==='policy')f.runtime.scheduler_window_policy=schedulerWindowPolicy(fixedSettings(false).scheduler);if(kind==='source')await f.db.query('UPDATE sources SET cleared=false WHERE id=$1',[f.source.id]);return 'offline-test-only';};assert.notEqual((await f.publisher.dispatch(new Date(POST))).status,'published');assert.equal(f.counts().calls,0);assert.equal((await f.db.query('SELECT * FROM publishing_attempts')).length,0);}));
+ for(const kind of ['clock','policy','source'])await t.test(kind,()=>fixture(async f=>{const row=await f.publisher.enqueue(f.input);await f.publisher.approve(row.id,row.version,true);f.runtime.credential=async()=>{if(kind==='clock')f.setNow('2026-10-26T18:05:00.001Z');if(kind==='policy')f.runtime.scheduler_window_policy=schedulerWindowPolicy(fixedSettings(false).scheduler);if(kind==='source')await f.db.query('UPDATE sources SET cleared=false WHERE id=$1',[f.source.id]);return 'offline-test-only';};assert.notEqual((await f.publisher.dispatch(new Date(POST))).status,'published');assert.equal(f.counts().calls,0);assert.equal((await f.db.query('SELECT * FROM publishing_attempts')).length,0);}));
 });
 
 
@@ -69,13 +69,13 @@ test('fixed scheduled mode rejects non-LinkedIn and cancelled prior attempt hist
  await assert.rejects(f.publisher.cancel(row.id,row.version),/reconciliation/);
  // Emulate a pre-existing cancellation under the generic/legacy behavior. Attempt evidence remains authoritative.
  await f.db.query("UPDATE publishing_outbox SET status='cancelled' WHERE id=$1",[row.id]);
- await assert.rejects(f.publisher.enqueue({...f.input,request_id:randomUUID(),scheduled_at:'2026-10-28T10:30:00Z'}),/reconciliation|replay/);
+ await assert.rejects(f.publisher.enqueue({...f.input,request_id:randomUUID(),scheduled_at:'2026-10-28T14:00:00Z'}),/reconciliation|replay/);
 }));
 
 
 test('clock crossing deadline after admission transaction still prevents the actual provider call',()=>fixture(async f=>{
- const row=await f.publisher.enqueue(f.input);await f.publisher.approve(row.id,row.version,true);f.setNow('2026-10-26T16:34:59.999Z');
- const slow:Database={...f.db,transaction:work=>f.db.transaction(tx=>work({query:async<T>(sql:string,params?:unknown[])=>{const result=await tx.query<T>(sql,params);if(sql.startsWith('INSERT INTO publishing_attempts')){await new Promise(resolve=>setTimeout(resolve,1));f.setNow('2026-10-26T16:35:01Z');}return result;}}))};
+ const row=await f.publisher.enqueue(f.input);await f.publisher.approve(row.id,row.version,true);f.setNow('2026-10-26T18:04:59.999Z');
+ const slow:Database={...f.db,transaction:work=>f.db.transaction(tx=>work({query:async<T>(sql:string,params?:unknown[])=>{const result=await tx.query<T>(sql,params);if(sql.startsWith('INSERT INTO publishing_attempts')){await new Promise(resolve=>setTimeout(resolve,1));f.setNow('2026-10-26T18:05:01Z');}return result;}}))};
  assert.equal((await new Publishing(slow,f.runtime).dispatch(new Date(POST))).status,'failed');assert.equal(f.counts().calls,0);
  assert.equal((await f.db.query('SELECT state FROM publishing_attempts'))[0].state,'rejected');
 }));

@@ -11,7 +11,7 @@ import {CAPSULE,CAP,BUFFER,configReady,istMonth,tokenCost,type RuntimeConfig,typ
 import {sourceEligible,draftSourceEligible,sourceAuthorized} from "./sources";
 const DAY=86400000;
 export const LEGACY_CALENDAR_BLOCKER="This unbound legacy calendar slot cannot create new three-platform work. Create a fresh LinkedIn-only plan on an unused date and explicitly link a cleared source; this historical slot is unchanged.";
-import {PLATFORMS,BENCHMARK_PRESET} from "./schedule-presets";
+import {PLATFORMS,BENCHMARK_PRESET,slotBrief} from "./schedule-presets";
 export type PlatformTimes=Partial<Record<typeof PLATFORMS[number],Record<string,string|null>>>;
 const validTime=(value:unknown)=>typeof value==="string"&&/^([01]\d|2[0-3]):[0-5]\d$/.test(value);
 function validateTimes(value:unknown):value is PlatformTimes{
@@ -248,7 +248,7 @@ export class Calendar{
           result.blocked++;result.entries.push({entry_id:entry.id,task_id:null,status:"blocked",reason});continue;
         }
         const grantId=selected?randomUUID():null;
-        const policy=calendarPlatformPolicy(entry),origin="calendar:"+entry.id,brief={kind:entry.kind,planned_date:entry.planned_date,platforms:activePlatforms(policy),...(policy?{platform_policy:policy}:{}),intended_post:new Date(entry.intended_post).toISOString(),review_due:new Date(entry.review_due).toISOString(),generation_due:new Date(entry.generation_due).toISOString(),...(selected?{source_policy:{id:selection.policy!.id,hash:selection.policy!.scope_hash,grant_id:grantId,provenance_id:selected.provenance.id}}:{})};
+        const policy=calendarPlatformPolicy(entry),origin="calendar:"+entry.id,brief={kind:entry.kind,planned_date:entry.planned_date,...slotBrief(entry.planned_date),platforms:activePlatforms(policy),...(policy?{platform_policy:policy}:{}),intended_post:new Date(entry.intended_post).toISOString(),review_due:new Date(entry.review_due).toISOString(),generation_due:new Date(entry.generation_due).toISOString(),...(selected?{source_policy:{id:selection.policy!.id,hash:selection.policy!.scope_hash,grant_id:grantId,provenance_id:selected.provenance.id}}:{})};
         if(selected){
           await tx.query("INSERT INTO events(id,kind,detail) VALUES($1,'github_source_selected',$2)",[grantId,JSON.stringify({policy_id:selection.policy!.id,source_hash:source!.hash,provenance_hash:githubProvenanceHash(selected.provenance),entry_id:entry.id,evidence_key:selected.evidence_key})]);
           await tx.query("INSERT INTO github_source_grants(id,policy_id,policy_hash,provenance_id,provenance_hash,source_id,source_hash,evidence_key,entry_id) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9)",[grantId,selection.policy!.id,selection.policy!.scope_hash,selected.provenance.id,githubProvenanceHash(selected.provenance),source!.id,source!.hash,selected.evidence_key,entry.id]);

@@ -2,6 +2,7 @@ import {schedulerWindowPhase,scheduledPolicyBinding,type SchedulerWindowPolicy} 
 import {resolveScopedSource} from "./github-source-policy";
 import {calendarPublicationCurrent,lockPublicationGuards} from "./calendar-publication-binding";
 import {scopedTaskMatches} from "./scoped-source-proof";
+import {deliveryNotice,type Notifier} from "./notify";
 import {taskPlatformPolicy,activePlatforms} from "./platform-policy";
 import {reviewReadiness,evidenceApprovalCurrent} from "./evidence-review";
 import {randomUUID} from "node:crypto";
@@ -24,6 +25,7 @@ export type PublishingPayload={text:string;media?:PublishingMedia[]};
 export type PublishingAccount={id:string;platform:Platform;remote_id:string;label:string;enabled?:boolean;verified?:boolean;authorization_version:string;credential_env?:string;credential_configured?:boolean;scopes:string[];linkedin_version?:string;instagram_api_version?:string;instagram_login?:"instagram"|"facebook";professional?:boolean};
 /** Server-only configuration. Never obtain this object, credentials, or fetch from request JSON. */
 export type PublishingRuntime={
+  notify?:Notifier;dashboard_url?:string;
   enabled?:boolean;credential_use_authorized?:boolean;scheduler_authorized?:boolean;scheduler_interval_seconds?:number;scheduler_window_policy?:SchedulerWindowPolicy;max_lateness_seconds?:number;
   signal?:AbortSignal;now?:()=>Date;sleep?:(milliseconds:number)=>Promise<void>;accounts?:PublishingAccount[];accountCurrent?:(account:PublishingAccount,tx:Connection,requireFresh:boolean)=>Promise<boolean>;credential?:(account:PublishingAccount)=>Promise<string>;fetch?:typeof fetch;
   /** Must verify a server-controlled, immutable public JPEG object against its exact SHA-256. */
@@ -264,7 +266,18 @@ export class Publishing{
     return this.deliver(now);
   }
   /** Crash/timeout after claim is terminal uncertain, never requeued. */
+  /** Delivers, then tells the owner about one final outcome (never about repeating waits). */
   private async deliver(now:Date,target?:{id:string;version:string;accountId:string},signal=this.runtime.signal){
+    const result=await this.deliverOnce(now,target,signal) as Record<string,unknown>;
+    if(this.runtime.notify){
+      const id=String(result.id??result.blocked??""),outcome=typeof result.status==="string"?result.status:result.reason==="Scheduled time missed"?"missed":/invalidated|approval missing/i.test(String(result.reason||""))?"invalidated":null;
+      const row=id&&outcome?(await this.db.query<PublishRow>("SELECT * FROM publishing_outbox WHERE id=$1",[id]))[0]:undefined;
+      const notice=row?deliveryNotice(row,outcome!,this.runtime.dashboard_url):null;
+      if(notice)await this.runtime.notify(notice);
+    }
+    return result as Awaited<ReturnType<Publishing["deliverOnce"]>>;
+  }
+  private async deliverOnce(now:Date,target?:{id:string;version:string;accountId:string},signal=this.runtime.signal){
     if(!Number.isFinite(now.getTime()))throw new PublicationValidationError("Invalid dispatch time");
     if(this.runtime.enabled!==true)return {status:"disabled"};
     if(!target&&this.runtime.scheduler_window_policy){

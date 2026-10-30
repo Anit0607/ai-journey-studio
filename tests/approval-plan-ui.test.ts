@@ -9,7 +9,7 @@ function harness(file="../app/approval-plan-panel.tsx",fetcher?:typeof fetch){
  const values:any[]=[];let cursor=0;
  const hooks={useState:(initial:any)=>{const i=cursor++;if(!(i in values))values[i]=initial;return [values[i],(next:any)=>{values[i]=next;}];},useRef:(initial:any)=>{const i=cursor++;return values[i]??={current:initial};},useEffect:()=>{}};
  const source=readFileSync(new URL(file,import.meta.url),"utf8"),output=ts.transpileModule(source,{compilerOptions:{module:ts.ModuleKind.CommonJS,jsx:ts.JsxEmit.ReactJSX}}).outputText,exports:any={};
- new Function("require","exports","window","fetch","AbortSignal",output)((name:string)=>name==="react"?hooks:name.endsWith("/approval-plan-contract")?{currentApprovalPlanContract}:name.endsWith("/execution-readiness")?{executionReadiness:()=>({})}:name.startsWith(".")?{default:()=>null}:require(name),exports,{location:{search:""}},fetcher, {timeout:()=>new AbortController().signal});
+ new Function("require","exports","window","fetch","AbortSignal",output)((name:string)=>name==="react"?hooks:name.endsWith("/approval-plan-contract")?{currentApprovalPlanContract}:name.endsWith("/execution-readiness")?{executionReadiness:()=>({})}:name.endsWith("/lib/post-status")?{currentDelivery:()=>null,deliveryLocksApproval:()=>false}:name.startsWith(".")?{default:()=>null}:require(name),exports,{location:{search:""}},fetcher, {timeout:()=>new AbortController().signal});
  return {values,render:(component:any,props:any)=>{cursor=0;return component(props);},outer:exports.default,reset:()=>{values.length=0;}};
 }
 function nodes(n:any):any[]{return Array.isArray(n)?n.flatMap(nodes):n?.props?[n,...nodes(n.props.children)]:[];}

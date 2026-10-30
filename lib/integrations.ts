@@ -1,3 +1,4 @@
+import {ntfyNotifier} from './notify';
 import {schedulerWindowPolicy,schedulerWindowPhase,nextUtcIntakeBoundary} from './scheduler-window-policy';
 import {qstashSchedulerStatus} from './qstash-scheduler';
 import {createGitHubAppCredentialResolver,githubAppStatus} from "./github-app-auth";
@@ -13,6 +14,7 @@ export function publishingRuntime(config:IntegrationSettings,env:Record<string,s
  const p=config.publishing||{}, scheduler=schedulerStatus(config);
  const accounts=Array.isArray(p.accounts)?p.accounts.map(account=>{const a=account as Record<string,unknown>;const slot=typeof a.credential_env==='string'&&/^STUDIO_PUBLISH_[A-Z0-9_]{1,100}$/.test(a.credential_env)?a.credential_env:null;return {...a,credential_configured:!!slot&&!!env[slot]};}):[];
  return {...p,accounts,enabled:p.enabled===true,credential_use_authorized:p.credential_use_authorized===true,
+  notify:ntfyNotifier(env,fetcher),dashboard_url:env.STUDIO_ORIGIN,
   scheduler_authorized:scheduler.publication_ready,scheduler_interval_seconds:config.scheduler?.cadence_seconds,scheduler_window_policy:schedulerWindowPolicy(config.scheduler),
   monthly_cap_microdollars:typeof p.monthly_cap_microdollars==='number'?p.monthly_cap_microdollars:undefined,
   credential:async account=>typeof account.credential_env==='string'&&/^STUDIO_PUBLISH_[A-Z0-9_]{1,100}$/.test(account.credential_env)?env[account.credential_env]||'':'',fetch:fetcher,

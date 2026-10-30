@@ -21,7 +21,7 @@ test('hourly intake uses next fixed UTC boundary, lease and cadence; posting nev
   await service.tick(new Date('2026-10-26T12:03:30Z'));assert.equal(sources,1);assert.equal(posts,0);assert.equal(ready,0);
   const both=await Promise.all([service.tick(new Date('2026-10-26T13:00:00Z')),service.tick(new Date('2026-10-26T13:00:00Z'))]);assert.equal(sources,2);assert(both.some(value=>value.status==='already-running'));assert.equal(posts,0);
   await db.query("UPDATE integration_ticks SET next_source_sync='2026-10-20T00:00:00Z'");
-  await service.tick(new Date('2026-10-26T16:30:00Z'));assert.equal(sources,2,'Overdue source must never run before publication');assert.equal(posts,1);assert.equal(ready,1);
+  await service.tick(new Date('2026-10-26T18:00:00Z'));assert.equal(sources,2,'Overdue source must never run before publication');assert.equal(posts,1);assert.equal(ready,1);
   await service.tick(new Date('2026-10-26T17:00:00Z'));assert.equal(sources,3);assert.equal(posts,1);
  }finally{await db.close();}
 });

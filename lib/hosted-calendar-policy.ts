@@ -1,3 +1,4 @@
+import {slotBrief} from './schedule-presets';
 import type {Connection} from "./db";
 import {hash,type RuntimeConfig,type Source,type Task,type Output} from "./domain";
 import {activeGithubPolicy,resolveScopedSource,stableJson} from "./github-source-policy";
@@ -44,7 +45,9 @@ export async function scopedCalendarContext(tx:Connection,taskId:string,config:R
   const post=iso(entry.intended_post),review=iso(entry.review_due),generation=iso(entry.generation_due);
   if(!platform||!post||!review||!generation||iso(entry.draft_due)!==review||Date.parse(post)-Date.parse(review)!==48*3_600_000)return undefined;
   const expected={kind:entry.kind,planned_date:entry.planned_date,platforms:["LinkedIn"],platform_policy:NEW_PLATFORM_POLICY,intended_post:post,review_due:review,generation_due:generation,source_policy:{id:proof.policy_id,hash:proof.policy_hash,grant_id:proof.grant_id,provenance_id:proof.provenance_id}};
-  if(stableJson(root.content_brief)!==stableJson(expected)||stableJson(task.content_brief)!==stableJson(expected)||stableJson(entry.platform_schedule)!==stableJson({platform_policy:NEW_PLATFORM_POLICY,LinkedIn:{intended_post:post,draft_due:review,review_due:review}}))return undefined;
+  // Briefs created before the evidence schedule have no audience/format; both shapes are exact.
+  const briefs=[stableJson(expected),stableJson({...expected,...slotBrief(entry.planned_date)})];
+  if(!briefs.includes(stableJson(root.content_brief))||!briefs.includes(stableJson(task.content_brief))||stableJson(entry.platform_schedule)!==stableJson({platform_policy:NEW_PLATFORM_POLICY,LinkedIn:{intended_post:post,draft_due:review,review_due:review}}))return undefined;
   if(execution){
     const settings=(await tx.query<{generation_enabled:boolean}>("SELECT generation_enabled FROM calendar_settings WHERE id=1"))[0];
     const lead=Date.parse(post)-Date.parse(generation);

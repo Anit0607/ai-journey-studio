@@ -1,4 +1,5 @@
 import {enqueueLegacy} from "./legacy-task-fixture";
+import {ntfyNotifier,deliveryNotice} from "../lib/notify";
 import test from "node:test";
 import assert from "node:assert/strict";
 import {randomUUID} from "node:crypto";
@@ -202,4 +203,31 @@ test("invocation signal blocks unsent requests and marks in-flight abort outcome
  const controller=new AbortController(),states:string[]=[];
  await assert.rejects(publishOfficial({platform:"LinkedIn",remote_id:LI.remote_id,payload:{text:TEXT}},LI,"mock-token",async(_url,init)=>{calls++;assert(init?.signal);controller.abort();assert.equal(init.signal.aborted,true);throw Error("request aborted");},{before:async()=>{},after:async(_stage,_code,_id,state)=>{states.push(state);}},undefined,controller.signal),/uncertain/);
  assert.equal(calls,1);assert.deepEqual(states,["uncertain"]);
+});
+
+test("the owner gets one ntfy notice per final outcome, with no post text",async()=>{
+ const sent:Array<{url:string;headers:Record<string,string>;body:string}>=[];
+ const notifier=ntfyNotifier({STUDIO_NTFY_TOPIC:"owner-private-topic-123"},async(url,init)=>{sent.push({url:String(url),headers:init?.headers as Record<string,string>,body:String(init?.body)});return new Response("{}");})!;
+ assert.equal(ntfyNotifier({STUDIO_NTFY_TOPIC:"short"}),undefined,"weak topic names are refused");assert.equal(ntfyNotifier({}),undefined);
+ await fixture(async(db,{input})=>{
+  const publisher=new Publishing(db,runtime(linkedinSuccess,{notify:notifier,dashboard_url:"https://studio.example.test"}));
+  const row=await publisher.enqueue(input);await publisher.approve(row.id,row.version,true);
+  assert.equal((await publisher.dispatch(NOW)).status,"published");assert.equal((await publisher.dispatch(NOW)).status,"idle");
+ });
+ await fixture(async(db,{input})=>{
+  const publisher=new Publishing(db,runtime(async()=>new Response("{}",{status:422}),{notify:notifier,dashboard_url:"https://studio.example.test"}));
+  const row=await publisher.enqueue(input);await publisher.approve(row.id,row.version,true);
+  assert.equal((await publisher.dispatch(NOW)).status,"failed");
+ });
+ assert.equal(sent.length,2,"idle dispatches send nothing");
+ assert.equal(sent[0].url,"https://ntfy.sh/owner-private-topic-123");assert.equal(sent[0].headers.Title,"Published on LinkedIn");assert.equal(sent[0].headers.Click,"https://www.linkedin.com/feed/update/urn:li:share:98765/");
+ assert.equal(sent[1].headers.Title,"LinkedIn post failed");assert.equal(sent[1].headers.Priority,"high");assert.equal(sent[1].headers.Click,"https://studio.example.test");
+ for(const message of sent)assert(!message.body.includes(TEXT),"post text never leaves in a notification");
+});
+
+test("delivery notices exist only for final outcomes",()=>{
+ const row={platform:"LinkedIn",scheduled_at:"2026-11-03T03:30:00Z",provider_id:null};
+ assert.match(deliveryNotice(row,"published")!.message,/Tue,? 03 Nov, 09:00 IST/);
+ for(const outcome of ["failed","uncertain","missed","invalidated"])assert.equal(deliveryNotice(row,outcome,"https://d")!.priority,"high");
+ for(const outcome of ["idle","blocked","claimed"])assert.equal(deliveryNotice(row,outcome),null);
 });
