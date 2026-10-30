@@ -48,8 +48,26 @@ Hobby, which does not allow commercial use.
   37–51 tuned voice (`docs/linkedin-voice-v2.md`), fact selection, a one-off
   corrected comparison run (`docs/corrected-private-comparison.md`) and owner
   message context (`docs/owner-message-context.md`).
-- No post has ever been published. Scheduled delivery (QStash) has not been
-  verified end to end.
+- **Correction (verified in production DB, 30 Oct):** one post *was*
+  published to the owner's personal LinkedIn on 23 Oct 18:29 UTC
+  (`urn:li:share:7519465042535198722`, HTTP 201, `delivery_mode=manual`,
+  task `89b57b6a`). The LinkedIn connection is `tested` (person URN, scopes
+  `openid profile w_member_social`, token expires 22 Dec 2026).
+  Scheduled (QStash) delivery has still never published anything.
+- Production DB: 11 tasks, 9 completed drafts sitting in `review`, none
+  approved since. Latest is task `96737ed0` (26 Oct), with 7 revisions and 32
+  assistant evidence decisions. Calendar slots for 28, 29 and 30 Oct were
+  missed. Total October model spend is about $0.28 (64 calls).
+- Main blocker is review friction, not plumbing: each draft needs dozens of
+  per-sentence evidence decisions before approval.
+- `pricing_valid_until` in `STUDIO_RUNTIME_CONFIG` is 2026-10-30, so drafting
+  is blocked from 31 Oct until it is re-set (max 7-day window,
+  `lib/domain.ts:38-46`).
+- Production Neon: project `wispy-shadow-18019163`, branch
+  `br-summer-lab-a1d5whxh`, endpoint `ep-icy-poetry-a1aljq8e` (about 35 MB).
+  There are 9 stale preview branches from 13–22 Oct; ask before deleting.
+  Read-only access works by fetching `connection_uri` from the Neon API and
+  POSTing to `https://<endpoint>/sql` with `Neon-Batch-Read-Only: true`.
 
 ### Checks (this session)
 
