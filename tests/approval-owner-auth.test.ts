@@ -10,7 +10,7 @@ import {provisionOwner,handleOwnerAuth} from "../lib/owner-password";
 import {GET,POST} from "../app/api/studio/[action]/route";
 
 const account:PublishingAccount={id:"approval-auth-fixture",platform:"LinkedIn",remote_id:"urn:li:person:12345",label:"Fictional owner",enabled:true,verified:true,authorization_version:"fixture-v1",scopes:["w_member_social"],linkedin_version:"202610"};
-const ownerActions=["approve","approve-revision","publication-approve","publication-media-approve","approval-plan-approve","evidence-review","source-clear","agent-revise"];
+const ownerActions=["approve","approve-revision","publication-approve","publication-media-approve","approval-plan-approve","approval-plan-confirm-approve","attest-final-post","evidence-review","source-clear","agent-revise"];
 
 test("every approval action requires a live owner cookie and same origin; worker reads and execution remain permitted",async()=>{
  const db=await embedded(),globals=globalThis as typeof globalThis&{studioDb?:Promise<Database>},priorDb=globals.studioDb,priorFetch=globalThis.fetch;

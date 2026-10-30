@@ -14,8 +14,10 @@ import {APPROVAL_PLAN_CONTRACT_V2,currentApprovalPlanContract,type ApprovalPlan}
 function fail(message:string):never{throw new PublicationValidationError(message);}
 const scopedDb=(db:Database,tx:Connection):Database=>({...db,query:tx.query.bind(tx),transaction:work=>work(tx),close:async()=>{}});
 
-/** Read-only preparation. No outbox, approval, credential read or outbound call. */
-export async function previewApprovalPlan(db:Database,runtime:PublishingRuntime,taskId:string,token:string):Promise<ApprovalPlan>{
+/** Read-only preparation. No outbox, approval, credential read or outbound call.
+ * With allowOwnerConfirmation, open wording-review findings (never hard ones) are reported
+ * as pending_confirmation instead of failing, so one owner action can confirm and approve. */
+export async function previewApprovalPlan(db:Database,runtime:PublishingRuntime,taskId:string,token:string,options:{allowOwnerConfirmation?:boolean}={}):Promise<ApprovalPlan>{
   return db.transaction(async tx=>{
     // Settings -> OAuth guard -> entry -> task -> source/policy -> connection.
     await lockPublicationGuards(tx,true);
@@ -37,11 +39,11 @@ export async function previewApprovalPlan(db:Database,runtime:PublishingRuntime,
     if(runtime.accountCurrent&&!await runtime.accountCurrent(account,tx,false))fail("LinkedIn destination authorization changed");
     const quality=await reviewReadiness(tx,taskId,context.bundle,context.source);
     if(quality.editorial.blocking)fail("Resolve the saved editorial hold before approval or publication");
-    if(quality.flags.length)fail("Resolve source-grounding flags before approval");
+    if(quality.flags.length&&(!options.allowOwnerConfirmation||quality.flags.some(flag=>flag.kind==="hard")))fail("Resolve source-grounding flags before approval");
     const variants=platformVariants(context.bundle.find(a=>a.role==="Platform Adapter"),policy),variant=variants.variants.find(v=>v.platform==="LinkedIn");
     if(!variants.complete||!variant?.hash||variant.text===null)fail("Exact LinkedIn draft is incomplete");
     const values={...APPROVAL_PLAN_CONTRACT_V2,task_id:taskId,review_token:token,entry_id:entry.id,calendar_binding:calendarPublicationBinding(entry),source_hash:context.source.hash,clearance_id:context.source.clearance_id||null,quality_binding:quality.binding,evidence_version:quality.evidence_version,account_id:account.id,account_version:account.authorization_version,account_label:account.label,remote_id:account.remote_id,scheduled_at:at.toISOString(),scheduler_policy_hash,timezone:"UTC" as const,delivery_mode:"scheduled" as const,text:variant.text,variant_hash:variant.hash};
-    return {...values,version:hash(JSON.stringify(values))};
+    return {...values,version:hash(JSON.stringify(values)),...(quality.flags.length?{pending_confirmation:{count:quality.flags.length,binding:quality.binding}}:{})};
   });
 }
 
@@ -78,5 +80,28 @@ export async function approveApprovalPlan(db:Database,runtime:PublishingRuntime,
     const receipts=await tx.query<{detail:string}>("SELECT detail FROM events WHERE task_id=$1 AND kind=$2",[plan.task_id,APPROVAL_PLAN_EVENT]);
     if(!receipts.some(event=>JSON.parse(event.detail).plan_version===plan.version))await tx.query("INSERT INTO events(id,task_id,kind,detail) VALUES($1,$2,$3,$4)",[randomUUID(),plan.task_id,APPROVAL_PLAN_EVENT,JSON.stringify({outbox_id:row.id,entry_id:plan.entry_id,calendar_binding:plan.calendar_binding,plan_version:plan.version,scheduler_policy_hash:plan.scheduler_policy_hash,acknowledgement_version:plan.acknowledgement_version,acknowledgement:plan.acknowledgement,acknowledgement_hash:plan.acknowledgement_hash})]);
     return publisher.approve(row.id,row.version,true);
+  });
+}
+
+// Fields the owner saw; confirmation must not change any of them before approval.
+const CONSENTED_FIELDS=["task_id","review_token","entry_id","calendar_binding","source_hash","clearance_id","account_id","account_version","account_label","remote_id","scheduled_at","scheduler_policy_hash","timezone","delivery_mode","text","variant_hash"] as const;
+/** One owner action: confirm every open wording finding of the exact post, then approve its plan. */
+export async function confirmAndApproveApprovalPlan(db:Database,runtime:PublishingRuntime,input:unknown){
+  if(!input||typeof input!=="object"||Array.isArray(input)||Object.keys(input).sort().join(",")!=="acknowledged,acknowledgement,acknowledgement_hash,acknowledgement_version,binding,expected_plan,review_token,task_id")fail("Exact confirm-and-approve request required");
+  const body=input as Record<string,unknown>;
+  if(!currentApprovalPlanContract(body))fail("Current final-post acknowledgement required; refresh the approval preview");
+  if(body.acknowledged!==true||typeof body.task_id!=="string"||typeof body.review_token!=="string"||typeof body.expected_plan!=="string"||typeof body.binding!=="string")fail("Explicit exact plan acknowledgement required");
+  return db.transaction(async tx=>{
+    await lockPublicationGuards(tx,true);
+    const local=scopedDb(db,tx),before=await previewApprovalPlan(local,runtime,body.task_id as string,body.review_token as string,{allowOwnerConfirmation:true});
+    if(before.version!==body.expected_plan)fail("Approval plan changed; review the full preview again");
+    if(before.pending_confirmation){
+      if(before.pending_confirmation.binding!==body.binding)fail("Review changed; refresh before approving");
+      await new Store(local).attestFinalPost(before.task_id,before.review_token,{binding:before.pending_confirmation.binding,acknowledged:true});
+    }
+    const after=await previewApprovalPlan(local,runtime,before.task_id,before.review_token);
+    if(CONSENTED_FIELDS.some(key=>after[key]!==before[key]))fail("Approval plan changed; review the full preview again");
+    const {acknowledgement,acknowledgement_hash,acknowledgement_version}=APPROVAL_PLAN_CONTRACT_V2;
+    return approveApprovalPlan(local,runtime,{acknowledged:true,acknowledgement,acknowledgement_hash,acknowledgement_version,expected_plan:after.version,review_token:after.review_token,task_id:after.task_id});
   });
 }
