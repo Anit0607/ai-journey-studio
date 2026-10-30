@@ -24,10 +24,13 @@ test('actual six-stage fixture remains byte/hash exact and unapprovable after on
  const excluded='(Source hash: '+source.hash+')';
  const lesson=q.flags.find(f=>f.role==='Platform Adapter'&&f.reason==='Commit-title evidence does not establish the inferred configuration lesson');assert(lesson);assert.equal(lesson.kind,'hard');
  const signature=(f:Finding)=>JSON.stringify([f.role,f.kind,f.reason,f.claim,f.span.start,f.span.end]);
- assert.deepEqual(q.flags.filter(f=>f.id!==lesson.id).map(signature).sort(),observed.reviews[0].quality.flags.filter(f=>f.claim!==excluded).map(signature).sort());
+ // The stored review is unchanged except one Strategist sentence: it was hard only because
+ // its first word "When" counted as a new name; it is now owner wording review.
+ const reclassified=(f:Finding)=>f.role==='Strategist'&&f.claim.includes('it is common to specialize')?{...f,kind:'wording_review' as const,reason:'Compare this wording with exact cleared evidence'}:f;
+ assert.deepEqual(q.flags.filter(f=>f.id!==lesson.id).map(signature).sort(),observed.reviews[0].quality.flags.filter(f=>f.claim!==excluded).map(reclassified).map(signature).sort());
  assert.equal(q.flags.length,13);assert(q.flags.some(f=>f.kind==='hard'&&f.role==='Critic'));
  assert(q.flags.some(f=>f.role==='Writer'&&f.kind==='hard'&&f.claim.includes('records a configuration change')));
- assert(q.flags.some(f=>f.role==='Strategist'&&f.kind==='hard'&&f.claim.includes('it is common to specialize')));
+ assert(q.flags.some(f=>f.role==='Strategist'&&f.kind==='wording_review'&&f.claim.includes('it is common to specialize')));
  assert.equal(JSON.stringify(observed),before);
 });
 

@@ -81,11 +81,15 @@ test('Critic still sees exact current artifacts and current index; format accoun
  assert.match(prompt,/1200 output-token cap/);
  for(let checkpoint=0;checkpoint<6;checkpoint++)assert(Buffer.byteLength(render(checkpoint))+providerResponseFormatBytes('openai',checkpoint===5?{artifact:'critic'}:undefined)<48000);
  const q=evidenceQuality(fixture.outputs,source,[],NEW_PLATFORM_POLICY);
- // Exact PR50 baseline already has 18 hard + 11 wording holds; no guard is removed.
- assert.equal(q.flags.filter(x=>x.kind==='hard').length,18);
- assert.equal(q.flags.filter(x=>x.kind==='wording_review').length,11);
- assert.equal(hash(JSON.stringify(q.flags.map(({id,kind,role})=>({id,kind,role})))),'a502b84e8c2359c6f16c1a09f85257f2b54abb06afaa1adcf07c3b7855d8b146');
- assert.equal(q.critic.valid,false);
+ // PR50 baseline was 18 hard + 11 wording holds. Ordinary sentence-initial words that
+ // appear in the source ("Dashboard", "Provider", "Status") or are function words are no
+ // longer treated as new names, so 14 of those become owner wording review; the timing
+ // check now surfaces on two "Previously" sentences and stays hard.
+ assert.equal(q.flags.filter(x=>x.kind==='hard').length,4);
+ assert.equal(q.flags.filter(x=>x.kind==='wording_review').length,26);
+ assert.equal(hash(JSON.stringify(q.flags.map(({id,kind,role})=>({id,kind,role})))),'c3c360cd80edaba4f4ce405a1e2cf9666f6a7f651e56b5590512c96de74a7fe5');
+ // Its two citations that failed only on that sentence-start check now validate.
+ assert.equal(q.critic.valid,true);
  assert.equal(q.editorial.status,'editorial_review_required');
 });
 

@@ -41,7 +41,9 @@ test('captured upstream fabrications fail before projection, while canonical met
  assert.throws(()=>buildDraftPrompt(task(3),source,observed.outputs.slice(0,3)),/predecessor invalid/);
  assert.deepEqual(evidenceFindings(artifacts.slice(0,3),source.text,source.reported_date,NEW_PLATFORM_POLICY).filter(f=>['Harvester','Story Miner','Strategist'].includes(f.role)),[]);
  const badText=change(1,{extra:'The system saved 999 compute-unit hours.'});assert.throws(()=>parseNoteSelection(1,badText,source),/Invalid canonical note selection/);const badFindings=evidenceFindings([{role:'Story Miner',text:badText,hash:hash(badText)}],source.text,source.reported_date,NEW_PLATFORM_POLICY).filter(f=>f.role==='Story Miner');assert(badFindings.some(f=>f.kind==='hard'&&f.claim.includes('999')&&/figure/i.test(f.reason)),'Assert the injected clause itself, not an unrelated missing-bundle flag');
- assert.equal(EVIDENCE_POLICY,'evidence-review-v3-lossless-spans');const q=evidenceQuality(observed.outputs,source,[],NEW_PLATFORM_POLICY);assert.equal(q.flags.length,28);assert.equal(q.flags.filter(x=>x.kind==='hard').length,16);assert.equal(q.critic.valid,false);
+ assert.equal(EVIDENCE_POLICY,'evidence-review-v3-lossless-spans');const q=evidenceQuality(observed.outputs,source,[],NEW_PLATFORM_POLICY);// Sentence-start function/source words are no longer new names (16 -> 9 hard); two
+ // previously skipped public sentences are now checked and flagged (28 -> 30).
+ assert.equal(q.flags.length,30);assert.equal(q.flags.filter(x=>x.kind==='hard').length,9);assert.equal(q.critic.valid,false);
 });
 test('exact fact packet remains bound to current source and every immutable prior artifact',()=>{
  const selected=parseNoteSelection(2,artifacts[2].text,source,parseNoteSelection(1,artifacts[1].text,source));const packet=canonicalFactPacket(source,selected,artifacts[2].hash);assert.equal(packet.source_hash,source.hash);assert.equal(packet.selection_artifact_hash,artifacts[2].hash);

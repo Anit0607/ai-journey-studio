@@ -32,7 +32,7 @@ export const COMPARISON_PROMPT_POLICY_FILES=Object.freeze([
   },
   {
     "path": "lib/evidence-review.ts",
-    "sha256": "38fc8a1f35f54dbe3ae3dc180aff82eb0816a9f368752d484d0ff1ce6e7c8e19"
+    "sha256": "a74707e3858707384a68b04d95a95c3edc70eff7fa88622d988d84142010108e"
   },
   {
     "path": "lib/grounding.ts",
@@ -75,4 +75,4 @@ export const COMPARISON_PROMPT_POLICY_FILES=Object.freeze([
     "sha256": "fd779bfcd7d00308d2a477db4b131c3dd443dc01362ffce64803805235ca1908"
   }
 ]);
-export const COMPARISON_PROMPT_POLICY_HASH="611b0cc16f36fc021ce464dcea2405af37cf220525ef9b47f2bc7463db6794d3";
+export const COMPARISON_PROMPT_POLICY_HASH="e439f1a1f6c2013dadb9dd19c421429e05a4f8764b222788fa946168755af79e";

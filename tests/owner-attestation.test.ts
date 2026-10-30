@@ -6,7 +6,7 @@ import {embedded} from "../lib/db";
 import {Store} from "../lib/store";
 import {SourceIntake} from "../lib/sources";
 import {ROLES,hash} from "../lib/domain";
-import {evidenceQuality,OWNER_ATTESTATION_POLICY,OWNER_ATTESTATION_REASON} from "../lib/evidence-review";
+import {evidenceQuality,OWNER_ATTESTATION_POLICY,OWNER_ATTESTATION_REASON,OUTDATED_CRITIC_NOTE} from "../lib/evidence-review";
 import type {Artifact} from "../lib/grounding";
 import {variantFixture} from "./variant-fixture";
 const sourceText="AI Journey Studio is my personal project for documenting my AI learning journey. I am a non-coder and use AI agents for implementation while retaining final approval. The hosted dashboard and login are working. Automatic source collection, content generation and reviewed social publishing are not yet verified end to end.";
@@ -62,4 +62,33 @@ test('forged or mismatched confirmation rows resolve nothing',()=>{
  assert.equal(evidenceQuality(b,source,q.flags.map(f=>row(f,{actor:'assistant'}))).flags.length,q.flags.length);
  assert.equal(evidenceQuality(b,source,q.flags.map(f=>row(f,{binding:'other'}))).flags.length,q.flags.length);
  assert.equal(evidenceQuality(b,source,q.flags.map(f=>({...row(f),context:{...row(f).context,bundle_hash:'old'}}))).flags.length,q.flags.length);
+});
+
+test('a spelled-out source number supports the same digit; a genuinely new number stays hard',()=>{
+ const src='The endpoint used a five-minute autosuspend delay and two-minute integration requests.',s={text:src,hash:hash(src),cleared:true};
+ const flags=(writer:string)=>evidenceQuality(bundle(writer),s).findings.filter(f=>f.role==='Writer');
+ assert(flags('The database slept after 5 minutes of idle time and requests came every 2 minutes.').every(f=>f.kind==='wording_review'));
+ assert(flags('The database slept after 400 hours of running time.').some(f=>f.kind==='hard'&&/New figure/.test(f.reason)));
+});
+
+test('ordinary words starting a sentence need owner review, not a hard block; unknown mid-sentence names stay hard',()=>{
+ const flags=(writer:string)=>evidenceQuality(bundle(writer),source).findings.filter(f=>f.role==='Writer');
+ for(const text of ['But the hosted dashboard and login are working.','Posting has its own approval.'])assert(flags(text).every(f=>f.kind==='wording_review'),text);
+ assert(flags('The hosted dashboard was reviewed by Microsoft.').some(f=>f.kind==='hard'));
+ assert(flags('Microsoft reviewed the hosted dashboard.').some(f=>f.kind==='hard'),'an unknown name starting a public sentence is hard, never skipped');
+ assert(flags('Acme Corporation reviewed the hosted dashboard.').some(f=>f.kind==='hard'),'multiword names stay hard anywhere');
+});
+
+test('an owner edit to public copy replaces a structured Critic with a plain out-of-date note; other edits keep it',async()=>{
+ const run=async(role:string,critic:string)=>{const db=await embedded();try{const store=new Store(db),intake=new SourceIntake(db);const staged=await intake.stage({text:sourceText,category:'project-note',reported_date:'2026-10-21'});const cleared=await intake.clear(staged.id,staged.hash,true),task=await enqueueLegacy(store,cleared.id);
+  for(const x of bundle().map(a=>a.role==='Critic'?{role:a.role,text:critic,hash:hash(critic)}:a))await db.query('INSERT INTO outputs(id,task_id,role,text,hash) VALUES($1,$2,$3,$4,$5)',[randomUUID(),task.id,x.role,x.text,x.hash]);await db.query("UPDATE tasks SET status='review',checkpoint=6 WHERE id=$1",[task.id]);
+  const review=(await store.snapshot()).reviews[0],current=review.bundle.find((a:any)=>a.role===role).text;
+  await store.revise(task.id,review.token,'Owner wording change',{role,text:current+'\nAI Journey Studio documents my learning.'});
+  return (await store.snapshot()).reviews[0].bundle.find((a:any)=>a.role==='Critic').text;}finally{await db.close();}};
+ const structured='{"schema":2,"source_hash":"stale"}';
+ assert.equal(await run('Writer',structured),OUTDATED_CRITIC_NOTE);
+ assert.equal(await run('Strategist',structured),structured,'internal-only edits leave the Critic untouched');
+ assert.equal(await run('Writer',critic),critic,'a plain-prose Critic is kept');
+ const q=evidenceQuality(bundle().map(a=>a.role==='Critic'?{role:a.role,text:OUTDATED_CRITIC_NOTE,hash:hash(OUTDATED_CRITIC_NOTE)}:a),source);
+ assert.equal(q.critic.legacy,true);assert(q.flags.every(f=>f.kind==='wording_review'),'the note itself raises no hard finding');
 });

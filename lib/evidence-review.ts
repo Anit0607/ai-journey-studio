@@ -15,6 +15,8 @@ export const ASSISTANT_EVIDENCE_POLICY="assistant-wording-comparison-v1";
 /** One owner confirmation of the complete final post. It resolves only current
  * wording-review findings of the exact bundle; hard findings and Critic
  * "unsupported" verdicts still block, and any edit invalidates it. */
+/** Plain Critic note saved when the owner edits public copy after a structured Critic review. */
+export const OUTDATED_CRITIC_NOTE="Unsupported claims: Not re-checked by the AI fact-check. It reviewed an earlier version, and the owner edited the post afterwards.\nEvidence needed: Every reworded sentence is listed for the owner to compare with the cleared source.\nProposed advice: Read the complete edited post and confirm it only if every statement in it is true.";
 export const OWNER_ATTESTATION_POLICY="owner-final-post-attestation-v1";
 export const OWNER_ATTESTATION_REASON="Owner read the complete final post and confirmed every statement in it is true and fit to share publicly.";
 export type Span={start:number;end:number};
@@ -96,9 +98,18 @@ const sourceSentences=(source:string)=>spans(source).map(x=>x.text);
 const exact=(claim:string,source:string)=>sourceSentences(source).some(x=>plain(x)===plain(claim));
 const factual=(claim:string)=>/\b(?:I|my|Anit|owner|project|dashboard|login|system|agents?|workflow|he|she|they|we|our|it)\b.*\b(?:am|is|are|was|were|has|have|had|use[sd]?|identifies|retain[sd]?|work(?:ing|s)?|focus(?:ed|es)?|learn(?:ed|s)?|found|discovered|achieved|build[sd]?|built|documents?|demonstrates?|highlights?|verified|operational)\b/i.test(claim);
 const dangerous=/\b(?:discovered|achieved|earned|increased|improved|successfully|always|guaranteed|reliably|reliable|proven|expert|engineer|years of experience|functioning as intended|fully operational|perfect|my favorite|my family|born in|degree in|worked at)\b|(?:experience|journey) (?:highlights|shows|taught|demonstrates)/i;
+// An ordinary word that starts a sentence ("Posting", "Later") is not a new name: its
+// lowercase form is in the source, or it has a common verb/adverb ending. The finding
+// still needs owner review as reworded text; mid-sentence unknown names stay hard.
+const SENTENCE_FUNCTION_WORDS=new Set(['Can','Could','Should','Would','Will','Do','Does','Did','Show','Tell','Try','Ask','Let','Make','Take','Look','See','Find','Later','Earlier','Today','Next','First','Finally','Instead','Again','Not','Nothing','Nobody','Everything','Something','But','And','Or','Yet','Then','Now','Just','When','What','Where','Why','Which','While','After','Before','Once','Since','Because','Although','Still','Also','Even','Here','There','These','Every','Each','Some','Most','Many','In','On','At','By','With','To','From','Of','An','You','Your','Its','Their','His','Her']);
+const ordinarySentenceStart=(word:string,source:string)=>/^[A-Z][a-z]+$/.test(word)&&(SENTENCE_FUNCTION_WORDS.has(word)||/(?:ing|ed|ly)$/.test(word)||new RegExp('\\b'+word.toLowerCase()+'\\b').test(source));
+// A source that spells a number out ("five-minute") supports the same digit ("5 minutes").
+const NUMBER_WORDS:Readonly<Record<string,string>>={one:'1',two:'2',three:'3',four:'4',five:'5',six:'6',seven:'7',eight:'8',nine:'9',ten:'10',eleven:'11',twelve:'12',thirteen:'13',fourteen:'14',fifteen:'15',sixteen:'16',seventeen:'17',eighteen:'18',nineteen:'19',twenty:'20',thirty:'30',forty:'40',fifty:'50',sixty:'60',seventy:'70',eighty:'80',ninety:'90'};
+const sourceNumberWords=(source:string)=>(source.match(/\b(?:one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety)\b/gi)||[]).map(word=>NUMBER_WORDS[word.toLowerCase()]);
+const CAPITALIZED_TERM='New named entity or unsupported capitalized term requires correction';
 function hardReason(claim:string,source:string,role?:string):string|null{
  if(/\b(?:this|the) draft\b.*(?:exact sentences|no added assumptions|no invented|only.*facts)/i.test(claim))return 'Draft self-certification is not source evidence; remove it';
- const figures:string[]=claim.match(/(?:\$\s*)?\b\d+(?:[.,]\d+)?%?/g)||[];const sourceFigures:string[]=source.match(/(?:\$\s*)?\b\d+(?:[.,]\d+)?%?/g)||[];
+ const figures:string[]=claim.match(/(?:\$\s*)?\b\d+(?:[.,]\d+)?%?/g)||[];const sourceFigures:string[]=[...(source.match(/(?:\$\s*)?\b\d+(?:[.,]\d+)?%?/g)||[]),...sourceNumberWords(source)];
  if(figures.some(x=>!sourceFigures.includes(x)))return "New figure requires new cleared evidence";
  const extra=claim.match(dangerous);if(extra&&!source.toLowerCase().includes(extra[0].toLowerCase()))return "Added outcome, biography or certainty requires correction or new evidence";
  // Structural labels are not names. Keep the body, original claim and span;
@@ -109,7 +120,7 @@ function hardReason(claim:string,source:string,role?:string):string|null{
  // Only these sentence-initial grammatical/discourse words are exempt from
  // the single-term entity check; later occurrences and multiword names are not.
  const firstWord=entityText.search(/[A-Za-z]/);
- if(singleNames.some(match=>{const x=match[0];const connective=match.index===firstWord&&['Following','Subsequently','Upon','If','Is','For','So','How','Those','Separately'].includes(x);return !connective&&!source.includes(x)&&!['The','This','That','It','As','However','Currently','Proposed','Evidence','Unsupported','Review','Owner','Content','Audience','Approach','Human','Keep','Use','Only','No','All','Source','LinkedIn','Instagram','Writer','Platform','Adapter','Check','My','We','Our','They','He','She'].includes(x);}))return 'New named entity or unsupported capitalized term requires correction';
+ if(singleNames.some(match=>{const x=match[0];const connective=match.index===firstWord&&(['Following','Subsequently','Upon','If','Is','For','So','How','Those','Separately'].includes(x)||ordinarySentenceStart(x,source));return !connective&&!source.includes(x)&&!['The','This','That','It','As','However','Currently','Proposed','Evidence','Unsupported','Review','Owner','Content','Audience','Approach','Human','Keep','Use','Only','No','All','Source','LinkedIn','Instagram','Writer','Platform','Adapter','Check','My','We','Our','They','He','She'].includes(x);}))return CAPITALIZED_TERM;
  if(names.some(x=>!source.includes(x)&&!['Proposed approach','Evidence needed','Unsupported claims','Proposed advice'].includes(x)))return "New named entity requires new cleared evidence";
  // An observed removal does not establish that Studio performed it. This narrow
  // product-action guard is not general actor/semantic verification.
@@ -148,7 +159,7 @@ export function evidenceFindings(bundle:Artifact[],source:string,reportedDate?:s
    if(verifiedSourceEnvelope(atom.text,artifact.role,source,reportedDate))continue;
    const internal=['Harvester','Story Miner','Strategist'].includes(artifact.role);
    if(internal&&((reportedDate&&(atom.text==='SOURCE DATE: '+reportedDate||atom.text===reportedDate))||atom.text===hash(source)||(atom.text.startsWith('SOURCE: ')&&exact(atom.text.slice(8),source))))continue;
-   if(exact(atom.text,source)||(atom.raw&&spans(atom.text).length>0&&spans(atom.text).every(x=>exact(x.text,source)))||(source===CAPSULE&&SUPPORTED_SENTENCES.some(x=>plain(x)===plain(atom.text)))||/^#{1,3} (?:LinkedIn|X|Instagram)$/.test(atom.text)||(!factual(atom.text)&&!(/^(?:Writer|Platform Adapter)$/.test(artifact.role)&&/\b(?:is|are|was|were|has|have|documents?|uses?|publish(?:ed|es)?|delet(?:ed|es)?|remov(?:ed|es)?|supports?|tested)\b/i.test(atom.text))&&!dangerous.test(atom.text)&&! /\d/.test(atom.text)))continue;
+   if(exact(atom.text,source)||(atom.raw&&spans(atom.text).length>0&&spans(atom.text).every(x=>exact(x.text,source)))||(source===CAPSULE&&SUPPORTED_SENTENCES.some(x=>plain(x)===plain(atom.text)))||/^#{1,3} (?:LinkedIn|X|Instagram)$/.test(atom.text)||(!factual(atom.text)&&!(/^(?:Writer|Platform Adapter)$/.test(artifact.role)&&/\b(?:is|are|was|were|has|have|documents?|uses?|publish(?:ed|es)?|delet(?:ed|es)?|remov(?:ed|es)?|supports?|tested)\b/i.test(atom.text))&&!dangerous.test(atom.text)&&! /\d/.test(atom.text)&&!(/^(?:Writer|Platform Adapter)$/.test(artifact.role)&&hardReason(atom.text,source,artifact.role))))continue;
    if(out.some(x=>x.role===artifact.role&&x.span.start===atom.start))continue;
    const hard=hardReason(atom.text,source,artifact.role);
    out.push(finding(artifact.role,atom.raw||atom.text,hard||"Compare this wording with exact cleared evidence",hard?"hard":"wording_review",artifact.hash,{start:atom.start,end:atom.end}));
@@ -271,7 +282,8 @@ export const CRITIC_CONTRACT=' Return JSON only, without Markdown fences or surr
 function citationSuggestions(data:Record<string,unknown>,bundle:Artifact[],source:EvidenceSource){
  const allowed=['schema','source_hash','index_hash','Unsupported claims:','Evidence needed:','Proposed advice:','evidence'];
  if(Object.keys(data).some(key=>!allowed.includes(key))||data.source_hash!==source.hash||!Array.isArray(data.evidence)||data.evidence.length>8||['Unsupported claims:','Evidence needed:','Proposed advice:'].some(key=>typeof data[key]!=='string'||!String(data[key]).trim()||String(data[key]).length>1000))throw Error();
- const index=criticCitationIndex(bundle,source);if(data.index_hash!==index.index_hash)throw Error();
+ const index=criticCitationIndex(bundle,source);
+ if(data.index_hash!==index.index_hash)throw Error();
  const seen=new Set<string>();
  const suggestions=data.evidence.map((value:unknown)=>{
   if(!value||typeof value!=='object'||Array.isArray(value))throw Error();const x=value as Record<string,unknown>;
