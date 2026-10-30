@@ -10,7 +10,7 @@ import {resolveScopedSource} from "./github-source-policy";
 import {scopedSourceProof,scopedTaskMatches} from "./scoped-source-proof";
 import {taskPlatformPolicyHash} from "./platform-policy-binding";
 import {newTaskPlatformBrief,taskPlatformPolicy} from "./platform-policy";
-import {evidenceQuality,reviewReadiness,saveEvidenceDecision,saveAssistantEvidenceDecision,saveEvidenceApproval,type Decision,type AssistantEvidenceInput} from "./evidence-review";
+import {evidenceQuality,reviewReadiness,saveEvidenceDecision,saveOwnerAttestation,saveAssistantEvidenceDecision,saveEvidenceApproval,type Decision,type AssistantEvidenceInput} from "./evidence-review";
 import {usageSummary} from "./usage";
 import {OwnerReports} from "./owner-reports";
 import {platformVariants} from "./platform-variants";
@@ -305,6 +305,13 @@ export class Store{
       const context=await this.revisionContext(tx,id,expected);
       await assertNoPendingAgentRevision(tx,id);
       return saveEvidenceDecision(tx,id,context.bundle,context.source,input);
+    });
+  }
+  async attestFinalPost(id:string,expected:string,input:Parameters<typeof saveOwnerAttestation>[4]){
+    return this.db.transaction(async tx=>{
+      const context=await this.revisionContext(tx,id,expected);
+      await assertNoPendingAgentRevision(tx,id);
+      return saveOwnerAttestation(tx,id,context.bundle,context.source,input);
     });
   }
   async recordOwnerMessageContext(input:OwnerContextInput){

@@ -1,5 +1,6 @@
 "use client";
 import EvidencePanel from "./evidence-panel";
+import FinalPostReview from "./final-post-review";
 import {useEffect,useId,useReducer,useRef,useState,type CSSProperties} from "react";
 const textStyle:CSSProperties={display:"block",width:"100%",boxSizing:"border-box",background:"#0d141c",color:"#dce8ed",border:"1px solid #30404b",padding:"12px",margin:"8px 0"};
 type Version={token:string;sequence:number;bundle:Record<string,string>};
@@ -107,8 +108,11 @@ export default function RevisionPanel({task,review,busy,action,agentRevisionElig
     <p>Original approval remains in history. Approval does not establish truth or authorize publishing.</p>
     <p className="fine">{review.quality.notice}</p>
     {review.quality.editorial&&<section aria-label="Editorial review"><h3>Story and reader value</h3><p><strong>{review.quality.editorial.status.replaceAll("_"," ")}</strong></p><p>{review.quality.editorial.notice}</p>{review.quality.editorial.issues.map((issue:any,index:number)=><p key={index}><strong>{issue.role}:</strong> {issue.message}</p>)}</section>}
+    <FinalPostReview task={task} token={review.token} review={review} busy={busy||saving} action={action}/>
+    <details><summary>Advanced: review sentence by sentence</summary>
     {review.quality.flags.length>0&&<details><summary>Source-grounding flags ({review.quality.flags.length})</summary>{review.quality.flags.map((flag:any,index:number)=><p key={index}><strong>{flag.role}:</strong> {flag.claim}<br/>{flag.reason}</p>)}</details>}
     <EvidencePanel quality={review.quality} task={task} token={review.token} busy={busy||saving} action={action}/>
+    </details>
     <label>Reason / revision note<textarea style={textStyle} aria-label="Revision note" value={note} maxLength={1000} onChange={event=>setNote(event.target.value)}/></label>
     <p className="fine">Feedback may change tone or structure. New personal facts need their own cleared source. Do not include bank, client, private, confidential, or credential material.</p>
     <button disabled={busy||saving||!!editor.pending||!note.trim()||!canRequestAgent} onClick={async()=>{setAck(false);await action("agent-revise",{task,expected:review.token,note});}}>Request agent revision</button>
