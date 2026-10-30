@@ -10,7 +10,7 @@ import {resolveScopedSource} from "./github-source-policy";
 import {scopedSourceProof,scopedTaskMatches} from "./scoped-source-proof";
 import {taskPlatformPolicyHash} from "./platform-policy-binding";
 import {newTaskPlatformBrief,taskPlatformPolicy} from "./platform-policy";
-import {evidenceQuality,reviewReadiness,saveEvidenceDecision,saveOwnerAttestation,saveAssistantEvidenceDecision,saveEvidenceApproval,type Decision,type AssistantEvidenceInput} from "./evidence-review";
+import {evidenceQuality,reviewReadiness,saveEvidenceDecision,saveOwnerAttestation,criticSuggestions,OUTDATED_CRITIC_NOTE,saveAssistantEvidenceDecision,saveEvidenceApproval,type Decision,type AssistantEvidenceInput} from "./evidence-review";
 import {usageSummary} from "./usage";
 import {OwnerReports} from "./owner-reports";
 import {platformVariants} from "./platform-variants";
@@ -294,6 +294,9 @@ export class Store{
       const context=await this.revisionContext(tx,id,expected);
       if(edit&&context.bundle.find(item=>item.role===edit.role)?.text===edit.text)throw Error("No content change");
       const bundle=context.bundle.map(item=>({role:item.role,text:edit?.role===item.role?edit.text:item.text,hash:edit?.role===item.role?hash(edit.text):item.hash}));
+      // An owner edit to public copy makes a structured Critic's sentence index stale. Replace
+      // it with a plain note instead of leaving a citation set that no longer matches the text.
+      if(edit&&["Writer","Platform Adapter"].includes(edit.role)&&!criticSuggestions(context.bundle,context.source).legacy){const critic=bundle.find(item=>item.role==="Critic");if(critic){critic.text=OUTDATED_CRITIC_NOTE;critic.hash=hash(OUTDATED_CRITIC_NOTE);}}
       const revision=randomUUID(),version=bundleVersion(bundle,context.source.hash);
       await tx.query("INSERT INTO content_revisions(id,task_id,parent_id,base_token,version,bundle,request_note,sequence) VALUES($1,$2,$3,$4,$5,$6,$7,$8)",[revision,id,context.latest?.id||null,expected,version,JSON.stringify(bundle),note.trim(),(context.latest?.sequence||0)+1]);
       await this.event(tx,id,edit?"manual_revision_saved":"changes_requested","New revision "+revision+"; historical approvals preserved; fresh approval required");
