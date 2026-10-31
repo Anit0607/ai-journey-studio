@@ -41,6 +41,9 @@ function pricingCurrent(c:RuntimeConfig,date:Date):boolean{
   if(today===null||verified===null||verified>today)return false;
   // An unapproved or absent window never extends the original same-day gate.
   if(c.pricing_window_authorized!==true)return verified===today;
+  // Owner-approved standing prices (30 Oct 2026) stay valid until the configured prices are
+  // changed. The monthly budget cap and per-call reservations still apply to every call.
+  if(c.pricing_valid_until==="until-changed")return true;
   const until=utcDay(c.pricing_valid_until);
   // Seven UTC calendar days includes the verification day, so the final day is +6.
   return until!==null&&until>=verified&&until-verified<=6*86_400_000&&today<=until;

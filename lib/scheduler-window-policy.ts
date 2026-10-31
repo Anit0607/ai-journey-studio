@@ -1,7 +1,9 @@
 import {createHash} from 'node:crypto';
 
 /** Opt-in, server-only policy. This is an admission policy, never publication consent. */
-export const FIXED_WEEKLY_UTC=['Mon16:30','Wed10:30','Fri09:30','Sun16:30'] as const;
+// Evidence-based schedule v2 (owner-approved 30 Oct 2026): Mon 23:30 IST global post,
+// Tue 09:00 IST India post, Wed 19:30 IST global long-form post, Thu 09:00 IST India post.
+export const FIXED_WEEKLY_UTC=['Mon18:00','Tue03:30','Wed14:00','Thu03:30'] as const;
 export const OPTIONAL_DATED_UTC='2026-10-29T10:30:00Z';
 export const FIXED_WINDOW_LIMITS={intake_window_seconds:240,posting_before_seconds:240,posting_after_seconds:360,max_lateness_seconds:300} as const;
 export type SchedulerWindowPolicy={mode:'generic';valid:true;hash:null}|{mode:'invalid';valid:false;hash:null}|{mode:'fixed-cadence-v1';valid:true;hash:string;weekly_utc:string[];exceptions_utc:string[]};
@@ -23,7 +25,7 @@ export function schedulerWindowStatus(scheduler:unknown){
  return {...policy,weekly_utc:policy.mode==='fixed-cadence-v1'?policy.weekly_utc:[],exceptions_utc:policy.mode==='fixed-cadence-v1'?policy.exceptions_utc:[],...FIXED_WINDOW_LIMITS,
  notice:policy.mode==='invalid'?'Invalid explicit scheduler window policy. Scheduling is blocked; there is no continuous-polling fallback.':policy.mode==='generic'?'Generic scheduler cadence; fixed windows are not enabled.':'Hourly source intake uses UTC minutes 00–03:59.999. Publication wakes run from 4 minutes before through 6 minutes after each exact anchor. No provider request is allowed early or more than 5 minutes late. The dated exception is not publication approval.'};
 }
-const weekly=new Map([[1,'16:30'],[3,'10:30'],[5,'09:30'],[0,'16:30']]);
+const weekly=new Map([[1,'18:00'],[2,'03:30'],[3,'14:00'],[4,'03:30']]);
 export function exactSchedulerAnchor(policy:SchedulerWindowPolicy,value:string|Date):boolean{
  const date=new Date(value),milliseconds=date.getTime();
  if(!Number.isFinite(milliseconds)||policy.mode==='invalid')return false;

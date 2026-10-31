@@ -15,3 +15,12 @@ export function parseAssistantRevision(input:unknown){
   if(typeof body.task!=="string"||typeof body.expected!=="string"||typeof body.note!=="string"||typeof body.text!=="string"||!["Writer","Platform Adapter"].includes(String(body.role)))throw Error("Invalid assistant revision request");
   return {task:body.task,expected:body.expected,note:body.note,role:String(body.role),text:body.text};
 }
+/** Scheduling only: applying the evidence schedule or moving a post. Moves cancel unattempted
+ * delivery plans, so nothing the assistant does here can approve or publish a post. */
+export function parseAssistantCalendar(input:unknown):{op:"apply-schedule"}|{op:"move";entry:string;planned_date:string}{
+  if(!input||typeof input!=="object"||Array.isArray(input))throw Error("Invalid assistant calendar request");
+  const body=input as Record<string,unknown>,keys=Object.keys(body).sort().join(",");
+  if(body.op==="apply-schedule"&&keys==="op")return {op:"apply-schedule"};
+  if(body.op==="move"&&keys==="entry,op,planned_date"&&typeof body.entry==="string"&&typeof body.planned_date==="string")return {op:"move",entry:body.entry,planned_date:body.planned_date};
+  throw Error("Invalid assistant calendar request");
+}

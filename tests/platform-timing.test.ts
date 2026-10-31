@@ -6,15 +6,15 @@ import {Calendar} from "../lib/calendar";
 import {Store} from "../lib/store";
 import {BENCHMARK_PRESET} from "../lib/schedule-presets";
 import {BASE_SCHEMA,PREFLIGHT_SCHEMA,REVISION_SCHEMA,CALENDAR_SCHEMA,PLATFORM_TIMING_SCHEMA} from "../lib/schema";
-const config={start_date:"2026-10-14",post_time:null,short_days:[1,3,5],long_day:0,generation_lead_hours:null,timing_mode:"per_platform" as const,platform_times:BENCHMARK_PRESET.times,timing_basis:BENCHMARK_PRESET.id};
+const config={start_date:"2026-10-14",post_time:null,short_days:BENCHMARK_PRESET.short_days,long_day:BENCHMARK_PRESET.long_day,generation_lead_hours:null,timing_mode:"per_platform" as const,platform_times:BENCHMARK_PRESET.times,timing_basis:BENCHMARK_PRESET.id};
 test("platform/day benchmark is optional; no hours or dates are seeded",async()=>{
   const db=await embedded();try{const calendar=new Calendar(db),settings=await calendar.settings();assert.equal(settings.start_date,null);assert.equal(settings.post_time,null);assert.deepEqual(settings.platform_times,{});assert.equal(settings.timing_basis,null);assert.equal((await db.query<any>("SELECT * FROM calendar_entries")).length,0);}finally{await db.close();}
 });
 test("new Wednesday plan uses only LinkedIn timing and preserves its 48-hour review deadline",async()=>{
   const db=await embedded();try{const calendar=new Calendar(db),store=new Store(db);await calendar.configure(config);await calendar.plan(1);const snapshot=await calendar.snapshot(await store.snapshot(),{},false),entry=snapshot.entries[0];assert.equal(entry.planned_date,"2026-10-14");
     const linkedin=entry.variants.find((item:any)=>item.platform==="LinkedIn");
-    assert.equal(linkedin.intended_post,"2026-10-14T10:30:00.000Z");assert.equal(entry.variants.length,1);assert.equal(new Date(entry.review_due).toISOString(),"2026-10-12T10:30:00.000Z");assert.equal(linkedin.review_due,"2026-10-12T10:30:00.000Z");assert.equal(entry.generation_due,null);assert.equal(snapshot.paid_activation,false);assert.equal(snapshot.settings.timing_basis,BENCHMARK_PRESET.id);assert.equal((await store.snapshot()).ledger.length,0);
-    const monday=snapshot.entries.find((item:any)=>item.planned_date==="2026-10-19");assert.equal(monday.variants.find((item:any)=>item.platform==="LinkedIn").intended_post,"2026-10-19T16:30:00.000Z");
+    assert.equal(linkedin.intended_post,"2026-10-14T14:00:00.000Z");assert.equal(entry.variants.length,1);assert.equal(new Date(entry.review_due).toISOString(),"2026-10-12T14:00:00.000Z");assert.equal(linkedin.review_due,"2026-10-12T14:00:00.000Z");assert.equal(entry.generation_due,null);assert.equal(snapshot.paid_activation,false);assert.equal(snapshot.settings.timing_basis,BENCHMARK_PRESET.id);assert.equal((await store.snapshot()).ledger.length,0);
+    const monday=snapshot.entries.find((item:any)=>item.planned_date==="2026-10-19");assert.equal(monday.variants.find((item:any)=>item.platform==="LinkedIn").intended_post,"2026-10-19T18:00:00.000Z");
   }finally{await db.close();}
 });
 test("partial/invalid platform times cannot silently fall back to shared hour or mislabel provenance",async()=>{

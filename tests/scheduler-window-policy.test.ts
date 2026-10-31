@@ -19,14 +19,14 @@ test('fixed mode is explicitly opt-in, strict, canonical and independent of curr
 
 test('UTC exact anchors also accept equivalent IST instants, never the surrounding wake window',()=>{
  const policy=schedulerWindowPolicy(fixedSettings().scheduler);
- for(const at of ['2026-10-26T22:00:00+05:30','2026-10-28T16:00:00+05:30','2026-10-30T15:00:00+05:30','2026-11-01T22:00:00+05:30',OPTIONAL_DATED_UTC])assert.equal(exactSchedulerAnchor(policy,at),true,at);
- for(const at of ['2026-10-26T16:26:00Z','2026-10-26T16:30:00.001Z','2026-10-26T16:32:00Z','2026-10-27T16:30:00Z','2026-11-05T10:30:00Z','invalid'])assert.equal(exactSchedulerAnchor(policy,at),false,at);
+ for(const at of ['2026-10-26T23:30:00+05:30','2026-10-28T19:30:00+05:30','2026-10-27T09:00:00+05:30','2026-10-29T09:00:00+05:30',OPTIONAL_DATED_UTC])assert.equal(exactSchedulerAnchor(policy,at),true,at);
+ for(const at of ['2026-10-26T17:56:00Z','2026-10-26T18:00:00.001Z','2026-10-26T18:02:00Z','2026-10-27T16:30:00Z','2026-11-05T10:30:00Z','invalid'])assert.equal(exactSchedulerAnchor(policy,at),false,at);
  assert.equal(exactSchedulerAnchor(schedulerWindowPolicy(fixedSettings(false).scheduler),OPTIONAL_DATED_UTC),false);
 });
 
 test('intake half-open and posting inclusive boundaries are deterministic UTC, including dated exception',()=>{
  const policy=schedulerWindowPolicy(fixedSettings().scheduler);
- for(const [at,phase] of [['2026-10-26T12:00:00Z','intake'],['2026-10-26T12:03:59.999Z','intake'],['2026-10-26T12:04:00Z','idle'],['2026-10-26T16:25:59.999Z','idle'],['2026-10-26T16:26:00Z','publication'],['2026-10-26T16:36:00Z','publication'],['2026-10-26T16:36:00.001Z','idle'],['2026-10-29T10:26:00Z','publication'],['2026-11-05T10:30:00Z','idle']])assert.equal(schedulerWindowPhase(policy,new Date(at)),phase,at);
+ for(const [at,phase] of [['2026-10-26T12:00:00Z','intake'],['2026-10-26T12:03:59.999Z','intake'],['2026-10-26T12:04:00Z','idle'],['2026-10-26T17:55:59.999Z','idle'],['2026-10-26T17:56:00Z','publication'],['2026-10-26T18:06:00Z','publication'],['2026-10-26T18:06:00.001Z','idle'],['2026-10-29T10:26:00Z','publication'],['2026-11-05T10:30:00Z','idle']])assert.equal(schedulerWindowPhase(policy,new Date(at)),phase,at);
  assert.equal(nextUtcIntakeBoundary(new Date('2026-10-26T12:03:59Z')).toISOString(),'2026-10-26T13:00:00.000Z');
  assert.equal(schedulerWindowPhase(policy,new Date(NaN)),'invalid');
  assert.equal(schedulerWindowPhase(schedulerWindowPolicy({}),new Date('2026-10-26T12:15:00Z')),'generic');

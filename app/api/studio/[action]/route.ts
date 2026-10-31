@@ -2,7 +2,8 @@ import {validOwnerContextInput} from '../../../../lib/owner-message-context';
 import {validAssistantEvidenceInput} from '../../../../lib/evidence-review';
 import {runOwnerCalendar,ownerCalendarSnapshot,validOwnerCalendarRequest} from "../../../../lib/owner-calendar";
 import {previewApprovalPlan,approveApprovalPlan,confirmAndApproveApprovalPlan} from "../../../../lib/approval-plan";
-import {assistantEditAuthorized,parseAssistantRevision} from "../../../../lib/assistant-edit";
+import {assistantEditAuthorized,parseAssistantRevision,parseAssistantCalendar} from "../../../../lib/assistant-edit";
+import {applyEvidenceSchedule,moveCalendarEntry} from "../../../../lib/calendar-schedule";
 import {runOwnerDraft,ownerDraftSnapshot,validOwnerDraftRequest} from "../../../../lib/owner-draft";
 import {advanceGenerationNow,GenerationTimeError,validGenerationTimeInput,parseGenerationTimeRequest} from '../../../../lib/calendar-generation-time';
 import {renderApprovedInstagram,getPrivateMedia,approvePublicMedia,safeMediaError} from "../../../../lib/publication-media";
@@ -62,10 +63,11 @@ export async function GET(request:Request,context:Context){
 export async function POST(request:Request,context:Context){
   const {action}=await context.params;
   if(action==="assistant-revise")return assistantRevise(request);
+  if(action==="assistant-calendar")return assistantCalendar(request);
   // Worker execution credentials cannot grant owner source, evidence, content or publication consent.
-  if(!await (["calendar-generation-now","publication-publish","owner-draft-run","owner-calendar-run","approval-plan-approve","approval-plan-confirm-approve","source-clear","evidence-review","attest-final-post","assistant-evidence-review","owner-message-context","approve","approve-revision","publication-approve","publication-media-approve","agent-revise"].includes(action)?passwordOwnerAuthenticated(request):ownerApiAuthenticated(request)))return response({error:"Private access required"},401);
+  if(!await (["calendar-generation-now","publication-publish","owner-draft-run","owner-calendar-run","approval-plan-approve","approval-plan-confirm-approve","calendar-apply-schedule","calendar-move","source-clear","evidence-review","attest-final-post","assistant-evidence-review","owner-message-context","approve","approve-revision","publication-approve","publication-media-approve","agent-revise"].includes(action)?passwordOwnerAuthenticated(request):ownerApiAuthenticated(request)))return response({error:"Private access required"},401);
   if(!allowedOrigin(request))return response({error:"Origin rejected"},403);
-  if(!["calendar-generation-now","approval-plan-approve","approval-plan-confirm-approve","owner-draft-run","owner-calendar-run","publication-media-stage","publication-media-approve","integration-sync","integration-import","publication-enqueue","publication-approve","publication-cancel","publication-revise","publication-publish","metrics-save","money-add","money-void","coverage-confirm","source-stage","source-clear","source-revoke","agent-revise","calendar-dispatch","source","run","approve","cancel","retry","step","evidence-review","attest-final-post","assistant-evidence-review","owner-message-context","request-changes","revise","approve-revision","calendar-configure","calendar-plan","calendar-link","calendar-prepare","calendar-recover"].includes(action))return response({error:"Unknown action"},404);
+  if(!["calendar-generation-now","approval-plan-approve","approval-plan-confirm-approve","calendar-apply-schedule","calendar-move","owner-draft-run","owner-calendar-run","publication-media-stage","publication-media-approve","integration-sync","integration-import","publication-enqueue","publication-approve","publication-cancel","publication-revise","publication-publish","metrics-save","money-add","money-void","coverage-confirm","source-stage","source-clear","source-revoke","agent-revise","calendar-dispatch","source","run","approve","cancel","retry","step","evidence-review","attest-final-post","assistant-evidence-review","owner-message-context","request-changes","revise","approve-revision","calendar-configure","calendar-plan","calendar-link","calendar-prepare","calendar-recover"].includes(action))return response({error:"Unknown action"},404);
   if(hostedEnvironment()&&action==="step")return response({error:"Hosted checkpoints run only through the protected daily scheduler"},403);
   const limit=["evidence-review","assistant-evidence-review","owner-message-context"].includes(action)?12000:action==="integration-import"?1_050_000:action==="publication-enqueue"||action==="publication-revise"?40000:["revise","source-stage"].includes(action)?40000:4096;
   if(Number(request.headers.get("content-length")||0)>limit)return response({error:"Request too large"},413);
@@ -78,6 +80,8 @@ export async function POST(request:Request,context:Context){
       try{return response({result:await advanceGenerationNow(store.db,body,{readConfig:runtimeConfig,isReady:config=>hostedEnvironment()?hostedOwnerDraftReady(config):liveReady(config)})});}
       catch(error){return response({error:error instanceof GenerationTimeError?error.message:"Generation-time change was not confirmed; refresh the calendar and inspect its saved time before retrying"},409);}
     }
+    if(action==="calendar-apply-schedule")value=await applyEvidenceSchedule(store.db,"owner",new Date(),hostedEnvironment()?120:49);
+    if(action==="calendar-move")value=await moveCalendarEntry(store.db,{entry:String(body.entry),planned_date:String(body.planned_date)},"owner");
     if(action==="approval-plan-confirm-approve")value=await confirmAndApproveApprovalPlan(store.db,(await createIntegrations(store.db)).publishing.runtime,body);
     if(action==="approval-plan-approve")value=await approveApprovalPlan(store.db,(await createIntegrations(store.db)).publishing.runtime,body);
     if(action==="owner-calendar-run"){
@@ -151,7 +155,7 @@ export async function POST(request:Request,context:Context){
     }
     return response({result:value??true});
   }catch(error){
-    const safe=safeCalendarRecoveryError(error)||safeMediaError(error)||safePublicationError(error)||safeIngestionError(error)||(error instanceof Error&&[...REPORT_ERRORS,"Dispatched calendar task cannot be relinked","Invalid generation activation","Task and calendar platform policies must match","Invalid dispatch time","Completed revision cannot be retried; review its parent content","Revision feedback required (maximum 1000 characters)","Standing OpenAI draft and revision permission required","Revise the parent content task instead","Source not authorized for OpenAI revision","This exact version already has an agent revision request","Agent revision pending; review or cancel it before approval","Invalid source text","Invalid source category","Invalid source date","Source already staged with different metadata","Explicit owner source acknowledgement required","Unknown source","Stale source hash; review the exact source again","Invalid source id","Exact source hash required","Source transmission is not authorized","Source not cleared","Source invalidated","Stale artifact version","Task is not ready for approval","Unknown completion; reconciliation required before retry","Task cannot be retried","Owner draft attempt cannot be replayed","Safety termination cannot be retried","Approved task cannot be cancelled","Unknown task","Task is not ready for revision","Stale revision; refresh before editing","Revision note required","Invalid revision text","Excluded private material","No content change","Human factual review acknowledgement required","No revision to approve","Resolve source-grounding flags before approval","Fresh revision approval required","Invalid calendar date or time","Invalid cadence","Generation lead must be 49 to 336 hours or unset","Generation lead must be 120 to 336 hours or unset","Choose one to four weeks","Choose start date and posting time first","Unknown calendar entry","Task must match the linked source","Invalid platform timing","Preset provenance does not match selected hours","Choose every platform/day posting time first","Confirm that you read the complete post and every statement in it is true","Fix the marked corrections first; they cannot be confirmed","Some flags cannot be confirmed here; refresh and review them individually","Nothing left to confirm","Stale evidence review; refresh before saving"].includes(error.message)?error.message:"Action blocked or database unavailable");
+    const safe=safeCalendarRecoveryError(error)||safeMediaError(error)||safePublicationError(error)||safeIngestionError(error)||(error instanceof Error&&[...REPORT_ERRORS,"Dispatched calendar task cannot be relinked","Invalid generation activation","Task and calendar platform policies must match","Invalid dispatch time","Completed revision cannot be retried; review its parent content","Revision feedback required (maximum 1000 characters)","Standing OpenAI draft and revision permission required","Revise the parent content task instead","Source not authorized for OpenAI revision","This exact version already has an agent revision request","Agent revision pending; review or cancel it before approval","Invalid source text","Invalid source category","Invalid source date","Source already staged with different metadata","Explicit owner source acknowledgement required","Unknown source","Stale source hash; review the exact source again","Invalid source id","Exact source hash required","Source transmission is not authorized","Source not cleared","Source invalidated","Stale artifact version","Task is not ready for approval","Unknown completion; reconciliation required before retry","Task cannot be retried","Owner draft attempt cannot be replayed","Safety termination cannot be retried","Approved task cannot be cancelled","Unknown task","Task is not ready for revision","Stale revision; refresh before editing","Revision note required","Invalid revision text","Excluded private material","No content change","Human factual review acknowledgement required","No revision to approve","Resolve source-grounding flags before approval","Fresh revision approval required","Invalid calendar date or time","Invalid cadence","Generation lead must be 49 to 336 hours or unset","Generation lead must be 120 to 336 hours or unset","Choose one to four weeks","Choose start date and posting time first","Unknown calendar entry","Task must match the linked source","Invalid platform timing","Preset provenance does not match selected hours","Choose every platform/day posting time first","Confirm that you read the complete post and every statement in it is true","Fix the marked corrections first; they cannot be confirmed","Some flags cannot be confirmed here; refresh and review them individually","Nothing left to confirm","Stale evidence review; refresh before saving",...CALENDAR_SCHEDULE_ERRORS].includes(error.message)?error.message:"Action blocked or database unavailable");
     return response({error:safe},400);
   }
 }
@@ -167,6 +171,22 @@ async function assistantRevise(request:Request){
     return response({result});
   }catch(error){
     const known=["Invalid assistant revision request","Revision note required","Invalid revision text","No content change","Stale artifact version"];
+    return response({error:error instanceof Error&&known.includes(error.message)?error.message:"Action blocked or database unavailable"},400);
+  }
+}
+
+const CALENDAR_SCHEDULE_ERRORS=["Choose a post and a new date","Unknown calendar entry","Only a future post can be moved","Publication has started or may have completed; it cannot be moved","That day is not a posting day in the current schedule","Choose a posting time at least one hour from now","That slot already has a post"];
+/** Applies the evidence schedule or moves a post with the assistant credential; never approves. */
+async function assistantCalendar(request:Request){
+  if(!assistantEditAuthorized(request))return response({error:"Assistant edit access required"},401);
+  if(!allowedOrigin(request))return response({error:"Origin rejected"},403);
+  if(Number(request.headers.get("content-length")||0)>4096)return response({error:"Request too large"},413);
+  try{
+    const input=parseAssistantCalendar(JSON.parse(await readBody(request,4096))),db=await database();
+    const result=input.op==="apply-schedule"?await applyEvidenceSchedule(db,"assistant",new Date(),hostedEnvironment()?120:49):await moveCalendarEntry(db,input,"assistant");
+    return response({result});
+  }catch(error){
+    const known=["Invalid assistant calendar request",...CALENDAR_SCHEDULE_ERRORS,"Choose start date and posting time first"];
     return response({error:error instanceof Error&&known.includes(error.message)?error.message:"Action blocked or database unavailable"},400);
   }
 }

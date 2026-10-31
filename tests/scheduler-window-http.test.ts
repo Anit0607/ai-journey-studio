@@ -38,7 +38,7 @@ test('invalid explicit policy fails closed after signature validation, never gen
 test('generic delivery and admitted windows retain durable authenticated-jti deduplication',async()=>{
  let queries=0,runs=0,opens=0;const db={query:async(sql:string)=>{queries++;return sql.startsWith('INSERT')?[{signed_jti:'offline-window-test'}]:[];}} as unknown as Database;
  const deps:IntegrationTickDependencies={env,config:fixedSettings(),database:async()=>{opens++;return db;},runTick:async()=>{runs++;return {status:'completed'};}};
- for(const now of [()=>new Date('2026-10-26T12:00:00Z'),()=>new Date('2026-10-26T16:26:00Z')])assert.equal((await handleIntegrationTick(request(),{...deps,now})).status,200);
+ for(const now of [()=>new Date('2026-10-26T12:00:00Z'),()=>new Date('2026-10-26T17:56:00Z')])assert.equal((await handleIntegrationTick(request(),{...deps,now})).status,200);
  assert.equal(runs,2);assert.equal(opens,2);assert.equal(queries,4);
  const generic={scheduler:{provider:'qstash' as const,mode:'external' as const,authorized:true,cadence_seconds:120}};
  await handleIntegrationTick(request(),{...deps,config:generic,now:idle});assert.equal(runs,3);
