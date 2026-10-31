@@ -54,3 +54,12 @@ Adaptation boundary: LinkedIn hook/payoff and voice discipline; Instagram captio
 - Transitive runtime packages: `@babel/runtime` 7.29.10, `core-js` 2.6.12 and `punycode` 1.4.1, all MIT. Exact registry URLs, aliases, versions and integrity hashes are in `package-lock.json`.
 
 All new packages came from `https://registry.npmjs.org`; installation was performed with lifecycle scripts disabled. No upstream repository scripts were run. `twitter-text` was released in March 2020 and still depends on deprecated `core-js` 2. Its age and legacy polyfill side effects are maintenance/performance risks, even when a vulnerability scan is clean. The Twemoji override is a deliberate, tested compatibility boundary, not an official new X parser release. Keep it pinned and rerun the Unicode/URL and publication regressions when either parser changes. See [the local validation review](docs/x-text-validation-2026-10-22.md) for verification and remaining limits.
+
+## sergebulaev/linkedin-skills
+
+- License: [MIT notice](third_party/drafting-guidance/linkedin-skills/LICENSE)
+- Pinned commit: `8f8bc4b`
+- Adapted material:
+  - [skills/linkedin-interviewer/SKILL.md](https://github.com/sergebulaev/linkedin-skills/blob/8f8bc4b/skills/linkedin-interviewer/SKILL.md)
+
+Adaptation boundary: the Story Bank interview questions in `lib/story-bank-questions.ts` are rewritten from the interviewer's bank and post modes for an AI-learning journey. The owner's answers are the evidence; the questions supply none.
