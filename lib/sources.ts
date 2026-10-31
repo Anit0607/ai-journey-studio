@@ -1,20 +1,23 @@
 import {scopedSourceProof,githubDraftRuntimeBinding} from "./scoped-source-proof";
+import {EXCLUDED_MATERIAL,CREDENTIAL_ASSIGNMENT} from "./privacy-patterns";
+export {EXCLUDED_MATERIAL};
 import {randomUUID} from "node:crypto";
 import type {Connection,Database} from "./db";
 import {CAPSULE,configReady,hash,sourceAllowed,type RuntimeConfig,type Source} from "./domain";
 
-export const SOURCE_CATEGORIES=["project-note","build-log","lesson-learned","user-reported-notes"] as const;
+export const SOURCE_CATEGORIES=["project-note","build-log","lesson-learned","user-reported-notes","owner-chat"] as const;
 export const SOURCE_MAX_LENGTH=12_000;
 export const SOURCE_MAX_BYTES=32_000;
 export const SOURCE_CLEARANCE_PROVIDER="openai";
 export const SOURCE_CLEARANCE_PURPOSE="content-drafts-revisions";
 export const SOURCE_CLEARANCE_ACKNOWLEDGEMENT="I am the owner and have reviewed this exact source text and hash. I authorize sending it to OpenAI for content drafts and revisions under the $10 monthly warning and $15 monthly cap. It contains no bank, client, private, confidential, or credential material. This does not authorize Gemini or publishing.";
+/** Standing consent for imported chats, given by the owner in chat on 31 Oct 2026. It covers only
+ * "owner-chat" sources (the owner's own messages); it is not a claim that each was reviewed. */
+export const STANDING_CHAT_CONSENT_ACKNOWLEDGEMENT="Standing owner consent given in chat on 31 Oct 2026: my own messages from imported chats may be sent to OpenAI to draft posts and revisions under the $15 monthly cap. AI replies are excluded, and messages mentioning a bank, clients or private details are skipped.";
 export type SourceInput={text:string;category:string;reported_date:string};
 
 // This is an intentionally conservative intake guard, not a guarantee that
 // arbitrary text is safe. Explicit owner review is still required separately.
-export const EXCLUDED_MATERIAL=/\b(?:bandhan|banks?|banking|clients?|private|confidential|secrets?|credentials?|passwords?|passcodes?)\b|\b(?:api[ _-]?key|access[ _-]?token|refresh[ _-]?token|session[ _-]?(?:cookie|token)|authorization)\s*(?:[:=]|\b)|\b(?:sk-[A-Za-z0-9_-]{8,}|AIza[A-Za-z0-9_-]{20,}|(?:AKIA|ASIA)[A-Z0-9]{16}|gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|xox[baprs]-[A-Za-z0-9-]{10,}|eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+)|-----BEGIN [A-Z ]*PRIVATE KEY-----|\bBearer\s+[A-Za-z0-9._~-]{8,}/i;
-const CREDENTIAL_ASSIGNMENT=/(?:API[_-]?KEY|ACCESS[_-]?TOKEN|REFRESH[_-]?TOKEN|PASSWORD|SECRET|DATABASE_URL|PRIVATE[_-]?KEY)["']?\s*[:=]|[a-z][a-z0-9+.-]*:\/\/[^\/\s:@]+:[^\/\s@]+@/i;
 const UUID=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const SHA256=/^[a-f0-9]{64}$/;
 
@@ -35,7 +38,7 @@ function intact(source:Source|undefined|null,expectedHash?:string):source is Sou
   return !!source&&source.cleared===true&&typeof source.text==="string"&&typeof source.hash==="string"&&SHA256.test(source.hash)&&hash(source.text)===source.hash&&(expectedHash===undefined||source.hash===expectedHash)&&!source.revoked_at;
 }
 function ownerCleared(source:Source,provider:string,now=new Date()):boolean {
-  if(provider!==SOURCE_CLEARANCE_PROVIDER||!source.clearance_id||!UUID.test(source.clearance_id)||source.clearance_hash!==source.hash||source.clearance_provider!==SOURCE_CLEARANCE_PROVIDER||source.clearance_purpose!==SOURCE_CLEARANCE_PURPOSE||source.clearance_owner_acknowledged!==true||source.clearance_acknowledgement!==SOURCE_CLEARANCE_ACKNOWLEDGEMENT||!source.cleared_at||!Number.isFinite(new Date(source.cleared_at).getTime()))return false;
+  if(provider!==SOURCE_CLEARANCE_PROVIDER||!source.clearance_id||!UUID.test(source.clearance_id)||source.clearance_hash!==source.hash||source.clearance_provider!==SOURCE_CLEARANCE_PROVIDER||source.clearance_purpose!==SOURCE_CLEARANCE_PURPOSE||source.clearance_owner_acknowledged!==true||!(source.clearance_acknowledgement===SOURCE_CLEARANCE_ACKNOWLEDGEMENT||(source.category==="owner-chat"&&source.clearance_acknowledgement===STANDING_CHAT_CONSENT_ACKNOWLEDGEMENT))||!source.cleared_at||!Number.isFinite(new Date(source.cleared_at).getTime()))return false;
   try{validateSourceInput(source,now);return true;}catch{return false;}
 }
 function hasOwnerClearance(source:Source):boolean {
@@ -92,6 +95,20 @@ export class SourceIntake {
       const eventId=randomUUID(),clearedAt=new Date().toISOString();
       await this.event(tx,eventId,"source_cleared",{source_id:id,source_hash:expectedHash,provider:SOURCE_CLEARANCE_PROVIDER,purpose:SOURCE_CLEARANCE_PURPOSE,actor:"owner",owner_acknowledged:true,acknowledgement:SOURCE_CLEARANCE_ACKNOWLEDGEMENT,cleared_at:clearedAt});
       return (await tx.query<Source>("UPDATE sources SET cleared=true,clearance_id=$2,clearance_hash=$3,clearance_provider=$4,clearance_purpose=$5,clearance_owner_acknowledged=true,clearance_acknowledgement=$6,cleared_at=$7,revoked_at=NULL WHERE id=$1 RETURNING *",[id,eventId,expectedHash,SOURCE_CLEARANCE_PROVIDER,SOURCE_CLEARANCE_PURPOSE,SOURCE_CLEARANCE_ACKNOWLEDGEMENT,clearedAt]))[0];
+    });
+  }  /** Clears an imported owner-chat source under the recorded standing consent. */
+  async clearStanding(id:string,expectedHash:string):Promise<Source> {
+    this.reference(id,expectedHash);
+    return this.db.transaction(async tx=>{
+      const source=(await tx.query<Source>("SELECT * FROM sources WHERE id=$1 FOR UPDATE",[id]))[0];
+      if(!source)throw Error("Unknown source");
+      if(source.hash!==expectedHash||hash(source.text)!==expectedHash)throw Error("Stale source hash; review the exact source again");
+      validateSourceInput(source);
+      if(source.category!=="owner-chat")throw Error("Standing consent covers imported chat messages only");
+      if(intact(source,expectedHash)&&ownerCleared(source,"openai"))return source;
+      const eventId=randomUUID(),clearedAt=new Date().toISOString();
+      await this.event(tx,eventId,"source_cleared",{source_id:id,source_hash:expectedHash,provider:SOURCE_CLEARANCE_PROVIDER,purpose:SOURCE_CLEARANCE_PURPOSE,actor:"owner-standing-consent",owner_acknowledged:true,acknowledgement:STANDING_CHAT_CONSENT_ACKNOWLEDGEMENT,cleared_at:clearedAt});
+      return (await tx.query<Source>("UPDATE sources SET cleared=true,clearance_id=$2,clearance_hash=$3,clearance_provider=$4,clearance_purpose=$5,clearance_owner_acknowledged=true,clearance_acknowledgement=$6,cleared_at=$7,revoked_at=NULL WHERE id=$1 RETURNING *",[id,eventId,expectedHash,SOURCE_CLEARANCE_PROVIDER,SOURCE_CLEARANCE_PURPOSE,STANDING_CHAT_CONSENT_ACKNOWLEDGEMENT,clearedAt]))[0];
     });
   }
   async revoke(id:string,expectedHash:string):Promise<Source> {

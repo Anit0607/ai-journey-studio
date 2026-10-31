@@ -5,6 +5,7 @@ import {previewApprovalPlan,approveApprovalPlan,confirmAndApproveApprovalPlan} f
 import {assistantEditAuthorized,parseAssistantRevision,parseAssistantCalendar} from "../../../../lib/assistant-edit";
 import {applyEvidenceSchedule,moveCalendarEntry} from "../../../../lib/calendar-schedule";
 import {saveStory} from "../../../../lib/story-bank";
+import {importOwnerChats,importClaudeCodeChats} from "../../../../lib/chat-import";
 import {runOwnerDraft,ownerDraftSnapshot,validOwnerDraftRequest} from "../../../../lib/owner-draft";
 import {advanceGenerationNow,GenerationTimeError,validGenerationTimeInput,parseGenerationTimeRequest} from '../../../../lib/calendar-generation-time';
 import {renderApprovedInstagram,getPrivateMedia,approvePublicMedia,safeMediaError} from "../../../../lib/publication-media";
@@ -65,12 +66,13 @@ export async function POST(request:Request,context:Context){
   const {action}=await context.params;
   if(action==="assistant-revise")return assistantRevise(request);
   if(action==="assistant-calendar")return assistantCalendar(request);
+  if(action==="assistant-chat-import")return assistantChatImport(request);
   // Worker execution credentials cannot grant owner source, evidence, content or publication consent.
-  if(!await (["calendar-generation-now","publication-publish","owner-draft-run","owner-calendar-run","approval-plan-approve","approval-plan-confirm-approve","calendar-apply-schedule","calendar-move","story-save","source-clear","evidence-review","attest-final-post","assistant-evidence-review","owner-message-context","approve","approve-revision","publication-approve","publication-media-approve","agent-revise"].includes(action)?passwordOwnerAuthenticated(request):ownerApiAuthenticated(request)))return response({error:"Private access required"},401);
+  if(!await (["calendar-generation-now","publication-publish","owner-draft-run","owner-calendar-run","approval-plan-approve","approval-plan-confirm-approve","calendar-apply-schedule","calendar-move","story-save","chat-import","source-clear","evidence-review","attest-final-post","assistant-evidence-review","owner-message-context","approve","approve-revision","publication-approve","publication-media-approve","agent-revise"].includes(action)?passwordOwnerAuthenticated(request):ownerApiAuthenticated(request)))return response({error:"Private access required"},401);
   if(!allowedOrigin(request))return response({error:"Origin rejected"},403);
-  if(!["calendar-generation-now","approval-plan-approve","approval-plan-confirm-approve","calendar-apply-schedule","calendar-move","story-save","owner-draft-run","owner-calendar-run","publication-media-stage","publication-media-approve","integration-sync","integration-import","publication-enqueue","publication-approve","publication-cancel","publication-revise","publication-publish","metrics-save","money-add","money-void","coverage-confirm","source-stage","source-clear","source-revoke","agent-revise","calendar-dispatch","source","run","approve","cancel","retry","step","evidence-review","attest-final-post","assistant-evidence-review","owner-message-context","request-changes","revise","approve-revision","calendar-configure","calendar-plan","calendar-link","calendar-prepare","calendar-recover"].includes(action))return response({error:"Unknown action"},404);
+  if(!["calendar-generation-now","approval-plan-approve","approval-plan-confirm-approve","calendar-apply-schedule","calendar-move","story-save","chat-import","owner-draft-run","owner-calendar-run","publication-media-stage","publication-media-approve","integration-sync","integration-import","publication-enqueue","publication-approve","publication-cancel","publication-revise","publication-publish","metrics-save","money-add","money-void","coverage-confirm","source-stage","source-clear","source-revoke","agent-revise","calendar-dispatch","source","run","approve","cancel","retry","step","evidence-review","attest-final-post","assistant-evidence-review","owner-message-context","request-changes","revise","approve-revision","calendar-configure","calendar-plan","calendar-link","calendar-prepare","calendar-recover"].includes(action))return response({error:"Unknown action"},404);
   if(hostedEnvironment()&&action==="step")return response({error:"Hosted checkpoints run only through the protected daily scheduler"},403);
-  const limit=["evidence-review","assistant-evidence-review","owner-message-context"].includes(action)?12000:action==="story-save"?20000:action==="integration-import"?1_050_000:action==="publication-enqueue"||action==="publication-revise"?40000:["revise","source-stage"].includes(action)?40000:4096;
+  const limit=["evidence-review","assistant-evidence-review","owner-message-context"].includes(action)?12000:action==="story-save"?20000:action==="chat-import"?900_000:action==="integration-import"?1_050_000:action==="publication-enqueue"||action==="publication-revise"?40000:["revise","source-stage"].includes(action)?40000:4096;
   if(Number(request.headers.get("content-length")||0)>limit)return response({error:"Request too large"},413);
   try{
     const raw=await readBody(request,limit);
@@ -82,6 +84,7 @@ export async function POST(request:Request,context:Context){
       catch(error){return response({error:error instanceof GenerationTimeError?error.message:"Generation-time change was not confirmed; refresh the calendar and inspect its saved time before retrying"},409);}
     }
     if(action==="story-save")value=await saveStory(store.db,body);
+    if(action==="chat-import")value=await importOwnerChats(store.db,body);
     if(action==="calendar-apply-schedule")value=await applyEvidenceSchedule(store.db,"owner",new Date(),hostedEnvironment()?120:49);
     if(action==="calendar-move")value=await moveCalendarEntry(store.db,{entry:String(body.entry),planned_date:String(body.planned_date)},"owner");
     if(action==="approval-plan-confirm-approve")value=await confirmAndApproveApprovalPlan(store.db,(await createIntegrations(store.db)).publishing.runtime,body);
@@ -193,4 +196,12 @@ async function assistantCalendar(request:Request){
   }
 }
 
-const STORY_ERRORS=["Invalid story","Confirm that these answers are yours and true before saving","Answer at least two questions","Each answer can be at most 1,500 characters","Source already staged with different metadata","Invalid source text"];
+const STORY_ERRORS=["Invalid chat import","Chat import is not enabled","Invalid story","Confirm that these answers are yours and true before saving","Answer at least two questions","Each answer can be at most 1,500 characters","Source already staged with different metadata","Invalid source text"];
+/** Weekly collector: imports the owner's own Claude Code messages with the assistant credential. */
+async function assistantChatImport(request:Request){
+  if(!assistantEditAuthorized(request))return response({error:"Assistant edit access required"},401);
+  if(!allowedOrigin(request))return response({error:"Origin rejected"},403);
+  if(Number(request.headers.get("content-length")||0)>900_000)return response({error:"Request too large"},413);
+  try{return response({result:await importClaudeCodeChats(await database(),JSON.parse(await readBody(request,900_000)))});}
+  catch(error){return response({error:error instanceof Error&&["Invalid chat import","Chat import is not enabled"].includes(error.message)?error.message:"Action blocked or database unavailable"},400);}
+}
