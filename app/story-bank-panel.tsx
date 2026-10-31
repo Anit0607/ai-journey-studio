@@ -18,7 +18,7 @@ export default function StoryBankPanel({sources,busy,action}:{sources:Source[];b
   return <section aria-label="Story Bank">
     <span className="eyebrow">STORY BANK</span>
     <h2>Your experiences, in your own words</h2>
-    <p>Your agents can only write personal posts about what you have told them. Answer a few questions; each saved story becomes a source your agents can draft from, and every draft still comes to you for approval.</p>
+    <p>Your agents can only write personal posts about what you have told them. Optional: tell your agents something directly. Each saved story joins your story library; the autopilot drafts from it, and every draft still comes to you for approval.</p>
     <div className="actions">{(Object.keys(STORY_SETS) as StorySet[]).map(key=><button key={key} className={set===key?"primary":""} disabled={busy} onClick={()=>{setSet(key);setAnswers({});setAck(false);}}>{STORY_SETS[key].label}</button>)}</div>
     <p className="fine">{STORY_SETS[set].intro}</p>
     {questions.map(item=><label key={set+item.id}>{item.q}
@@ -26,10 +26,10 @@ export default function StoryBankPanel({sources,busy,action}:{sources:Source[];b
     </label>)}
     <p className="fine">Keep work details private: answers mentioning a bank, clients, or anything private or confidential are refused, and you will be told which words to remove.</p>
     <label><input type="checkbox" checked={ack} disabled={busy||filled<2} onChange={event=>setAck(event.target.checked)}/> {ACK}</label>
-    <div className="actions"><button className="primary" disabled={busy||!ack||filled<2} onClick={()=>void save()}>Save story and queue a draft</button></div>
+    <div className="actions"><button className="primary" disabled={busy||!ack||filled<2} onClick={()=>void save()}>Save story</button></div>
     {filled<2&&<p className="fine">Answer at least two questions to save.</p>}
     <h3>Saved stories ({stories.length})</h3>
     {stories.length===0?<p className="fine">None yet.</p>:stories.map(story=><details key={story.id}><summary>{story.text.split("\n")[0].replace(STORY_MARKER,"Story")}</summary><pre style={{whiteSpace:"pre-wrap"}}>{story.text}</pre></details>)}
-    <p className="fine">After saving, open <strong>Overview</strong>: the new draft task appears there. Use <strong>Run this exact draft once</strong> (at most $0.13) to run your agents, review the post, put it in a free slot, then approve and schedule it.</p>
+    <p className="fine">Optional. Your agents already find stories in your imported chats. Each morning the autopilot picks the best unused story for the next free slot, drafts it and alerts you to approve it.</p>
   </section>;
 }

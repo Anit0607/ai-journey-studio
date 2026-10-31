@@ -36,12 +36,13 @@ export class Store{
       return (await tx.query<Source>("SELECT * FROM sources WHERE hash=$1",[version]))[0];
     });
   }
-  async enqueue(source:string){
+  /** Queues one manual draft task; extraBrief adds format/timing context (never evidence). */
+  async enqueue(source:string,extraBrief:Record<string,unknown>={}){
     return this.db.transaction(async tx=>{
       const s=(await tx.query<Source>("SELECT * FROM sources WHERE id=$1 AND cleared=true FOR UPDATE",[source]))[0];
       if(!s||!sourceEligible(s))throw Error("Source not cleared");
       const id=randomUUID();
-      const inserted=await tx.query<Task>("INSERT INTO tasks(id,source_id,source_hash,status,content_brief) VALUES($1,$2,$3,'queued',$4) ON CONFLICT(source_id,source_hash,origin_key) DO NOTHING RETURNING *",[id,source,s.hash,JSON.stringify(newTaskPlatformBrief())]);
+      const inserted=await tx.query<Task>("INSERT INTO tasks(id,source_id,source_hash,status,content_brief) VALUES($1,$2,$3,'queued',$4) ON CONFLICT(source_id,source_hash,origin_key) DO NOTHING RETURNING *",[id,source,s.hash,JSON.stringify({...extraBrief,...newTaskPlatformBrief()})]);
       if(inserted.length){await this.event(tx,id,"queued","Cleared source queued");return inserted[0];}
       return (await tx.query<Task>("SELECT * FROM tasks WHERE source_id=$1 AND source_hash=$2 AND origin_key='manual'",[source,s.hash]))[0];
     });

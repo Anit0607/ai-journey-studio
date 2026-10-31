@@ -1,9 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import {randomUUID} from "node:crypto";
 import {embedded} from "../lib/db";
-import {Calendar} from "../lib/calendar";
-import {NEW_PLATFORM_POLICY} from "../lib/platform-policy";
 import {composeStory,saveStory,blockedWords,STORY_MARKER,STORY_SETS} from "../lib/story-bank";
 
 const answers={topic:"Teaching my app to sleep",when:"25 October 2026",wrong:"I assumed the database slept on its own."};
@@ -26,7 +23,7 @@ test('blocked words are named so the owner can remove them',()=>{
  assert.deepEqual(blockedWords("I built a calendar."),[]);
 });
 
-test('saving clears the story as the owner\'s source and queues one draft task; nothing is drafted or approved',async()=>{
+test('saving clears the story as the owner\'s source for the autopilot; nothing is queued, drafted or approved',async()=>{
  const db=await embedded();try{
   await assert.rejects(saveStory(db,{set:"post",answers,acknowledged:false},now),/Confirm that these answers/);
   await assert.rejects(saveStory(db,{set:"post",answers:{...answers,tried:"I demoed it at the bank."},acknowledged:true},now),/Remove these words before saving: bank/);
@@ -34,14 +31,7 @@ test('saving clears the story as the owner\'s source and queues one draft task; 
   const saved=await saveStory(db,{set:"post",answers,acknowledged:true},now);
   const source=(await db.query<any>("SELECT * FROM sources WHERE id=$1",[saved.source]))[0];
   assert.equal(source.category,"user-reported-notes");assert.equal(source.cleared,true);assert.equal(source.clearance_owner_acknowledged,true);assert.equal(source.reported_date,"2026-10-31");
-  const task=(await db.query<any>("SELECT * FROM tasks WHERE id=$1",[saved.task]))[0];
-  assert.equal(task.status,"queued");assert.equal(task.checkpoint,0);assert.deepEqual(task.content_brief.platform_policy,NEW_PLATFORM_POLICY);
+  assert.deepEqual(saved,{source:saved.source});assert.equal((await db.query("SELECT * FROM tasks")).length,0,"the autopilot, not saving, queues drafts");
   for(const table of ["outputs","ledger","approvals","publishing_outbox"])assert.equal((await db.query("SELECT * FROM "+table)).length,0,table);
-  // A drafted story can be put into a free calendar slot through the existing link action.
-  const entry=randomUUID(),post="2026-11-05T03:30:00.000Z",review="2026-11-03T03:30:00.000Z";
-  await db.query("INSERT INTO calendar_entries(id,planned_date,kind,intended_post,draft_due,review_due,platform_schedule) VALUES($1,'2026-11-05','shortform',$2,$3,$3,$4)",[entry,post,review,JSON.stringify({LinkedIn:{intended_post:post,draft_due:review,review_due:review},platform_policy:NEW_PLATFORM_POLICY})]);
-  await new Calendar(db).link(entry,saved.source,saved.task);
-  const linked=(await db.query<any>("SELECT source_id,task_id FROM calendar_entries WHERE id=$1",[entry]))[0];
-  assert.deepEqual(linked,{source_id:saved.source,task_id:saved.task});
  }finally{await db.close();}
 });
