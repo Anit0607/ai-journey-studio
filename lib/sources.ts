@@ -13,7 +13,7 @@ export type SourceInput={text:string;category:string;reported_date:string};
 
 // This is an intentionally conservative intake guard, not a guarantee that
 // arbitrary text is safe. Explicit owner review is still required separately.
-const EXCLUDED_MATERIAL=/\b(?:bandhan|banks?|banking|clients?|private|confidential|secrets?|credentials?|passwords?|passcodes?)\b|\b(?:api[ _-]?key|access[ _-]?token|refresh[ _-]?token|session[ _-]?(?:cookie|token)|authorization)\s*(?:[:=]|\b)|\b(?:sk-[A-Za-z0-9_-]{8,}|AIza[A-Za-z0-9_-]{20,}|(?:AKIA|ASIA)[A-Z0-9]{16}|gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|xox[baprs]-[A-Za-z0-9-]{10,}|eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+)|-----BEGIN [A-Z ]*PRIVATE KEY-----|\bBearer\s+[A-Za-z0-9._~-]{8,}/i;
+export const EXCLUDED_MATERIAL=/\b(?:bandhan|banks?|banking|clients?|private|confidential|secrets?|credentials?|passwords?|passcodes?)\b|\b(?:api[ _-]?key|access[ _-]?token|refresh[ _-]?token|session[ _-]?(?:cookie|token)|authorization)\s*(?:[:=]|\b)|\b(?:sk-[A-Za-z0-9_-]{8,}|AIza[A-Za-z0-9_-]{20,}|(?:AKIA|ASIA)[A-Z0-9]{16}|gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|xox[baprs]-[A-Za-z0-9-]{10,}|eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+)|-----BEGIN [A-Z ]*PRIVATE KEY-----|\bBearer\s+[A-Za-z0-9._~-]{8,}/i;
 const CREDENTIAL_ASSIGNMENT=/(?:API[_-]?KEY|ACCESS[_-]?TOKEN|REFRESH[_-]?TOKEN|PASSWORD|SECRET|DATABASE_URL|PRIVATE[_-]?KEY)["']?\s*[:=]|[a-z][a-z0-9+.-]*:\/\/[^\/\s:@]+:[^\/\s@]+@/i;
 const UUID=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const SHA256=/^[a-f0-9]{64}$/;
