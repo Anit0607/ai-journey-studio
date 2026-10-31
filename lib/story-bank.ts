@@ -1,5 +1,4 @@
 import type {Database} from "./db";
-import {Store} from "./store";
 import {SourceIntake,EXCLUDED_MATERIAL} from "./sources";
 
 import {STORY_SETS,STORY_MARKER,STORY_ANSWER_LIMIT,type StorySet} from "./story-bank-questions";
@@ -26,7 +25,7 @@ export function composeStory(set:StorySet,answers:Record<string,unknown>,date:st
   if(blocks.length<2)throw Error("Answer at least two questions");
   return STORY_MARKER+" ("+STORY_SETS[set].label+"), answered by the owner on "+date+". Everything below is in the owner's own words.\n\n"+blocks.join("\n\n");
 }
-/** Saves, clears and queues one story in the owner's session. Nothing is drafted, approved or posted. */
+/** Saves and clears one story in the owner's session. Nothing is drafted, approved or posted. */
 export async function saveStory(db:Database,input:unknown,now=new Date()){
   if(!input||typeof input!=="object"||Array.isArray(input)||Object.keys(input).sort().join(",")!=="acknowledged,answers,set")throw Error("Invalid story");
   const body=input as {set:StorySet;answers:Record<string,unknown>;acknowledged:unknown};
@@ -35,6 +34,7 @@ export async function saveStory(db:Database,input:unknown,now=new Date()){
   const blocked=blockedWords(text);
   if(blocked.length)throw Error("Remove these words before saving: "+blocked.join(", "));
   const intake=new SourceIntake(db),staged=await intake.stage({text,category:"user-reported-notes",reported_date:date});
-  const source=await intake.clear(staged.id,staged.hash,true),task=await new Store(db).enqueue(source.id);
-  return {source:source.id,task:task.id};
+  // Not queued here: the daily autopilot picks unused stories for free slots.
+  const source=await intake.clear(staged.id,staged.hash,true);
+  return {source:source.id};
 }
