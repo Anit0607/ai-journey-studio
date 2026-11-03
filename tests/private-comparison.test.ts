@@ -38,7 +38,7 @@ async function seed(){
  const input={expected_state_hash:preview.preview.state_hash,scope_hash:policy.COMPARISON_SCOPE_HASH,acknowledged:true as const};
  let calls=0;const prompts:string[]=[];
  const fake:typeof comparisonProvider=async(prompt)=>{const n=calls++;prompts.push(prompt);return completion(artifacts[n].text);};
- const options={readConfig:()=>c,ready:()=>true,provider:fake};
+ const options={readConfig:()=>c,ready:()=>true,now:()=>new Date('2026-10-28T12:00:00Z'),provider:fake};
  return {db,c,source,task,target,exports,input,options,artifacts,prompts,calls:()=>calls};
 }
 function completion(text:string):ComparisonCompletion{return {text,input:100,output:100,complete:true,report:{model:policy.COMPARISON_PRICING.model,tier:'default',request_id:'offline',finish_reason:'stop'},raw:{id:'offline',text}};}

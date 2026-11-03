@@ -63,7 +63,7 @@ test('autopilot does nothing without a ready runtime, generation, a slot in rang
   await db.query("UPDATE calendar_settings SET generation_enabled=false WHERE id=1");assert.equal((await run(db)).result.status,"blocked");await db.query("UPDATE calendar_settings SET generation_enabled=true WHERE id=1");
   assert.equal((await run(db,{now:()=>new Date("2026-11-02T10:00:00Z")})).result.status,"no_slot",'a slot under 30 hours away is left for manual handling');
   const failed=await run(db,{draft:async(_db:Database,input:{task_id:string})=>({task_id:input.task_id,status:"blocked",steps:2})});
-  assert.equal(failed.result.status,"blocked");assert.equal(failed.sent.length,0);
+  assert.equal(failed.result.status,"blocked");assert.deepEqual(failed.sent.map(n=>n.title),["A post slot has no draft"],'no draft-ready alert, but the owner hears the slot is empty');
   assert.equal((await db.query<any>("SELECT task_id FROM calendar_entries WHERE id=$1",[slot]))[0].task_id,null,'a failed draft never takes the slot');
  }finally{await db.close();}
 });
@@ -76,4 +76,21 @@ test('the autopilot route needs the cron secret or the assistant credential',asy
  assert.equal((await handleAutopilot(req(env.STUDIO_ACCESS_TOKEN),"scheduler",env)).status,401,'worker token is not the cron secret');
  assert.equal((await handleAutopilot(req(env.CRON_SECRET),"assistant",env)).status,401,'cron secret is not the assistant credential');
  assert.equal((await handleAutopilot(req(env.STUDIO_ASSISTANT_EDIT_TOKEN,"https://other.example.test"),"assistant",env)).status,401,'assistant runs need the studio origin');
+});
+
+test('the owner is warned early, once per run, when a slot in the next three days has no draft',async()=>{
+ const db=await embedded();try{
+  await db.query("UPDATE calendar_settings SET generation_enabled=true WHERE id=1");
+  await entry(db,"2026-11-03T03:30:00.000Z","2026-11-03");await entry(db,"2026-11-04T00:30:00.000Z","2026-11-04");await entry(db,"2026-11-09T18:00:00.000Z","2026-11-09");
+  const {result,sent}=await run(db);
+  assert.equal(result.status,"no_story");assert.equal(sent.length,1);
+  assert.equal(sent[0].title,"2 post slots have no draft",'only slots within 72 hours count');
+  assert.match(sent[0].message,/^Next empty slot: Tue 03 Nov, 09:00 IST\. Your agents have no new story/);
+  assert.match(sent[0].message,/Nothing will be posted for an empty slot\.$/);
+  await db.query("DELETE FROM calendar_entries WHERE planned_date='2026-11-09'");
+  const close=await run(db,{now:()=>new Date("2026-11-03T00:00:00Z")});
+  assert.equal(close.result.status,"no_slot");assert.match(close.sent[0].message,/less than 30 hours away/);
+  const quiet=await run(db,{now:()=>new Date("2026-11-05T10:00:00Z")});
+  assert.equal(quiet.sent.length,0,'no alert when the next three days are covered or empty of slots');
+ }finally{await db.close();}
 });

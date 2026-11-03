@@ -19,7 +19,7 @@ import {comparisonPolicy,comparisonPolicyAuthorized,currentComparisonPromptPolic
 import {assertCorrectiveComparisonFamily,comparisonDetail} from './private-comparison-predecessor';
 
 const START='private_comparison_started',STAGE='private_comparison_stage',END='private_comparison_finished';
-type Options={readConfig:()=>RuntimeConfig;ready:()=>boolean;provider?:typeof comparisonProvider;signal?:AbortSignal};
+type Options={readConfig:()=>RuntimeConfig;ready:()=>boolean;provider?:typeof comparisonProvider;signal?:AbortSignal;/** Clock for the owner's pricing window; tests pin a day inside it. */now?:()=>Date};
 const configHash=(c:RuntimeConfig)=>hash(JSON.stringify(c));
 async function event(tx:Connection,kind:string,detail:unknown,id=randomUUID()) {await tx.query('INSERT INTO events(id,task_id,kind,detail) VALUES($1,$2,$3,$4)',[id,target.task_id,kind,JSON.stringify(detail)]);}
 /** Read-only preview binds original artifacts too; never changes or resumes a task. */
@@ -68,7 +68,7 @@ export async function runPrivateComparison(rawDb:Database,input:ComparisonReques
  const policy=comparisonPolicy(input.scope_hash)!;
  if(!comparisonPolicyAuthorized(policy,currentComparisonPromptPolicyHash()||undefined))return result;
  const initial=options.readConfig(),binding=configHash(initial),deadline=Date.now()+240_000;
- const runtime=()=>{const day=new Date().toISOString().slice(0,10);if(!comparisonPolicyAuthorized(policy,currentComparisonPromptPolicyHash()||undefined)||!options.ready()||options.signal?.aborted||Date.now()>=deadline||configHash(options.readConfig())!==binding||day<policy.scope.pricing_verified||day>policy.scope.pricing_expires)throw Error('Comparison gate closed');};
+ const runtime=()=>{const day=(options.now?.()||new Date()).toISOString().slice(0,10);if(!comparisonPolicyAuthorized(policy,currentComparisonPromptPolicyHash()||undefined)||!options.ready()||options.signal?.aborted||Date.now()>=deadline||configHash(options.readConfig())!==binding||day<policy.scope.pricing_verified||day>policy.scope.pricing_expires)throw Error('Comparison gate closed');};
  let reservation:string|undefined,known=true,spent=0,inputs=0,outputs=0,pricingAnomaly=false,claimAttempted=false;
  const proposedRunId=randomUUID();
  const artifacts:Output[]=[];

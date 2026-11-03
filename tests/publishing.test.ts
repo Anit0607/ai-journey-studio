@@ -241,3 +241,13 @@ test("LinkedIn commentary escapes little-text markup so the whole post is publis
  await publishOfficial({platform:"LinkedIn",remote_id:LI.remote_id,payload:{text:"Before (inside) after."}},LI,"mock-token",async(_url,init)=>{sent=JSON.parse(String(init?.body)).commentary;return linkedinSuccess(_url as string);},{before:async()=>{},after:async()=>{}});
  assert.equal(sent,"Before \\(inside\\) after.","the request carries escaped text; the stored payload is unchanged");
 });
+test("LinkedIn is shown exactly the approved text: render check and escaped length",async()=>{
+ const {linkedinCommentary,linkedinRendered,PublicationValidationError}=await import("../lib/publishing");
+ const samples=["Plain text.","Neon (100 hours) #ai @me [x] {y} <z> *b* _i_ ~s~ | back\\slash","Line one\n\nLine two (with brackets)","emoji 🚀 and Hindi नमस्ते (test)"];
+ for(const text of samples)assert.equal(linkedinRendered(linkedinCommentary(text)),text,"escaped text renders back to the approved text");
+ assert.equal(linkedinRendered("cut (here"),null,"an unescaped bracket would truncate on LinkedIn");
+ assert.equal(linkedinRendered("dangling \\"),null);
+ // A post that fits 3,000 characters but not once its symbols are escaped is refused before approval.
+ const tight="(".repeat(10)+"a".repeat(2985);
+ await assert.rejects(publishOfficial({platform:"LinkedIn",remote_id:LI.remote_id,payload:{text:tight}},LI,"mock-token",async()=>{throw Error("must not send");},{before:async()=>{},after:async()=>{}}),(error:unknown)=>error instanceof PublicationValidationError&&/brackets and symbols/.test((error as Error).message));
+});

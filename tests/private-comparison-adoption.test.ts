@@ -43,7 +43,7 @@ async function seed(options:{scoped?:boolean;clean?:boolean}={}){
  const scoped=options.scoped?await bindScopedComparisonFixture(db,c,source):null;if(scoped)source=scoped.source;
  const store=new Store(db),review=(await store.snapshot()).reviews.find((r:any)=>r.task_id===target.task_id),preview=await comparisonSnapshot(db,c);assert(preview.preview);
  let calls=0;
- const result=await runPrivateComparison(db,{scope_hash:COMPARISON_SCOPE_HASH,expected_state_hash:preview.preview.state_hash,acknowledged:true},{readConfig:()=>c,ready:()=>true,provider:async()=>{
+ const result=await runPrivateComparison(db,{scope_hash:COMPARISON_SCOPE_HASH,expected_state_hash:preview.preview.state_hash,acknowledged:true},{readConfig:()=>c,ready:()=>true,now:()=>new Date('2026-10-28T12:00:00Z'),provider:async()=>{
   const text=artifacts[calls++].text;
   return {text,input:100,output:100,complete:true,report:{model:COMPARISON_PRICING.model,tier:'default',finish_reason:'stop',request_id:'offline'},raw:{model:COMPARISON_PRICING.model,service_tier:'default',choices:[{finish_reason:'stop',message:{content:text}}],usage:{prompt_tokens:100,completion_tokens:100}}};
  }});
