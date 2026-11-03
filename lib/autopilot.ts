@@ -33,7 +33,25 @@ export type AutopilotResult={status:"drafted"|"idle"|"blocked"|"limit"|"no_story
 /** One hands-free draft: next free slot, best unused owner story, capped six-stage run, then the slot.
  * Nothing is confirmed, approved, scheduled or published here; the owner approves every post. */
 export async function runAutopilot(db:Database,options:Options):Promise<AutopilotResult>{
-  const now=(options.now||(()=>new Date()))(),config=options.readConfig();
+  const now=(options.now||(()=>new Date()))(),result=await draftNext(db,options,now);
+  if(result.status!=="drafted"&&result.status!=="limit")await warnEmptySlots(db,options,now,result);
+  return result;
+}
+const istTime=(date:Date)=>date.toLocaleString("en-GB",{timeZone:"Asia/Kolkata",weekday:"short",day:"2-digit",month:"short",hour:"2-digit",minute:"2-digit",hour12:false})+" IST";
+const GAP_REASON:Record<string,string>={
+  no_story:"Your agents have no new story to write from. Import your ChatGPT, Claude or Gemini chats, or answer one Story Bank question.",
+  no_slot:"The next empty slot is less than 30 hours away, too close to draft and still leave you time to review.",
+};
+/** Says early, once a day, when a slot in the next 3 days has no draft, so nothing is missed silently. */
+async function warnEmptySlots(db:Database,options:Options,now:Date,result:AutopilotResult){
+  if(!options.notify)return;
+  const empty=await db.query<{intended_post:string}>("SELECT intended_post FROM calendar_entries WHERE task_id IS NULL AND intended_post BETWEEN $1 AND $2 ORDER BY intended_post",[now,new Date(now.getTime()+72*HOUR)]);
+  if(!empty.length)return;
+  const reason=GAP_REASON[result.status]||"Drafting stopped: "+(result.reason||result.status)+".";
+  try{await options.notify({title:empty.length===1?"A post slot has no draft":empty.length+" post slots have no draft",message:"Next empty slot: "+istTime(new Date(empty[0].intended_post))+". "+reason+" Nothing will be posted for an empty slot.",click:options.dashboard});}catch{}
+}
+async function draftNext(db:Database,options:Options,now:Date):Promise<AutopilotResult>{
+  const config=options.readConfig();
   if(!(options.isReady||hostedOwnerDraftReady)(config)||config.owner_cleared_sources_authorized!==true)return {status:"blocked",reason:"Drafting is not ready"};
   const settings=(await db.query<{generation_enabled:boolean}>("SELECT generation_enabled FROM calendar_settings WHERE id=1"))[0];
   if(settings?.generation_enabled!==true)return {status:"blocked",reason:"Calendar generation is off"};
@@ -52,6 +70,6 @@ export async function runAutopilot(db:Database,options:Options):Promise<Autopilo
   if(run.status!=="review")return {status:"blocked",entry:entry.id,task:task.id,reason:"Draft run "+run.status};
   // The slot is linked only after drafting, matching the capped run's no-calendar precondition.
   try{await new Calendar(db).link(entry.id,best.source.id,task.id);}catch{return {status:"drafted",task:task.id,reason:"Slot was taken meanwhile; choose a slot in Overview"};}
-  if(options.notify)await options.notify({title:"Draft ready to approve",message:"A new LinkedIn draft for "+new Date(entry.intended_post).toLocaleString("en-GB",{timeZone:"Asia/Kolkata",weekday:"short",day:"2-digit",month:"short",hour:"2-digit",minute:"2-digit",hour12:false})+" IST is ready. Read it and approve it in the dashboard.",click:options.dashboard});
+  if(options.notify)await options.notify({title:"Draft ready to approve",message:"A new LinkedIn draft for "+istTime(new Date(entry.intended_post))+" is ready. Read it and approve it in the dashboard.",click:options.dashboard});
   return {status:"drafted",entry:entry.id,task:task.id};
 }

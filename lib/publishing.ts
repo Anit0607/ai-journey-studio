@@ -51,7 +51,7 @@ function normalizedPayload(platform:Platform,payload:PublishingPayload):Publishi
     if(weightedLength>280)throw new PublicationValidationError("X single-post limit exceeded; revise the final draft before approval");
     if(!valid)throw new PublicationValidationError("Invalid X publication text; revise the final draft before approval");
   }
-  if(platform==="LinkedIn"&&payload.text.length>3000)throw new PublicationValidationError("LinkedIn text limit exceeded");
+  if(platform==="LinkedIn"&&(payload.text.length>3000||linkedinCommentary(payload.text).length>3000))throw new PublicationValidationError("LinkedIn text limit exceeded (brackets and symbols count twice when sent to LinkedIn); shorten the post");
   if(platform==="Instagram"&&payload.text.length>2200)throw new PublicationValidationError("Instagram caption limit exceeded");
   if(platform!=="Instagram"){
     if(payload.media!==undefined&&(!Array.isArray(payload.media)||payload.media.length))throw new PublicationValidationError("Only text-only LinkedIn and X posts are supported");
@@ -364,6 +364,18 @@ export class Publishing{
 /** LinkedIn's Posts API reads commentary as "little text": these characters are markup and
  * must be backslash-escaped, or LinkedIn silently drops everything after the first one. */
 export const linkedinCommentary=(text:string)=>text.replace(/[\\|{}@[\]()<>#*_~]/g,character=>"\\"+character);
+/** What LinkedIn will show for a commentary string: escaped characters become plain text; any
+ * unescaped markup character means the shown text is unpredictable, so the result is null. */
+export function linkedinRendered(commentary:string):string|null{
+  let shown="";
+  for(let i=0;i<commentary.length;i++){
+    const character=commentary[i];
+    if(character==="\\"){if(i+1>=commentary.length)return null;shown+=commentary[++i];continue;}
+    if("|{}@[]()<>#*_~".includes(character))return null;
+    shown+=character;
+  }
+  return shown;
+}
 export class PublishFailure extends Error{constructor(message:string,readonly uncertain:boolean){super(message);}}
 export type AdapterJournal={before:(stage:string)=>Promise<void>;after:(stage:string,status:number|null,providerId:string|null,state:"received"|"rejected"|"uncertain")=>Promise<void>};
 /** Official APIs only. No token acquisition/refresh, uploads, account discovery, retries, or redirects. */
@@ -385,7 +397,10 @@ export async function publishOfficial(row:Pick<PublishRow,"platform"|"payload"|"
     await journal.after(stage,response.status,id,"received");return {id,status:response.status,data};
   };
   if(row.platform==="LinkedIn"){
-    const result=await request("publish","https://api.linkedin.com/rest/posts",{method:"POST",headers:{"Content-Type":"application/json","Linkedin-Version":account.linkedin_version!,"X-Restli-Protocol-Version":"2.0.0"},body:JSON.stringify({author:row.remote_id,commentary:linkedinCommentary(payload.text),visibility:"PUBLIC",distribution:{feedDistribution:"MAIN_FEED",targetEntities:[],thirdPartyDistributionChannels:[]},lifecycleState:"PUBLISHED",isReshareDisabledByAuthor:false})},(response)=>{const id=response.headers.get("x-restli-id");return response.status===201&&id&&/^urn:li:(?:share|ugcPost):\d+$/.test(id)?id:null;});
+    // Last check before anything is sent: LinkedIn must show exactly the approved text, all of it.
+    const commentary=linkedinCommentary(payload.text);
+    if(linkedinRendered(commentary)!==payload.text)throw new PublishFailure("LinkedIn would not show the exact approved text; nothing was sent",false);
+    const result=await request("publish","https://api.linkedin.com/rest/posts",{method:"POST",headers:{"Content-Type":"application/json","Linkedin-Version":account.linkedin_version!,"X-Restli-Protocol-Version":"2.0.0"},body:JSON.stringify({author:row.remote_id,commentary,visibility:"PUBLIC",distribution:{feedDistribution:"MAIN_FEED",targetEntities:[],thirdPartyDistributionChannels:[]},lifecycleState:"PUBLISHED",isReshareDisabledByAuthor:false})},(response)=>{const id=response.headers.get("x-restli-id");return response.status===201&&id&&/^urn:li:(?:share|ugcPost):\d+$/.test(id)?id:null;});
     return {platform:row.platform,provider_id:result.id,http_status:result.status,url:`https://www.linkedin.com/feed/update/${encodeURIComponent(result.id)}/`};
   }
   if(row.platform==="X"){

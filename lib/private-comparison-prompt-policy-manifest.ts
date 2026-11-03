@@ -72,7 +72,7 @@ export const COMPARISON_PROMPT_POLICY_FILES=Object.freeze([
   },
   {
     "path": "lib/private-comparison.ts",
-    "sha256": "fd779bfcd7d00308d2a477db4b131c3dd443dc01362ffce64803805235ca1908"
+    "sha256": "e32a4d8ca7fe092fd53c69d57961863366ed55f109be06178f4672304cebd135"
   }
 ]);
-export const COMPARISON_PROMPT_POLICY_HASH="cc04848172601fb2fa4fd99f2d7fb8c2727751058dee529c63eff807c80fe385";
+export const COMPARISON_PROMPT_POLICY_HASH="06ea8696ab06e0a5156073e654262dd1b87311a8913e3cdfaa37aca5b07c43c4";

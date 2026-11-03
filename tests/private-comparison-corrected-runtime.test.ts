@@ -46,7 +46,7 @@ function harness(){
  };
  const exports:any={},code=ts.transpileModule(readFileSync(new URL('../lib/private-comparison.ts',import.meta.url),'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText;
  runInNewContext(code,{exports,require:(name:string)=>modules[name]??require(name.startsWith('./')?'../lib/'+name.slice(2):name),Buffer,Date,setTimeout,clearTimeout});
- const options={readConfig:()=>config,ready:()=>ready,provider:async()=>{calls++;mutate();return {text:'Exact mocked output '+calls,input:10,output:10,complete:true,report:{model:COMPARISON_PRICING.model,tier:'default',finish_reason:'stop'},raw:{}};}};
+ const options={readConfig:()=>config,ready:()=>ready,now:()=>new Date('2026-10-28T12:00:00Z'),provider:async()=>{calls++;mutate();return {text:'Exact mocked output '+calls,input:10,output:10,complete:true,report:{model:COMPARISON_PRICING.model,tier:'default',finish_reason:'stop'},raw:{}};}};
  const input=async()=>({expected_state_hash:(await exports.comparisonContext(db,config,false,scopes.CORRECTED_COMPARISON_SCOPE_HASH)).state_hash,scope_hash:scopes.CORRECTED_COMPARISON_SCOPE_HASH,acknowledged:true});
  return {events,ledger,original,task,source,calendar,config,sql,before,read:()=>({calls}),setMutation:(f:()=>void)=>{mutate=f;},revoke:()=>{approved=false;},driftPolicy:()=>{currentPolicyHash=domain.hash('changed policy');},closeGate:()=>{ready=false;},run:async()=>exports.runPrivateComparison(db,await input(),options),runWith:(i:any)=>exports.runPrivateComparison(db,i,options),snapshot:()=>exports.comparisonSnapshot(db,config,scopes.CORRECTED_COMPARISON_SCOPE_HASH),input};
 }
