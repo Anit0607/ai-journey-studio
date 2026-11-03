@@ -231,3 +231,13 @@ test("delivery notices exist only for final outcomes",()=>{
  for(const outcome of ["failed","uncertain","missed","invalidated"])assert.equal(deliveryNotice(row,outcome,"https://d")!.priority,"high");
  for(const outcome of ["idle","blocked","claimed"])assert.equal(deliveryNotice(row,outcome),null);
 });
+
+test("LinkedIn commentary escapes little-text markup so the whole post is published",async()=>{
+ const {linkedinCommentary}=await import("../lib/publishing");
+ const text="Database time (Neon calls it 100 compute-unit hours). Use #tags, @names, [links], {x}, <y>, *bold*, _u_, ~s~ | a\\b.";
+ assert.equal(linkedinCommentary(text),"Database time \\(Neon calls it 100 compute-unit hours\\). Use \\#tags, \\@names, \\[links\\], \\{x\\}, \\<y\\>, \\*bold\\*, \\_u\\_, \\~s\\~ \\| a\\\\b.");
+ assert.equal(linkedinCommentary("Plain words, digits 5 and 2, quotes \"ok\" and 'fine'."),"Plain words, digits 5 and 2, quotes \"ok\" and 'fine'.");
+ let sent="";
+ await publishOfficial({platform:"LinkedIn",remote_id:LI.remote_id,payload:{text:"Before (inside) after."}},LI,"mock-token",async(_url,init)=>{sent=JSON.parse(String(init?.body)).commentary;return linkedinSuccess(_url as string);},{before:async()=>{},after:async()=>{}});
+ assert.equal(sent,"Before \\(inside\\) after.","the request carries escaped text; the stored payload is unchanged");
+});
