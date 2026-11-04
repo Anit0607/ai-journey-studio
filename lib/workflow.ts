@@ -9,7 +9,8 @@ import {assertSourcePrivacy,sourceAuthorized,draftSourceEligible} from "./source
 import {revisionPromptContext} from "./agent-revisions";
 import {Store} from "./store";
 import {ROLES,hash,type RuntimeConfig,type Source,type Task,type Output,tokenCost} from "./domain";
-import {providerCall,ProviderFailure,AccountingFailure,TerminationFailure,liveReady,type ProviderName} from "./providers";
+import {providerCall,ProviderFailure,AccountingFailure,TerminationFailure,liveReady,OUTPUT_TOKEN_CAP,CHAT_HARVEST_OUTPUT_TOKEN_CAP,type ProviderName} from "./providers";
+import {ownerChatRecord} from "./drafting-contract";
 import type {OwnerDraftScope} from "./owner-draft-policy";
 import {providerResponseFormatBytes,draftArtifactContract} from './critic-response-format';
 
@@ -37,12 +38,13 @@ export async function step(store:Store,c:RuntimeConfig,call=providerCall,enabled
     if(Buffer.byteLength(groundedPrompt)>(revisionContext?96000:48000))throw Error("Input size cap reached");
     const providers:ProviderName[]=["openai"];
     const artifactContract=draftArtifactContract(task,s,previous);
+    const outputCap=task.checkpoint===0&&ownerChatRecord(s.text)?CHAT_HARVEST_OUTPUT_TOKEN_CAP:OUTPUT_TOKEN_CAP;
     if(!c.owner_cleared_sources_authorized&&sourceAuthorized(c,s,"gemini")&&c.fallback_authorized&&process.env.GEMINI_API_KEY)providers.push("gemini");
     for(let index=0;index<providers.length;index++){
       const provider=providers[index],p=c[provider]!;
       const inputBytes=Buffer.byteLength(groundedPrompt)+providerResponseFormatBytes(provider,artifactContract);
       if(inputBytes>(revisionContext?96000:48000))throw Error("Input size cap reached");
-      reservation=await store.reserve(task,provider,p,tokenCost(p,inputBytes+256,1200),undefined,policy.ownerDraft,policy.ownerCalendar?{scope:policy.ownerCalendar,config:c}:undefined,draftPromptMetadata(task,s,previous,groundedPrompt));
+      reservation=await store.reserve(task,provider,p,tokenCost(p,inputBytes+256,outputCap),undefined,policy.ownerDraft,policy.ownerCalendar?{scope:policy.ownerCalendar,config:c}:undefined,draftPromptMetadata(task,s,previous,groundedPrompt));
       try{
         await policy.beforeProvider?.();
         if(task.content_brief?.source_policy){
@@ -60,7 +62,7 @@ export async function step(store:Store,c:RuntimeConfig,call=providerCall,enabled
           });
           if(!admitted){await store.reject(reservation,false);reservation=null;throw Error("Source invalidated");}
         }
-        const result=await call(provider,groundedPrompt,p,undefined,undefined,artifactContract);
+        const result=await call(provider,groundedPrompt,p,undefined,undefined,artifactContract,outputCap);
         if(provider==="openai"&&result.report.serviceTier!=="default")throw new AccountingFailure(result.report);
         await store.report(reservation,result.report);
         await store.settle(task,reservation,result.text,result.input,result.output,tokenCost(p,result.input,result.output),result.outcome,policy.ownerCalendar);
