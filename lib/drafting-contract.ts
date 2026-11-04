@@ -19,7 +19,7 @@ export function sourceRoleGoal(checkpoint: number, source: string, ordinaryGoal:
 }
 /** Imported owner chats can run to 12,000 characters, more than one bounded stage can copy out. */
 export const ownerChatRecord=(source:string)=>/^Owner messages from an? (?:ChatGPT|Claude\.ai|Claude Code|Codex|Gemini) /.test(source);
-export const OWNER_CHAT_HARVEST=' This source is a long record of the owner’s own chat messages, most unrelated to any one story. Extract only the 6 to 12 verbatim sentences that together tell ONE concrete first-person episode (what was tried, what went wrong, what changed or was learned), each with its message date. Copy them exactly; stay under 2,500 characters in total; skip every unrelated message. Do not rewrite the facts into third person.';
+export const OWNER_CHAT_HARVEST=' This source is a long record of the owner’s own chat messages, most unrelated to any one story. Extract only 6 to 12 verbatim excerpts that together tell ONE concrete first-person episode (what was tried, what went wrong, what changed or was learned), each with its message date. For a long message copy only the one or two sentences that matter, never the whole message. Copy them exactly; stay under 2,500 characters in total; skip every unrelated message. Do not rewrite the facts into third person.';
 /** Output is screened for private material; a model's own remark such as "no private details were
  * included" trips that screen and stops the run. Imported chats, long and mostly unrelated, invite
  * such remarks, so their stages may not comment on privacy or omissions. */
