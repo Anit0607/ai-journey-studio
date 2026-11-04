@@ -3,7 +3,7 @@ import {useState} from "react";
 import {parseExport,type ParseSummary,type ChatProviderName} from "../lib/chat-export-parse";
 
 type Action=(path:string,body:unknown)=>Promise<unknown>;
-const LABEL:Record<ChatProviderName,string>={chatgpt:"ChatGPT",claude:"Claude.ai",gemini:"Gemini","claude-code":"Claude Code"};
+const LABEL:Record<ChatProviderName,string>={chatgpt:"ChatGPT",claude:"Claude.ai",gemini:"Gemini","claude-code":"Claude Code",codex:"Codex"};
 const BATCH=25;
 
 /** Reads an export on this device and uploads only the owner's own messages, in small batches. */
@@ -12,7 +12,7 @@ export default function ChatImportPanel({busy,action}:{busy:boolean;action:Actio
   async function read(file:File){
     setError("");setResult(null);setProgress("");setReading(true);
     try{const parsed=parseExport(new Uint8Array(await file.arrayBuffer()),file.name);if(!parsed.provider)throw Error();setResult({...parsed,file:file.name});}
-    catch{setError("This file is not a ChatGPT, Claude.ai or Gemini (Google Takeout) export. Choose the .zip you downloaded, without unzipping it.");}
+    catch{setError("This file is not a ChatGPT, Claude.ai, Gemini (Google Takeout), Codex or Claude Code export. Choose the .zip you downloaded, without unzipping it, or a .zip of your Codex or Claude Code sessions folder.");}
     finally{setReading(false);}
   }
   async function upload(){
@@ -28,8 +28,8 @@ export default function ChatImportPanel({busy,action}:{busy:boolean;action:Actio
   return <section aria-label="Chat import">
     <span className="eyebrow">CHAT IMPORT</span>
     <h2>Bring in your AI chats</h2>
-    <p>Choose the export you downloaded from ChatGPT, Claude.ai or Google Takeout (Gemini). It is read <strong>on this device</strong>: only your own messages are kept, and the AI replies, pasted code or logs, and anything mentioning a bank, clients or private details are left out before anything is uploaded.</p>
-    <input type="file" accept=".zip,.json" disabled={busy||reading} onChange={event=>{const file=event.target.files?.[0];if(file)void read(file);}}/>
+    <p>Choose the export you downloaded from ChatGPT, Claude.ai or Google Takeout (Gemini), or a .zip of your Codex sessions folder (<code>.codex\\sessions</code>) or Claude Code projects folder (<code>.claude\\projects</code>). It is read <strong>on this device</strong>: only your own messages are kept, and the AI replies, pasted code or logs, and anything mentioning a bank, clients or private details are left out before anything is uploaded.</p>
+    <input type="file" accept=".zip,.json,.jsonl" disabled={busy||reading} onChange={event=>{const file=event.target.files?.[0];if(file)void read(file);}}/>
     {reading&&<p role="status">Reading the export on this device…</p>}
     {error&&<p role="alert">{error}</p>}
     {result&&<div>

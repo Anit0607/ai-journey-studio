@@ -3,10 +3,10 @@ import assert from "node:assert/strict";
 import {sourceDraftingContract,ownerChatRecord,OWNER_CHAT_HARVEST} from "../lib/drafting-contract";
 import {chatSourceTexts} from "../lib/chat-import";
 
-const conv=(provider:"chatgpt"|"claude"|"gemini"|"claude-code")=>({provider,id:"c",title:"Travel planner app",reported_date:"2026-10-25",messages:[{text:"I tried to make the planner load faster and it broke the map twice before I fixed it.",date:"2026-10-25"}]});
+const conv=(provider:"chatgpt"|"claude"|"gemini"|"claude-code"|"codex")=>({provider,id:"c",title:"Travel planner app",reported_date:"2026-10-25",messages:[{text:"I tried to make the planner load faster and it broke the map twice before I fixed it.",date:"2026-10-25"}]});
 
 test('every imported chat source gets the bounded Harvester instruction; other sources keep full extraction',()=>{
- for(const provider of ["chatgpt","claude","gemini","claude-code"] as const){
+ for(const provider of ["chatgpt","claude","gemini","claude-code","codex"] as const){
   const [{text}]=chatSourceTexts(conv(provider));
   assert(ownerChatRecord(text),provider);
   const harvester=sourceDraftingContract(0,text);

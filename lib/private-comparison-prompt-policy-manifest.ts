@@ -20,7 +20,7 @@ export const COMPARISON_PROMPT_POLICY_FILES=Object.freeze([
   },
   {
     "path": "lib/drafting-contract.ts",
-    "sha256": "68f7087600d93dceb00f3a8dd5946f0e8b4608e33ac6af6dab20ce0544bfd3d7"
+    "sha256": "93f45d9f0ac9d4768a7e0e73cdc63c77b34ad6d8a0087205138eac988d778b58"
   },
   {
     "path": "lib/drafting-guidance.ts",
@@ -75,4 +75,4 @@ export const COMPARISON_PROMPT_POLICY_FILES=Object.freeze([
     "sha256": "e32a4d8ca7fe092fd53c69d57961863366ed55f109be06178f4672304cebd135"
   }
 ]);
-export const COMPARISON_PROMPT_POLICY_HASH="bab24fd39f96ac8e2197411087680c266b5af66a1ea9df1d79c87b896d4b7588";
+export const COMPARISON_PROMPT_POLICY_HASH="e6243a18bfba1c9594cf8bcdcc2cdc8bd8e9f504253e9021870785201ff39055";

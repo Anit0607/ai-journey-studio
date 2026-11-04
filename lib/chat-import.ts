@@ -5,7 +5,7 @@ import {integrationConfig} from "./integration-config";
 import {hash} from "./domain";
 import type {ChatProviderName,OwnerConversation} from "./chat-export-parse";
 
-const LABEL:Record<ChatProviderName,string>={chatgpt:"ChatGPT",claude:"Claude.ai",gemini:"Gemini","claude-code":"Claude Code"};
+const LABEL:Record<ChatProviderName,string>={chatgpt:"ChatGPT",claude:"Claude.ai",gemini:"Gemini","claude-code":"Claude Code",codex:"Codex"};
 const PART_LIMIT=11_000,MAX_CONVERSATIONS=25,MAX_MESSAGES=400;
 const validDate=(value:unknown,today:string)=>typeof value==="string"&&/^\d{4}-\d{2}-\d{2}$/.test(value)&&new Date(value+"T00:00:00Z").toISOString().slice(0,10)===value&&value<=today;
 

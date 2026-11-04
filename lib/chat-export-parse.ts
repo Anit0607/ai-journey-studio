@@ -2,7 +2,7 @@
 import {unzipSync,strFromU8} from "fflate";
 import {privateMaterial} from "./privacy-patterns";
 
-export type ChatProviderName="chatgpt"|"claude"|"gemini"|"claude-code";
+export type ChatProviderName="chatgpt"|"claude"|"gemini"|"claude-code"|"codex";
 export type OwnerMessage={text:string;date:string};
 export type OwnerConversation={provider:ChatProviderName;id:string;title:string;reported_date:string;messages:OwnerMessage[]};
 export type ParseSummary={conversations:OwnerConversation[];kept:number;skipped:{ai:number;short:number;code:number;private:number}};
@@ -61,14 +61,58 @@ export function parseGemini(data:unknown,summary:ParseSummary,today:string){
   for(const [date,messages] of [...days].sort())conversation(summary,"gemini","gemini-"+date,"Gemini prompts on "+date,messages,today);
 }
 
+/** Text the coding tools insert into the owner's turn: instructions, environment and command wrappers. */
+const INJECTED=/^\s*(?:<(?:environment_context|user_instructions|INSTRUCTIONS|system-reminder|command-name|command-message|command-args|local-command-stdout|local-command-stderr|user-prompt-submit-hook|turn_aborted)\b|# AGENTS\.md|Caveat: The messages below)/i;
+const lines=(raw:string)=>raw.split("\n").flatMap(line=>{if(!line.trim())return [];try{const value=JSON.parse(line);return value&&typeof value==="object"?[value as Record<string,any>]:[];}catch{return [];}});
+const ownerTurn=(raw:string)=>INJECTED.test(raw)?null:raw;
+/** Codex session file (rollout-*.jsonl, the app, CLI and IDE share it): owner turns are role "user" messages. */
+export function parseCodexSession(raw:string,fileName:string,summary:ParseSummary,today:string){
+  const rows=lines(raw),meta=rows.find(row=>row.type==="session_meta")?.payload||rows.find(row=>typeof row.id==="string"&&"instructions" in row)||{};
+  const item=(row:Record<string,any>)=>row.type==="response_item"?row.payload:row;
+  const owner:Array<{text:string;date:string|null}>=[];let ai=0;
+  for(const row of rows){
+    const message=item(row);
+    if(!message||message.type!=="message")continue;
+    if(message.role!=="user"){if(message.role==="assistant")ai++;continue;}
+    const turn=ownerTurn(text(message.content));if(turn)owner.push({text:turn,date:day(row.timestamp||meta.timestamp)});
+  }
+  if(!owner.length)for(const row of rows)if(row.type==="event_msg"&&row.payload?.type==="user_message"&&typeof row.payload.message==="string"){const turn=ownerTurn(row.payload.message);if(turn)owner.push({text:turn,date:day(row.timestamp)});}
+  summary.skipped.ai+=ai;
+  conversation(summary,"codex",String(meta.id||fileName.split("/").pop()),"",owner,today);
+}
+/** Claude Code session file (~/.claude/projects/*.jsonl): owner turns are "user" lines that are not tool results. */
+export function parseClaudeCodeSession(raw:string,fileName:string,summary:ParseSummary,today:string){
+  const rows=lines(raw),owner:Array<{text:string;date:string|null}>=[];let ai=0;
+  for(const row of rows){
+    if(row.type==="assistant"){ai++;continue;}
+    if(row.type!=="user"||row.isMeta||row.isSidechain||row.message?.role!=="user")continue;
+    const content=row.message.content;
+    if(Array.isArray(content)&&content.some((part:any)=>part?.type==="tool_result"))continue;
+    const turn=ownerTurn(text(content));if(turn)owner.push({text:turn,date:day(row.timestamp)});
+  }
+  summary.skipped.ai+=ai;
+  const title=rows.find(row=>row.type==="summary"&&typeof row.summary==="string")?.summary||"";
+  conversation(summary,"claude-code",String(rows.find(row=>typeof row.sessionId==="string")?.sessionId||fileName.split("/").pop()),title,owner,today);
+}
+const sessionKind=(raw:string):"codex"|"claude-code"|null=>{const head=lines(raw.slice(0,200_000)).slice(0,40);
+  if(head.some(row=>row.type==="session_meta"||row.type==="response_item"||(typeof row.id==="string"&&"instructions" in row)))return "codex";
+  if(head.some(row=>typeof row.sessionId==="string"&&(row.type==="user"||row.type==="assistant"||row.type==="summary")))return "claude-code";
+  return null;};
+
 /** Reads an export zip (or a bare JSON file) and returns only the owner's own messages. */
 export function parseExport(bytes:Uint8Array,fileName:string,today=new Date().toISOString().slice(0,10)):ParseSummary&{provider:ChatProviderName|null}{
   const summary:ParseSummary={conversations:[],kept:0,skipped:{ai:0,short:0,code:0,private:0}};
-  const wanted=(name:string)=>/(^|\/)conversations(-\d+)?\.json$/i.test(name)||/Gemini Apps\/[^/]*\.json$/i.test(name);
+  const wanted=(name:string)=>/(^|\/)conversations(-\d+)?\.json$/i.test(name)||/Gemini Apps\/[^/]*\.json$/i.test(name)||/\.jsonl$/i.test(name);
   const files:Record<string,Uint8Array>=/\.zip$/i.test(fileName)?unzipSync(bytes,{filter:file=>wanted(file.name)}):{[fileName]:bytes};
   let provider:ChatProviderName|null=null;
   for(const [name,content] of Object.entries(files)){
     if(!wanted(name)&&!/\.json$/i.test(name))continue;
+    if(/\.jsonl$/i.test(name)){
+      const raw=strFromU8(content),kind=sessionKind(raw);
+      if(kind==="codex"){parseCodexSession(raw,name,summary,today);provider=provider&&provider!=="codex"?provider:"codex";}
+      else if(kind==="claude-code"){parseClaudeCodeSession(raw,name,summary,today);provider=provider&&provider!=="claude-code"?provider:"claude-code";}
+      continue;
+    }
     const data=JSON.parse(strFromU8(content));
     const first=Array.isArray(data)?data[0]:null;
     if(/Gemini Apps/i.test(name)||first?.header==="Gemini Apps"||typeof first?.title==="string"&&first.title.startsWith("Prompted ")){provider="gemini";parseGemini(data,summary,today);}
