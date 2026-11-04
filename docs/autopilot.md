@@ -14,3 +14,8 @@ A Vercel cron (`/api/autopilot`, 01:30 UTC = 07:00 IST, bearer `CRON_SECRET`) or
 6. **Empty-slot warning.** If no draft was made (no story, a slot too close, or drafting blocked) and any slot in the next 72 hours has no draft, it sends one ntfy alert naming the next empty slot and the reason. Nothing is posted for an empty slot, so the owner hears about it days ahead instead of noticing a missed post.
 
 Nothing is confirmed, approved, scheduled or published by the autopilot. The owner's one-click approval remains the only route to publication.
+
+## Checking notifications
+
+Every ntfy send attempt is stored as an `owner_notice` event with its title and ntfy's answer (`accepted 200`, `refused 429`, `unreachable TimeoutError`), never the message text. `POST /api/notify-test` (assistant credential plus studio Origin) sends one fixed test notice and returns that answer, without changing anything else.
+

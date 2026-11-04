@@ -17,6 +17,9 @@ export function sourceRoleGoal(checkpoint: number, source: string, ordinaryGoal:
     ? 'Choose one specific source-supported problem, decision or method and its observed limit/result for an attributed practical episode. If those details are missing, report an internal editorial hold rather than a generic status update. Do not infer a personal learning story.'
     : ordinaryGoal;
 }
+/** Imported owner chats can run to 12,000 characters, more than one bounded stage can copy out. */
+export const ownerChatRecord=(source:string)=>/^Owner messages from an? (?:ChatGPT|Claude\.ai|Claude Code|Gemini) /.test(source);
+export const OWNER_CHAT_HARVEST=' This source is a long record of the owner’s own chat messages, most unrelated to any one story. Extract only the 6 to 12 verbatim sentences that together tell ONE concrete first-person episode (what was tried, what went wrong, what changed or was learned), each with its message date. Copy them exactly; stay under 2,500 characters in total; skip every unrelated message. Do not rewrite the facts into third person.';
 export function sourceDraftingContract(checkpoint: number, source: string): string {
   const attributed = /^Attributed (?:GitHub|YouTube) evidence;/.test(source);
   const progressNote = attributedProgressNote(source);
@@ -27,7 +30,9 @@ export function sourceDraftingContract(checkpoint: number, source: string): stri
     : attributed
     ? ' This is attributed external evidence: retain third-person repository/author or channel attribution. Never write its actions or feelings as the owner’s experience.'
     : ' This is an owner-written note. Writer and Platform Adapter preserve its first-person narrator where present; do not replace "I/my" with "the user" or write a product review for potential customers. Do not add a name, emotion, lesson, recommendation, capability or audience need not stated in the note.';
-  const ordinaryRole = checkpoint === 0
+  const ordinaryRole = checkpoint === 0 && ownerChatRecord(source)
+    ? OWNER_CHAT_HARVEST
+    : checkpoint === 0
     ? ' Extract complete verbatim source sentences with their provenance; prefer SOURCE: followed by the exact note.' + (attributed ? ' Preserve repository/account or channel attribution; never make the owner its narrator.' : ' Do not rewrite the facts into third person.')
     : checkpoint === 1
       ? ' Choose one angle without rewriting or expanding the facts. Keep any proposed angle separate from verbatim evidence; an observed event is not a learned lesson.'
