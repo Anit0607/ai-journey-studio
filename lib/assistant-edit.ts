@@ -8,11 +8,13 @@ export function assistantEditAuthorized(request:Request,env:Env=process.env):boo
   if([env.STUDIO_ACCESS_TOKEN,env.STUDIO_AUTH_SECRET,env.CRON_SECRET,env.STUDIO_CONNECTIONS_ENCRYPTION_KEY].includes(token))return false;
   return authorized(request,token);
 }
-/** Only public-copy draft edits; approval, confirmation and publishing are not reachable. */
+/** Draft edits only: the public copy and the three internal working notes, never the Critic.
+ * Approval, confirmation and publishing are not reachable. */
+export const ASSISTANT_EDIT_ROLES=["Harvester","Story Miner","Strategist","Writer","Platform Adapter"];
 export function parseAssistantRevision(input:unknown){
   if(!input||typeof input!=="object"||Array.isArray(input)||Object.keys(input).sort().join(",")!=="expected,note,role,task,text")throw Error("Invalid assistant revision request");
   const body=input as Record<string,unknown>;
-  if(typeof body.task!=="string"||typeof body.expected!=="string"||typeof body.note!=="string"||typeof body.text!=="string"||!["Writer","Platform Adapter"].includes(String(body.role)))throw Error("Invalid assistant revision request");
+  if(typeof body.task!=="string"||typeof body.expected!=="string"||typeof body.note!=="string"||typeof body.text!=="string"||!ASSISTANT_EDIT_ROLES.includes(String(body.role)))throw Error("Invalid assistant revision request");
   return {task:body.task,expected:body.expected,note:body.note,role:String(body.role),text:body.text};
 }
 /** Scheduling only: applying the evidence schedule or moving a post. Moves cancel unattempted
