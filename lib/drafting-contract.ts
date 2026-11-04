@@ -20,11 +20,15 @@ export function sourceRoleGoal(checkpoint: number, source: string, ordinaryGoal:
 /** Imported owner chats can run to 12,000 characters, more than one bounded stage can copy out. */
 export const ownerChatRecord=(source:string)=>/^Owner messages from an? (?:ChatGPT|Claude\.ai|Claude Code|Gemini) /.test(source);
 export const OWNER_CHAT_HARVEST=' This source is a long record of the owner’s own chat messages, most unrelated to any one story. Extract only the 6 to 12 verbatim sentences that together tell ONE concrete first-person episode (what was tried, what went wrong, what changed or was learned), each with its message date. Copy them exactly; stay under 2,500 characters in total; skip every unrelated message. Do not rewrite the facts into third person.';
+/** Output is screened for private material; a model's own remark such as "no private details were
+ * included" trips that screen and stops the run. Imported chats, long and mostly unrelated, invite
+ * such remarks, so their stages may not comment on privacy or omissions. */
+export const NO_META_REMARKS=' Never add notes, disclaimers or remarks about privacy, confidentiality or what you left out; return only the artifact itself.';
 export function sourceDraftingContract(checkpoint: number, source: string): string {
   const attributed = /^Attributed (?:GitHub|YouTube) evidence;/.test(source);
   const progressNote = attributedProgressNote(source);
   const ownerProject = !!ownerProjectContext(source);
-  const common = ' Preserve who did what, the scope of a test, uncertainty, timing and negation. A gate based on configured work windows is not proof that it checks whether an actual queue job is due; retain the source’s stated condition instead of inventing a more capable check. A request, observed result or verified removal does not identify the actor that performed it or prove a product capability. Never turn "I asked for deletion; removal was verified" into "Studio deleted it". Prior artifacts may contain mistakes; compare every claim to SOURCE, never inherit their endorsement.';
+  const common = (ownerChatRecord(source) ? NO_META_REMARKS : '') + ' Preserve who did what, the scope of a test, uncertainty, timing and negation. A gate based on configured work windows is not proof that it checks whether an actual queue job is due; retain the source’s stated condition instead of inventing a more capable check. A request, observed result or verified removal does not identify the actor that performed it or prove a product capability. Never turn "I asked for deletion; removal was verified" into "Studio deleted it". Prior artifacts may contain mistakes; compare every claim to SOURCE, never inherit their endorsement.';
   const voice = ownerProject ? OWNER_PROJECT_NARRATION : progressNote
     ? ' This is attributed external evidence: retain accurate third-person actor and repository/author attribution without forcing a date-led introduction or provenance footer. Never write its actions or feelings as the owner’s experience.'
     : attributed

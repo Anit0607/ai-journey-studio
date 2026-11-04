@@ -24,7 +24,7 @@ async function fixture(work:(store:Store,parent:Task,token:string)=>Promise<void
   const db=await embedded();
   try{
     const store=new Store(db),source=await store.source(CAPSULE,"user-reported-notes","2026-10-09",true),parent=await enqueueLegacy(store,source.id);
-    for(const role of ROLES){const text=role==="Critic"?critique:role==="Platform Adapter"?variantFixture():"Proposed approach: inspect one source.";await db.query("INSERT INTO outputs(id,task_id,role,text,hash) VALUES($1,$2,$3,$4,$5)",[randomUUID(),parent.id,role,text,hash(text)]);}
+    for(const [index,role] of ROLES.entries()){const text=role==="Critic"?critique:role==="Platform Adapter"?variantFixture():"Proposed approach: inspect one source.";await db.query("INSERT INTO outputs(id,task_id,role,text,hash,created) VALUES($1,$2,$3,$4,$5,$6)",[randomUUID(),parent.id,role,text,hash(text),new Date(Date.UTC(2026,9,25,0,0,index)).toISOString()]);}
     await db.query("UPDATE tasks SET status='review',checkpoint=6 WHERE id=$1",[parent.id]);
     const initial=await store.snapshot();
     if(approveOriginal)await store.approve(parent.id,initial.reviews[0].token.slice("original:".length));
