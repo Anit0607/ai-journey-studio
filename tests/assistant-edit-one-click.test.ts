@@ -72,7 +72,8 @@ test('the assistant-edit credential is separate, strong and parses only public-c
  for(const other of ["STUDIO_ACCESS_TOKEN","STUDIO_AUTH_SECRET","CRON_SECRET","STUDIO_CONNECTIONS_ENCRYPTION_KEY"])assert.equal(assistantEditAuthorized(req("Bearer "+token),{STUDIO_ASSISTANT_EDIT_TOKEN:token,[other]:token}),false,other);
  const body={task:"t",expected:"e",note:"n",role:"Platform Adapter",text:"x"};
  assert.deepEqual(parseAssistantRevision(body),body);
- for(const bad of [{...body,role:"Critic"},{...body,role:"Harvester"},{...body,acknowledged:true},{...body,text:1}])assert.throws(()=>parseAssistantRevision(bad),/Invalid assistant revision request/);
+ for(const bad of [{...body,role:"Critic"},{...body,role:"Owner"},{...body,acknowledged:true},{...body,text:1}])assert.throws(()=>parseAssistantRevision(bad),/Invalid assistant revision request/);
+ for(const role of ["Harvester","Story Miner","Strategist","Writer"])assert.equal(parseAssistantRevision({...body,role}).role,role,"internal notes and public copy are editable drafts");
 });
 
 test('over HTTP the assistant credential saves an attributed draft edit and reaches no other action',async()=>{
@@ -100,3 +101,4 @@ test('over HTTP the assistant credential saves an attributed draft edit and reac
   assert.deepEqual(await counts(db),{approvals:0,revision_approvals:0,evidence_approval_receipts:0,publishing_outbox:0,evidence_decisions:0});
  }finally{globals.studioDb=priorDb;globalThis.fetch=priorFetch;for(const [key,value] of Object.entries(previous)){if(value===undefined)delete process.env[key];else process.env[key]=value;}await db.close();}
 });
+

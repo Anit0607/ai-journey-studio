@@ -24,11 +24,14 @@ export const OWNER_CHAT_HARVEST=' This source is a long record of the owner’s 
  * included" trips that screen and stops the run. Imported chats, long and mostly unrelated, invite
  * such remarks, so their stages may not comment on privacy or omissions. */
 export const NO_META_REMARKS=' Never add notes, disclaimers or remarks about privacy, confidentiality or what you left out; return only the artifact itself.';
+/** Echoed brief values ("Planned date: …", "900–1300 characters") and invented lessons in the
+ * internal notes are flagged as new figures or unsupported discoveries and block approval. */
+export const NO_BRIEF_ECHO=' Do not restate the planned date, posting time, audience, format or any character target from the format context, and do not state a discovery, lesson or advice the owner did not write.';
 export function sourceDraftingContract(checkpoint: number, source: string): string {
   const attributed = /^Attributed (?:GitHub|YouTube) evidence;/.test(source);
   const progressNote = attributedProgressNote(source);
   const ownerProject = !!ownerProjectContext(source);
-  const common = (ownerChatRecord(source) ? NO_META_REMARKS : '') + ' Preserve who did what, the scope of a test, uncertainty, timing and negation. A gate based on configured work windows is not proof that it checks whether an actual queue job is due; retain the source’s stated condition instead of inventing a more capable check. A request, observed result or verified removal does not identify the actor that performed it or prove a product capability. Never turn "I asked for deletion; removal was verified" into "Studio deleted it". Prior artifacts may contain mistakes; compare every claim to SOURCE, never inherit their endorsement.';
+  const common = (ownerChatRecord(source) ? NO_META_REMARKS + (checkpoint === 1 || checkpoint === 2 ? NO_BRIEF_ECHO : '') : '') + ' Preserve who did what, the scope of a test, uncertainty, timing and negation. A gate based on configured work windows is not proof that it checks whether an actual queue job is due; retain the source’s stated condition instead of inventing a more capable check. A request, observed result or verified removal does not identify the actor that performed it or prove a product capability. Never turn "I asked for deletion; removal was verified" into "Studio deleted it". Prior artifacts may contain mistakes; compare every claim to SOURCE, never inherit their endorsement.';
   const voice = ownerProject ? OWNER_PROJECT_NARRATION : progressNote
     ? ' This is attributed external evidence: retain accurate third-person actor and repository/author attribution without forcing a date-led introduction or provenance footer. Never write its actions or feelings as the owner’s experience.'
     : attributed
